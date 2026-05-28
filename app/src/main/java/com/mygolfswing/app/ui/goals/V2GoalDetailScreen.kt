@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.store.V2GoalStore
+import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import java.time.format.DateTimeFormatter
@@ -64,14 +66,7 @@ fun V2GoalDetailScreen(
     val goal = goals.firstOrNull { it.id == goalId }
 
     if (goal == null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(DSColors.warmWhite),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("目标不存在", color = DSColors.shadowGray)
-        }
+        V2MissingEntityScreen(message = "目标不存在", onBack = onBack, title = "目标详情")
         return
     }
 
@@ -131,6 +126,7 @@ private fun DetailNavBar(onBack: () -> Unit, onEdit: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .background(DSColors.cardWhite.copy(alpha = 0.92f))
             .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
         verticalAlignment = Alignment.CenterVertically,

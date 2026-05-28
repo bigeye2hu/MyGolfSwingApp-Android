@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2AIMessageRole
 import com.mygolfswing.app.data.store.V2AIChatStore
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 
 /**
@@ -120,6 +121,7 @@ private fun AIChatTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .background(DSColors.cardWhite.copy(alpha = 0.95f))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

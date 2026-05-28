@@ -12,6 +12,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.mygolfswing.app.ui.common.V2BackHandler
+import com.mygolfswing.app.ui.common.rememberV2AppNavigation
 import com.mygolfswing.app.ui.common.V2SplashScreen
 import com.mygolfswing.app.ui.memo.V2OnlineVideoSelection
 import com.mygolfswing.app.ui.memo.V2OnlineVideoSelectorScreen
@@ -20,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.store.V2GoalStore
+import com.mygolfswing.app.data.store.V2GolfProfileStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
@@ -96,7 +99,7 @@ private sealed class Destination {
 @Composable
 fun V2RootScreen(modifier: Modifier = Modifier) {
     var selectedTab by rememberSaveable { mutableStateOf(V2Tab.HOME) }
-    var destination by remember { mutableStateOf<Destination>(Destination.Tabs) }
+    val nav = rememberV2AppNavigation<Destination>(Destination.Tabs)
     var showQuickAdd by remember { mutableStateOf(false) }
     var bootstrapping by remember { mutableStateOf(true) }
     var pendingOnlinePick by remember { mutableStateOf<V2OnlineVideoSelection?>(null) }
@@ -106,6 +109,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         V2MemoStore.startObserving()
         V2PlazaStore.startObserving()
         V2ProfileStore.startObserving()
+        V2GolfProfileStore.startObserving()
         V2SwingSessionStore.startObserving()
         V2AIChatStore.loadPersisted()
         if (V2GoalStore.goals.value.isEmpty()) V2GoalStore.resetWithMockData()
@@ -122,7 +126,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 ServiceLocator.goalRepo.pushDirty()
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
                 V2MemoStore.pullFromCloud()
-                runCatching { ServiceLocator.golfProfileRepo.pullFromCloud() }
+                runCatching { V2GolfProfileStore.refreshFromCloud() }
             }
         }
         bootstrapping = false
@@ -133,7 +137,9 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         return
     }
 
-    when (val d = destination) {
+    V2BackHandler(enabled = nav.canGoBack) { nav.navigateBack() }
+
+    when (val d = nav.current) {
         Destination.Tabs -> TabsScaffold(
             selectedTab = selectedTab,
             onSelectTab = { tab ->
@@ -145,159 +151,163 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 }
             },
             onShowQuickAdd = { showQuickAdd = true },
-            onOpenAllGoals = { destination = Destination.AllGoals },
-            onOpenGoalDetail = { destination = Destination.GoalDetail(it) },
-            onCreateGoal = { destination = Destination.NewGoal() },
-            onCreateTextMemo = { destination = Destination.NewTextMemo },
-            onCreateVideoMemo = { destination = Destination.NewVideoMemo },
-            onOpenAllMemos = { destination = Destination.AllMemos },
-            onOpenVideoMemoList = { destination = Destination.VideoMemoList },
-            onOpenTextMemoList = { destination = Destination.TextMemoList },
-            onOpenSwingCalendar = { destination = Destination.SwingCalendar },
-            onOpenJustSwing = { destination = Destination.JustSwingMain },
-            onOpenAIArchive = { destination = Destination.AIArchive },
-            onOpenAIConfig = { destination = Destination.AIConfig },
+            onOpenAllGoals = { nav.navigateTo(Destination.AllGoals) },
+            onOpenGoalDetail = { nav.navigateTo(Destination.GoalDetail(it)) },
+            onCreateGoal = { nav.navigateTo(Destination.NewGoal()) },
+            onCreateTextMemo = { nav.navigateTo(Destination.NewTextMemo) },
+            onCreateVideoMemo = { nav.navigateTo(Destination.NewVideoMemo) },
+            onOpenAllMemos = { nav.navigateTo(Destination.AllMemos) },
+            onOpenVideoMemoList = { nav.navigateTo(Destination.VideoMemoList) },
+            onOpenTextMemoList = { nav.navigateTo(Destination.TextMemoList) },
+            onOpenSwingCalendar = { nav.navigateTo(Destination.SwingCalendar) },
+            onOpenJustSwing = { nav.navigateTo(Destination.JustSwingMain) },
+            onOpenAIArchive = { nav.navigateTo(Destination.AIArchive) },
+            onOpenAIConfig = { nav.navigateTo(Destination.AIConfig) },
             onSwitchToAI = { selectedTab = V2Tab.AI },
             onOpenMemoDetail = { memo ->
                 val m = V2MemoStore.allMemos.value.firstOrNull { it.id == memo }
-                destination = if (m?.kind == V2MemoKind.TEXT) {
-                    Destination.MemoDetail(memo)
-                } else {
-                    Destination.VideoMemoPlay(memo)
-                }
+                nav.navigateTo(
+                    if (m?.kind == V2MemoKind.TEXT) {
+                        Destination.MemoDetail(memo)
+                    } else {
+                        Destination.VideoMemoPlay(memo)
+                    },
+                )
             },
-            onOpenPlazaVideo = { destination = Destination.PlazaPlay(it) },
-            onRequestLogin = { destination = Destination.Login },
-            onOpenEditProfile = { destination = Destination.EditProfile },
-            onOpenAccountSecurity = { destination = Destination.ChangePassword },
-            onOpenStorage = { destination = Destination.StorageManagement },
-            onOpenFeedback = { destination = Destination.Feedback },
-            onOpenTerms = { destination = Destination.Legal(V2LegalDocType.TERMS) },
-            onOpenPrivacy = { destination = Destination.Legal(V2LegalDocType.PRIVACY) },
+            onOpenPlazaVideo = { nav.navigateTo(Destination.PlazaPlay(it)) },
+            onRequestLogin = { nav.navigateTo(Destination.Login) },
+            onOpenEditProfile = { nav.navigateTo(Destination.EditProfile) },
+            onOpenAccountSecurity = { nav.navigateTo(Destination.ChangePassword) },
+            onOpenStorage = { nav.navigateTo(Destination.StorageManagement) },
+            onOpenFeedback = { nav.navigateTo(Destination.Feedback) },
+            onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
+            onOpenPrivacy = { nav.navigateTo(Destination.Legal(V2LegalDocType.PRIVACY)) },
             modifier = modifier,
         )
         Destination.AllGoals -> V2AllGoalsScreen(
-            onBack = { destination = Destination.Tabs },
-            onCreate = { destination = Destination.NewGoal() },
-            onSelectGoal = { destination = Destination.GoalDetail(it) },
+            onBack = { nav.navigateBack() },
+            onCreate = { nav.navigateTo(Destination.NewGoal()) },
+            onSelectGoal = { nav.navigateTo(Destination.GoalDetail(it)) },
         )
         is Destination.NewGoal -> V2NewGoalScreen(
             editingGoalId = d.editingId,
-            onClose = { destination = Destination.Tabs },
-            onDeleted = { destination = Destination.Tabs },
+            onClose = { nav.navigateBack() },
+            onDeleted = { nav.resetToRoot() },
         )
         is Destination.GoalDetail -> V2GoalDetailScreen(
             goalId = d.id,
-            onBack = { destination = Destination.Tabs },
-            onEdit = { destination = Destination.NewGoal(editingId = d.id) },
+            onBack = { nav.navigateBack() },
+            onEdit = { nav.navigateTo(Destination.NewGoal(editingId = d.id)) },
         )
         Destination.NewTextMemo -> V2MemoCreateTextScreen(
-            onClose = { destination = Destination.Tabs },
+            onClose = { nav.navigateBack() },
         )
         Destination.NewVideoMemo -> V2MemoCreateVideoScreen(
-            onClose = { destination = Destination.Tabs },
-            onOpenOnlinePicker = { destination = Destination.OnlineVideoPicker },
+            onClose = { nav.navigateBack() },
+            onOpenOnlinePicker = { nav.navigateTo(Destination.OnlineVideoPicker) },
             pendingOnline = pendingOnlinePick,
             onPendingOnlineConsumed = { pendingOnlinePick = null },
         )
         Destination.OnlineVideoPicker -> V2OnlineVideoSelectorScreen(
-            onBack = { destination = Destination.NewVideoMemo },
+            onBack = { nav.navigateBack() },
             onConfirm = { pick ->
                 pendingOnlinePick = pick
-                destination = Destination.NewVideoMemo
+                nav.navigateBack()
             },
         )
         Destination.JustSwingMain -> V2JustSwingMainScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         is Destination.MemoDetail -> V2MemoDetailScreen(
             memoId = d.id,
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         is Destination.VideoMemoPlay -> V2VideoMemoPlayerScreen(
             memoId = d.id,
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         is Destination.PlazaPlay -> V2PlazaPlayerScreen(
             videoId = d.id,
-            onClose = { destination = Destination.Tabs },
+            onClose = { nav.navigateBack() },
         )
         Destination.VideoMemoList -> V2VideoMemoListScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
             onOpenMemo = { memoId ->
-                destination = Destination.VideoMemoPlay(memoId)
+                nav.navigateTo(Destination.VideoMemoPlay(memoId))
             },
         )
         Destination.TextMemoList -> V2TextMemoListScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
             onOpenMemo = { memoId ->
-                destination = Destination.MemoDetail(memoId)
+                nav.navigateTo(Destination.MemoDetail(memoId))
             },
         )
         Destination.SwingCalendar -> V2JustSwingCalendarScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         Destination.AIArchive -> V2AIArchiveScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         Destination.AllMemos -> V2MemoAllListScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
             onOpenMemo = { memoId ->
                 val m = V2MemoStore.allMemos.value.firstOrNull { it.id == memoId }
-                destination = if (m?.kind == V2MemoKind.TEXT) {
-                    Destination.MemoDetail(memoId)
-                } else {
-                    Destination.VideoMemoPlay(memoId)
-                }
+                nav.navigateTo(
+                    if (m?.kind == V2MemoKind.TEXT) {
+                        Destination.MemoDetail(memoId)
+                    } else {
+                        Destination.VideoMemoPlay(memoId)
+                    },
+                )
             },
         )
         Destination.Login -> V2LoginScreen(
-            onClose = { destination = Destination.Tabs },
+            onClose = { nav.navigateBack() },
             onLoginSuccess = {
-                destination = Destination.Tabs
+                nav.resetToRoot()
                 V2ProfileStore.refresh(force = true)
                 V2MemoStore.pullFromCloud()
             },
-            onOpenRegister = { destination = Destination.Register },
-            onOpenResetPassword = { destination = Destination.ResetPassword },
+            onOpenRegister = { nav.navigateTo(Destination.Register) },
+            onOpenResetPassword = { nav.navigateTo(Destination.ResetPassword) },
         )
         Destination.Register -> V2RegisterScreen(
-            onBack = { destination = Destination.Login },
+            onBack = { nav.navigateBack() },
             onRegisterSuccess = {
-                destination = Destination.Tabs
+                nav.resetToRoot()
                 V2ProfileStore.refresh(force = true)
             },
         )
         Destination.ResetPassword -> V2ResetPasswordScreen(
-            onBack = { destination = Destination.Login },
+            onBack = { nav.navigateBack() },
             onResetSuccess = {
-                destination = Destination.Tabs
+                nav.resetToRoot()
                 V2ProfileStore.refresh(force = true)
             },
         )
         Destination.EditProfile -> V2EditProfileScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
             onSaved = {
-                destination = Destination.Tabs
+                nav.navigateBack()
                 V2ProfileStore.refresh(force = true)
             },
         )
         Destination.ChangePassword -> V2ChangePasswordScreen(
-            onBack = { destination = Destination.Tabs },
-            onChangeSuccess = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
+            onChangeSuccess = { nav.navigateBack() },
         )
         Destination.StorageManagement -> V2StorageManagementScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         Destination.AIConfig -> V2AIServiceConfigScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         Destination.Feedback -> V2FeedbackScreen(
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
         is Destination.Legal -> V2LegalScreen(
             type = d.type,
-            onBack = { destination = Destination.Tabs },
+            onBack = { nav.navigateBack() },
         )
     }
 
@@ -305,12 +315,12 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         val isHomeTab = selectedTab == V2Tab.HOME
         V2QuickAddSheet(
             showCreateGoal = isHomeTab,
-            onCreateGoal = { destination = Destination.NewGoal() },
-            onCreateVideoMemo = { destination = Destination.NewVideoMemo },
-            onCreateTextMemo = { destination = Destination.NewTextMemo },
+            onCreateGoal = { nav.navigateTo(Destination.NewGoal()) },
+            onCreateVideoMemo = { nav.navigateTo(Destination.NewVideoMemo) },
+            onCreateTextMemo = { nav.navigateTo(Destination.NewTextMemo) },
             onCreateSwingClip = {
                 showQuickAdd = false
-                destination = Destination.JustSwingMain
+                nav.navigateTo(Destination.JustSwingMain)
             },
             onDismiss = { showQuickAdd = false },
         )

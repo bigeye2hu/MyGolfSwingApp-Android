@@ -53,6 +53,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -185,7 +186,10 @@ private fun Hero(onClose: () -> Unit) {
         // 右上角关闭按钮
         TextButton(
             onClick = onClose,
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 36.dp, end = 16.dp),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .v2StatusBarPadding()
+                .padding(top = 8.dp, end = 16.dp),
         ) {
             Text("跳过", color = DSColors.warmWhite, style = DSTypography.body)
         }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,12 +47,14 @@ fun V2PlazaScreen(
     onOpenVideo: (UUID) -> Unit = {},
 ) {
     LaunchedEffect(Unit) {
-        if (V2PlazaStore.videos.value.isEmpty()) V2PlazaStore.resetWithMockData()
+        V2PlazaStore.refresh()
     }
 
     val videos by V2PlazaStore.videos.collectAsState()
     val categories by V2PlazaStore.categories.collectAsState()
     val selectedCat by V2PlazaStore.selectedCategoryId.collectAsState()
+    val isLoading by V2PlazaStore.isLoading.collectAsState()
+    val isUsingMock by V2PlazaStore.isUsingMock.collectAsState()
     val filtered = remember(videos, selectedCat) { V2PlazaStore.filteredVideos() }
     val hero = filtered.firstOrNull()
 
@@ -61,6 +65,9 @@ fun V2PlazaScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             PlazaHeader()
+            if (isUsingMock) {
+                MockDataBanner()
+            }
             hero?.let { V2PlazaHeroCard(video = it, onTap = { onOpenVideo(it.id) }) }
             CategoryBar(
                 categories = categories,
@@ -68,8 +75,10 @@ fun V2PlazaScreen(
                 onSelect = { V2PlazaStore.selectCategory(it) },
             )
 
-            if (filtered.isEmpty()) {
-                EmptyState()
+            if (isLoading && videos.isEmpty()) {
+                LoadingState()
+            } else if (filtered.isEmpty()) {
+                EmptyState(isLoading = isLoading)
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
@@ -155,14 +164,42 @@ private fun CategoryPill(label: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun EmptyState() {
+private fun LoadingState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(color = DSColors.fairway)
+    }
+}
+
+@Composable
+private fun MockDataBanner() {
+    Text(
+        text = "当前为离线示例数据，请检查网络后下拉刷新",
+        fontSize = 12.sp,
+        color = DSColors.shadowGray,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = DSSpacing.lg, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun EmptyState(isLoading: Boolean) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(40.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = "该分类暂无视频，换一个试试", color = DSColors.shadowGray, fontSize = 13.sp)
+        Text(
+            text = if (isLoading) "加载中…" else "该分类暂无视频，换一个试试",
+            color = DSColors.shadowGray,
+            fontSize = 13.sp,
+        )
     }
 }
 

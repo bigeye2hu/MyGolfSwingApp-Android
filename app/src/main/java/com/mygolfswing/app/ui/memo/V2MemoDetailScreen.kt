@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2PinState
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import java.time.format.DateTimeFormatter
@@ -65,9 +67,7 @@ fun V2MemoDetailScreen(
     val memo = memos.firstOrNull { it.id == memoId }
 
     if (memo == null) {
-        Box(Modifier.fillMaxSize().background(DSColors.warmWhite), contentAlignment = Alignment.Center) {
-            Text("Memo 不存在", color = DSColors.shadowGray)
-        }
+        V2MissingEntityScreen(message = "Memo 不存在", onBack = onBack, title = "随手记")
         return
     }
 
@@ -167,6 +167,7 @@ private fun DetailNavBar(memo: V2Memo, onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .background(DSColors.cardWhite.copy(alpha = 0.92f))
             .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
         verticalAlignment = Alignment.CenterVertically,

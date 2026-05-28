@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import kotlinx.coroutines.launch
@@ -150,6 +151,7 @@ fun V2OnlineVideoSelectorScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .v2StatusBarPadding()
                 .background(DSColors.warmWhite)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

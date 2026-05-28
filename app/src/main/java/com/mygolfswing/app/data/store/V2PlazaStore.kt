@@ -35,6 +35,12 @@ object V2PlazaStore {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isUsingMock = MutableStateFlow(false)
+    val isUsingMock: StateFlow<Boolean> = _isUsingMock.asStateFlow()
+
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
+
     private val _savedIds = MutableStateFlow<Set<String>>(emptySet())
 
     private val defaultCategories = listOf(
@@ -59,7 +65,7 @@ object V2PlazaStore {
         scope.launch {
             repo.savedIds.onEach { ids ->
                 _savedIds.value = ids
-                _videos.value = _videos.value.map { it.copy(isSaved = ids.contains(it.id.toString())) }
+                _videos.value = _videos.value.map { it.copy(isSaved = ids.contains(it.saveKey())) }
             }.collect()
         }
     }
@@ -70,10 +76,11 @@ object V2PlazaStore {
     }
 
     fun toggleSave(videoId: UUID) {
-        val idStr = videoId.toString()
-        val nowSaved = _savedIds.value.contains(idStr)
+        val video = _videos.value.firstOrNull { it.id == videoId } ?: return
+        val saveKey = video.saveKey()
+        val nowSaved = _savedIds.value.contains(saveKey)
         scope.launch {
-            if (nowSaved) repo.unsave(idStr) else repo.save(idStr)
+            if (nowSaved) repo.unsave(saveKey) else repo.save(saveKey)
         }
         _videos.value = _videos.value.map { v ->
             if (v.id != videoId) v
@@ -106,10 +113,16 @@ object V2PlazaStore {
             val result = repo.fetchVideos(limit = 30, categoryId = cid)
             _isLoading.value = false
             result.onSuccess { list ->
+                _lastError.value = null
+                _isUsingMock.value = false
                 val saved = _savedIds.value
-                _videos.value = list.map { it.copy(isSaved = saved.contains(it.id.toString())) }
-            }.onFailure {
-                if (_videos.value.isEmpty()) resetWithMockData()
+                _videos.value = list.map { it.copy(isSaved = saved.contains(it.saveKey())) }
+            }.onFailure { e ->
+                _lastError.value = e.message
+                if (_videos.value.isEmpty()) {
+                    resetWithMockData()
+                    _isUsingMock.value = true
+                }
             }
         }
     }

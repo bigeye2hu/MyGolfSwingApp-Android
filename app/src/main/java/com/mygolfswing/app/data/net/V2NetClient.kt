@@ -52,6 +52,9 @@ class V2NetClient(private val session: V2SessionStore) {
         .addInterceptor(tcAuthInterceptor)
         .build()
 
+    /** 普通 HTTP（非流式 AI、大文件等） */
+    val httpClient: OkHttpClient = authedClient
+
     /** SSE / 流式：禁用读超时 */
     val streamingClient: OkHttpClient = baseClient.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)

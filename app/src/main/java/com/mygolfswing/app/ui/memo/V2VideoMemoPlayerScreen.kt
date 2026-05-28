@@ -39,6 +39,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import java.util.UUID
 
@@ -56,12 +58,7 @@ fun V2VideoMemoPlayerScreen(
     val context = LocalContext.current
 
     if (memo == null || memo.videoUrl.isNullOrEmpty()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) { Text("视频不存在", color = Color.White) }
+        V2MissingEntityScreen(message = "视频不存在", onBack = onBack, title = "视频 Memo")
         return
     }
 
@@ -97,6 +94,7 @@ fun V2VideoMemoPlayerScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
+                .v2StatusBarPadding()
                 .background(Color.Black.copy(alpha = 0.55f))
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,

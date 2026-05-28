@@ -6,7 +6,7 @@ import java.util.UUID
 /**
  * V2 广场视频（对齐 iOS `V2PlazaVideo`）。
  *
- * 当前阶段：内置 mock 数据 + 公网示例视频 URL（不依赖后端）。
+ * 列表数据来自云端 `videoPlaza`；仅在网络失败时回退 mock。
  */
 data class V2PlazaVideo(
     val id: UUID = UUID.randomUUID(),
@@ -28,6 +28,9 @@ data class V2PlazaVideo(
     val isSaved: Boolean = false,
     val isFeaturedToday: Boolean = false,
 ) {
+    /** 收藏 / 本地缓存用的云端 videoId */
+    fun saveKey(): String = sourceVideoId?.takeIf { it.isNotBlank() } ?: id.toString()
+
     enum class ThumbnailKind {
         GREEN_SWING, SAND_WARM, MINT_TIP, EARTH_GEAR, FITNESS_ROSE, SHORT_AMBER;
 

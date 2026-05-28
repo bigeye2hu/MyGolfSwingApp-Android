@@ -48,6 +48,7 @@ import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoAccent
 import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 
 /**
  * 创建文字 Memo 页（对齐 iOS `V2MemoCreateTextView`）。
@@ -165,6 +166,7 @@ private fun CreateMemoNavBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .background(Color.White.copy(alpha = 0.92f))
             .padding(horizontal = DSPadding, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

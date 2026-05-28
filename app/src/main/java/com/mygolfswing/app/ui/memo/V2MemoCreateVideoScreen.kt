@@ -77,6 +77,7 @@ import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2VideoFileStore
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -419,6 +420,7 @@ private fun NavBar(canSave: Boolean, onClose: () -> Unit, onSave: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .background(Color.White.copy(alpha = 0.92f))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

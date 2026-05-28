@@ -2,9 +2,11 @@ package com.mygolfswing.app.ui.common
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,18 +17,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 
 /**
- * V2 通用顶栏：左返回箭头 + 居中标题 + 右侧自定义动作（默认空）。
- *
- * 与 iOS 端 `V2NavBar` 视觉一致：透明背景，依靠下方分隔线区分内容。
+ * V2 通用顶栏：左返回箭头 + 标题 + 右侧自定义动作（默认空）。
  */
 @Composable
 fun V2NavTopBar(
@@ -38,23 +43,12 @@ fun V2NavTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .height(56.dp)
             .padding(horizontal = DSSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .background(DSColors.cardWhite, CircleShape)
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "返回",
-                tint = DSColors.inkGreen,
-            )
-        }
+        V2BackIconButton(onClick = onBack)
         Spacer(Modifier.size(8.dp))
         Text(
             text = title,
@@ -78,6 +72,7 @@ fun V2NavTopBarCentered(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .height(56.dp),
     ) {
         Text(
@@ -86,32 +81,67 @@ fun V2NavTopBarCentered(
             color = DSColors.inkGreen,
             modifier = Modifier.align(Alignment.Center),
         )
-        Row(
+        V2BackIconButton(
+            onClick = onBack,
             modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.Center)
-                .padding(horizontal = DSSpacing.sm),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
+                .align(Alignment.CenterStart)
+                .padding(start = DSSpacing.sm),
+        )
+        if (trailing != null) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .background(DSColors.cardWhite, CircleShape)
-                    .clickable(onClick = onBack),
+                    .align(Alignment.CenterEnd)
+                    .padding(end = DSSpacing.sm),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "返回",
-                    tint = DSColors.inkGreen,
-                )
+                trailing()
             }
-            if (trailing != null) {
-                Box(contentAlignment = Alignment.Center) { trailing() }
-            } else {
-                Spacer(Modifier.size(40.dp))
-            }
+        }
+    }
+}
+
+@Composable
+fun V2BackIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentDescription: String = "返回",
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .semantics { role = Role.Button }
+            .background(DSColors.cardWhite, CircleShape)
+            .clickable(
+                interactionSource = interaction,
+                indication = ripple(bounded = true, radius = 20.dp),
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = contentDescription,
+            tint = DSColors.inkGreen,
+        )
+    }
+}
+
+@Composable
+fun V2MissingEntityScreen(
+    message: String,
+    onBack: () -> Unit,
+    title: String = "返回",
+) {
+    Column(Modifier.fillMaxSize().v2FullScreenInsets()) {
+        V2NavTopBar(title = title, onBack = onBack)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(message, color = DSColors.shadowGray)
         }
     }
 }

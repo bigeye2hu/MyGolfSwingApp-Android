@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.store.V2GoalStore
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -176,6 +177,7 @@ private fun AllGoalsNavBar(onBack: () -> Unit, onCreate: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .v2StatusBarPadding()
             .background(DSColors.cardWhite.copy(alpha = 0.92f))
             .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
         verticalAlignment = Alignment.CenterVertically,

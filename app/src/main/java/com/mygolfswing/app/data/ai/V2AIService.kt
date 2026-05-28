@@ -3,9 +3,11 @@ package com.mygolfswing.app.data.ai
 import com.mygolfswing.app.data.net.V2ApiConfig
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -127,6 +129,75 @@ class V2AIService(
             response.close()
         }
     }
+
+    /**
+     * 非流式单次请求（对齐 iOS `AIService.generateSummary`），用于档案 AI 反射等。
+     */
+    suspend fun generateSummary(prompt: String): String = withContext(Dispatchers.IO) {
+        val providerId = ProviderId.from(session.aiProviderId.first())
+        val apiKey = session.aiApiKey.first()
+        if (providerId != ProviderId.BUILTIN && apiKey.isNullOrBlank()) {
+            error("请先配置 AI API Key")
+        }
+        val baseUrl = session.aiBaseUrl.first()?.takeIf { it.isNotBlank() } ?: providerId.defaultBase
+        val model = session.aiModel.first()?.takeIf { it.isNotBlank() } ?: providerId.defaultModel
+
+        val messages = JsonArray(
+            listOf(
+                JsonObject(
+                    mapOf(
+                        "role" to JsonPrimitive("system"),
+                        "content" to JsonPrimitive("你是一个专业的对话摘要助手，擅长提取关键信息。"),
+                    ),
+                ),
+                JsonObject(
+                    mapOf(
+                        "role" to JsonPrimitive("user"),
+                        "content" to JsonPrimitive(prompt),
+                    ),
+                ),
+            ),
+        )
+        val body = JsonObject(
+            mapOf(
+                "model" to JsonPrimitive(model),
+                "messages" to messages,
+                "stream" to JsonPrimitive(false),
+            ),
+        )
+        val url = when (providerId) {
+            ProviderId.BUILTIN -> "${baseUrl?.trimEnd('/')}/chat"
+            else -> "${baseUrl?.trimEnd('/')}/chat/completions"
+        }
+        val s = session.current()
+        val builder = Request.Builder()
+            .url(url)
+            .post(
+                net.json.encodeToString(JsonObject.serializer(), body)
+                    .toRequestBody("application/json".toMediaType()),
+            )
+        if (providerId == ProviderId.BUILTIN) {
+            s.userId?.let { builder.header("X-TC-UID", it) }
+            s.userSig?.let { builder.header("X-TC-UserSig", it) }
+            builder.header("X-Internal", "true")
+        } else {
+            apiKey?.takeIf { it.isNotBlank() }?.let { builder.header("Authorization", "Bearer $it") }
+        }
+        val response = net.httpClient.newCall(builder.build()).execute()
+        response.use { resp ->
+            if (!resp.isSuccessful) error("AI 请求失败：HTTP ${resp.code}")
+            val payload = resp.body?.string() ?: error("AI 响应体为空")
+            parseFullContent(payload) ?: error("AI 响应无内容")
+        }
+    }
+
+    private fun parseFullContent(payload: String): String? = runCatching {
+        val obj = net.json.parseToJsonElement(payload).jsonObject
+        val choices = obj["choices"]?.jsonArray ?: return@runCatching null
+        val first = choices.firstOrNull()?.jsonObject ?: return@runCatching null
+        val message = first["message"]?.jsonObject ?: first["delta"]?.jsonObject
+        message?.get("content")?.jsonPrimitive?.contentOrNull
+    }.getOrNull()
 
     private fun parseChunk(payload: String): String? = runCatching {
         val obj = net.json.parseToJsonElement(payload).jsonObject

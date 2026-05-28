@@ -65,17 +65,12 @@ private fun Thumbnail(video: V2PlazaVideo, onSaveTap: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .height(108.dp)
-            .background(Brush.linearGradient(video.thumbnailKind.gradient)),
+            .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.7f to Color.Transparent,
-                        1.0f to Color.Black.copy(alpha = 0.3f),
-                    ),
-                ),
+        V2PlazaThumbnailBackground(
+            video = video,
+            modifier = Modifier.fillMaxSize(),
+            heroScrim = false,
         )
 
         Box(

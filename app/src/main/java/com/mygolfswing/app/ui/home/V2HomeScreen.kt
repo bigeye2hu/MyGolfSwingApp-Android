@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2PlazaStore
+import com.mygolfswing.app.data.store.V2ProfileStore
+import com.mygolfswing.app.ui.common.headerDisplayName
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -50,6 +52,7 @@ fun V2HomeScreen(
     onOpenPlazaVideo: (UUID) -> Unit = {},
     onAddTap: () -> Unit = {},
 ) {
+    val profile by V2ProfileStore.profile.collectAsState()
     val goals by V2GoalStore.goals.collectAsState()
     val memos by V2MemoStore.allMemos.collectAsState()
     val plazaVideos by V2PlazaStore.videos.collectAsState()
@@ -62,8 +65,16 @@ fun V2HomeScreen(
         if (V2PlazaStore.videos.value.isEmpty()) V2PlazaStore.refresh()
     }
 
-    val activeCount = goals.count { it.status.name == "ACTIVE" }
+    LaunchedEffect(profile.isLoggedIn) {
+        if (profile.isLoggedIn) {
+            V2ProfileStore.refresh(force = false)
+            V2GoalStore.syncFromCloud()
+        }
+    }
+
+    val activeCount = V2GoalStore.activeCount
     val isEmpty = activeCount == 0
+    val headerName = profile.headerDisplayName()
     val recentMemos = remember(memos) { memos.sortedByDescending { it.createdAt }.take(6) }
 
     Box(
@@ -78,7 +89,12 @@ fun V2HomeScreen(
                 .padding(top = DSSpacing.sm, bottom = DSSpacing.lg),
             verticalArrangement = Arrangement.spacedBy(DSSpacing.xl),
         ) {
-            V2HomeHeader(goalCount = if (isEmpty) 0 else activeCount, onAddTap = onAddTap)
+            V2HomeHeader(
+                goalCount = if (isEmpty) 0 else activeCount,
+                displayName = headerName,
+                avatarUrl = profile.avatar,
+                onAddTap = onAddTap,
+            )
 
             if (isEmpty) {
                 V2HomeEmptyCard(

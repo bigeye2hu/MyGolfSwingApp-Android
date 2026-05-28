@@ -9,6 +9,7 @@ import com.mygolfswing.app.data.model.V2MemoThumbnailKind
 import com.mygolfswing.app.data.model.V2PinState
 import com.mygolfswing.app.data.model.V2Topic
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -112,9 +113,9 @@ object V2Json {
             derivedFromMemoIds = json["derivedFromMemoIds"]?.jsonArray?.map { UUID.fromString(it.jsonPrimitive.content) } ?: emptyList(),
             todayFocus = json["todayFocus"]?.jsonPrimitive?.booleanOrNull ?: false,
             completionCelebrated = json["completionCelebrated"]?.jsonPrimitive?.booleanOrNull ?: false,
-            startedAt = json["startedAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
-            completedAt = json["completedAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime(),
-            updatedAt = json["updatedAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
+            startedAt = json.epochMillis("startedAt")?.toLocalDateTime() ?: LocalDateTime.now(),
+            completedAt = json.epochMillis("completedAt")?.toLocalDateTime(),
+            updatedAt = json.epochMillis("updatedAt")?.toLocalDateTime() ?: LocalDateTime.now(),
         )
     }
 
@@ -128,8 +129,8 @@ object V2Json {
 
     private fun decodeProgress(o: JsonObject): V2Goal.Progress = V2Goal.Progress(
         current = o["current"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
-        lastIncrementAt = o["lastIncrementAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime(),
-        checkInDates = o["checkInDates"]?.jsonArray?.map { it.jsonPrimitive.long.toLocalDateTime() } ?: emptyList(),
+        lastIncrementAt = o.epochMillis("lastIncrementAt")?.toLocalDateTime(),
+        checkInDates = o["checkInDates"]?.jsonArray?.mapNotNull { it.epochMillis()?.toLocalDateTime() } ?: emptyList(),
     )
 
     private fun encodeCadence(c: V2Goal.Cadence): JsonObject = when (c) {
@@ -224,5 +225,13 @@ object V2Json {
     private inline fun <reified E : Enum<E>> enumByName(name: String, entries: List<E>): E {
         return entries.firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?: error("Unknown enum value '$name' in ${E::class.simpleName}")
+    }
+
+    /** iOS `JSONEncoder.dateEncodingStrategy = .millisecondsSince1970` 可能编码为 Long 或 Double */
+    private fun JsonObject.epochMillis(key: String): Long? = this[key]?.epochMillis()
+
+    private fun JsonElement.epochMillis(): Long? {
+        val p = this as? JsonPrimitive ?: return null
+        return p.longOrNull ?: p.doubleOrNull?.toLong()
     }
 }

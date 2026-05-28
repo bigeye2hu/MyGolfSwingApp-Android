@@ -12,6 +12,9 @@ interface GoalDao {
     @Query("SELECT * FROM v2_goal ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<GoalEntity>>
 
+    @Query("SELECT * FROM v2_goal")
+    suspend fun all(): List<GoalEntity>
+
     @Query("SELECT * FROM v2_goal WHERE id = :id")
     suspend fun get(id: String): GoalEntity?
 

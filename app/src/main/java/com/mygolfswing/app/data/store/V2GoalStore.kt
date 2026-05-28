@@ -229,6 +229,19 @@ object V2GoalStore {
      * 测试 / 演示数据（仅在本地为空时往 DB 写一份）。
      * 上层 [com.mygolfswing.app.ui.tabs.V2RootScreen] 在启动时判空再调。
      */
+    /** 登录后从云端拉取并合并（对齐 iOS `V2GoalStore.setup` 内的 cloud sync） */
+    fun syncFromCloud() {
+        scope.launch {
+            ServiceLocator.goalRepo.syncFromCloud()
+                .onSuccess { count ->
+                    android.util.Log.i("V2GoalStore", "云端目标同步完成：合并 $count 条")
+                }
+                .onFailure { e ->
+                    android.util.Log.w("V2GoalStore", "云端目标同步失败: ${e.message}")
+                }
+        }
+    }
+
     fun resetWithMockData() {
         scope.launch {
             val now = LocalDateTime.now()

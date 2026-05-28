@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -13,7 +14,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,10 +23,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import com.mygolfswing.app.ui.common.V2Format
+import com.mygolfswing.app.ui.common.V2UserAvatar
 import com.mygolfswing.app.ui.designsystem.DSColors
 
 /**
@@ -39,7 +41,8 @@ import com.mygolfswing.app.ui.designsystem.DSColors
 @Composable
 fun V2HomeHeader(
     goalCount: Int,
-    displayName: String = "高尔夫球友",
+    displayName: String,
+    avatarUrl: String? = null,
     onAddTap: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -60,16 +63,13 @@ fun V2HomeHeader(
             modifier = Modifier
                 .size(48.dp)
                 .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
-                .clip(CircleShape)
-                .background(DSColors.mistGreen)
                 .border(width = 2.5.dp, color = ringYellow, shape = CircleShape),
-            contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = Icons.Filled.Person,
-                contentDescription = "头像",
-                tint = DSColors.shadowGray,
-                modifier = Modifier.size(28.dp),
+            V2UserAvatar(
+                avatar = avatarUrl,
+                modifier = Modifier.fillMaxSize(),
+                emojiFontSize = 22.sp,
+                placeholderIconSize = 28.dp,
             )
         }
 
@@ -83,6 +83,7 @@ fun V2HomeHeader(
                 fontWeight = FontWeight.Bold,
                 color = titleInk,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Row(
                 verticalAlignment = Alignment.CenterVertically,

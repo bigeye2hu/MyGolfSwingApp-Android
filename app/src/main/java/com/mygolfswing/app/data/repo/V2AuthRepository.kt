@@ -262,12 +262,20 @@ class V2AuthRepository(
 
 // ============ JsonObject → V2Session 工具 ============
 
+private fun JsonObject.stringField(vararg keys: String): String? {
+    for (key in keys) {
+        val v = this[key]?.jsonPrimitive?.contentOrNull?.trim()
+        if (!v.isNullOrEmpty()) return v
+    }
+    return null
+}
+
 private fun JsonObject.toSession(): V2Session = V2Session(
-    userId = this["userId"]?.jsonPrimitive?.contentOrNull,
-    userSig = this["userSig"]?.jsonPrimitive?.contentOrNull,
+    userId = stringField("userId"),
+    userSig = stringField("userSig"),
     sdkAppId = this["sdkAppId"]?.jsonPrimitive?.intOrNull,
-    nickname = this["nickname"]?.jsonPrimitive?.contentOrNull,
-    avatar = this["avatar"]?.jsonPrimitive?.contentOrNull,
+    nickname = stringField("nickname", "nickName"),
+    avatar = stringField("avatar", "avatarUrl", "avatarURL"),
     email = this["email"]?.jsonPrimitive?.contentOrNull,
     phone = this["phone"]?.jsonPrimitive?.contentOrNull,
     username = this["username"]?.jsonPrimitive?.contentOrNull,
@@ -284,8 +292,8 @@ private fun JsonObject.toSession(): V2Session = V2Session(
 )
 
 private fun V2Session.mergedWith(data: JsonObject): V2Session = copy(
-    nickname = data["nickname"]?.jsonPrimitive?.contentOrNull ?: nickname,
-    avatar = data["avatar"]?.jsonPrimitive?.contentOrNull ?: avatar,
+    nickname = data.stringField("nickname", "nickName") ?: nickname,
+    avatar = data.stringField("avatar", "avatarUrl", "avatarURL") ?: avatar,
     email = data["email"]?.jsonPrimitive?.contentOrNull ?: email,
     phone = data["phone"]?.jsonPrimitive?.contentOrNull ?: phone,
     username = data["username"]?.jsonPrimitive?.contentOrNull ?: username,

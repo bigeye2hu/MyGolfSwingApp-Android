@@ -98,7 +98,11 @@ class V2PlazaRepository(
         val initial = coachName.firstOrNull()?.toString() ?: "C"
         val tint = avatarTints[(coachName.hashCode().ushr(1)) % avatarTints.size]
         val publishMs = o["publishTime"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
-        val cover = o["coverURL"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+        val cover = (
+            o["coverURL"]?.jsonPrimitive?.contentOrNull
+                ?: o["coverUrl"]?.jsonPrimitive?.contentOrNull
+                ?: o["thumbnailURL"]?.jsonPrimitive?.contentOrNull
+            )?.takeIf { it.isNotBlank() }
         val catName = o["categoryName"]?.jsonPrimitive?.contentOrNull
             ?: topicFromCategoryId(categoryId).displayName
         return V2PlazaVideo(

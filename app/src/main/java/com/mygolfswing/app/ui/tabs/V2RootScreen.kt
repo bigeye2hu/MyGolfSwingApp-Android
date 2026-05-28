@@ -112,8 +112,6 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         V2GolfProfileStore.startObserving()
         V2SwingSessionStore.startObserving()
         V2AIChatStore.loadPersisted()
-        if (V2GoalStore.goals.value.isEmpty()) V2GoalStore.resetWithMockData()
-        if (V2MemoStore.allMemos.value.isEmpty()) V2MemoStore.resetWithMockData()
         V2PlazaStore.refresh()
         val session = ServiceLocator.session.current()
         if (session.isLoggedIn) {
@@ -122,12 +120,15 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 ServiceLocator.authRepo.logout()
                 V2ProfileStore.refresh(force = true)
             } else {
-                ServiceLocator.goalRepo.pullFromCloud()
+                V2GoalStore.syncFromCloud()
                 ServiceLocator.goalRepo.pushDirty()
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
                 V2MemoStore.pullFromCloud()
                 runCatching { V2GolfProfileStore.refreshFromCloud() }
             }
+        } else {
+            if (V2GoalStore.goals.value.isEmpty()) V2GoalStore.resetWithMockData()
+            if (V2MemoStore.allMemos.value.isEmpty()) V2MemoStore.resetWithMockData()
         }
         bootstrapping = false
     }
@@ -267,6 +268,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 nav.resetToRoot()
                 V2ProfileStore.refresh(force = true)
                 V2MemoStore.pullFromCloud()
+                V2GoalStore.syncFromCloud()
             },
             onOpenRegister = { nav.navigateTo(Destination.Register) },
             onOpenResetPassword = { nav.navigateTo(Destination.ResetPassword) },

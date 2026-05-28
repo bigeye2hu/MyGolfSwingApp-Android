@@ -1,0 +1,417 @@
+package com.mygolfswing.app.ui.tabs
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.mygolfswing.app.ui.common.V2SplashScreen
+import com.mygolfswing.app.ui.memo.V2OnlineVideoSelection
+import com.mygolfswing.app.ui.memo.V2OnlineVideoSelectorScreen
+import com.mygolfswing.app.ui.swing.V2JustSwingMainScreen
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
+import com.mygolfswing.app.data.model.V2MemoKind
+import com.mygolfswing.app.data.store.V2GoalStore
+import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.data.store.V2PlazaStore
+import com.mygolfswing.app.data.store.V2ProfileStore
+import com.mygolfswing.app.ui.ai.V2AIChatScreen
+import com.mygolfswing.app.ui.auth.V2ChangePasswordScreen
+import com.mygolfswing.app.ui.auth.V2LoginScreen
+import com.mygolfswing.app.ui.auth.V2RegisterScreen
+import com.mygolfswing.app.ui.auth.V2ResetPasswordScreen
+import com.mygolfswing.app.ui.feedback.V2FeedbackScreen
+import com.mygolfswing.app.ui.legal.V2LegalDocType
+import com.mygolfswing.app.ui.legal.V2LegalScreen
+import com.mygolfswing.app.ui.settings.V2AIServiceConfigScreen
+import com.mygolfswing.app.ui.settings.V2StorageManagementScreen
+import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.goals.V2AllGoalsScreen
+import com.mygolfswing.app.ui.goals.V2GoalDetailScreen
+import com.mygolfswing.app.ui.goals.V2NewGoalScreen
+import com.mygolfswing.app.ui.home.V2HomeScreen
+import com.mygolfswing.app.ui.memo.V2MemoCreateTextScreen
+import com.mygolfswing.app.ui.memo.V2MemoCreateVideoScreen
+import com.mygolfswing.app.ui.memo.V2MemoDetailScreen
+import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.data.store.V2AIChatStore
+import com.mygolfswing.app.data.store.V2SwingSessionStore
+import com.mygolfswing.app.ui.memo.V2MemoAllListScreen
+import com.mygolfswing.app.ui.memo.V2MemoListScreen
+import com.mygolfswing.app.ui.memo.V2QuickAddSheet
+import com.mygolfswing.app.ui.memo.V2TextMemoListScreen
+import com.mygolfswing.app.ui.memo.V2VideoMemoListScreen
+import com.mygolfswing.app.ui.memo.V2VideoMemoPlayerScreen
+import com.mygolfswing.app.ui.plaza.V2PlazaPlayerScreen
+import com.mygolfswing.app.ui.plaza.V2PlazaScreen
+import com.mygolfswing.app.ui.profile.V2AIArchiveScreen
+import com.mygolfswing.app.ui.profile.V2EditProfileScreen
+import com.mygolfswing.app.ui.profile.V2ProfileScreen
+import com.mygolfswing.app.ui.swing.V2JustSwingCalendarScreen
+import com.mygolfswing.app.ui.theme.MyGolfSwingAppAndroidTheme
+import java.util.UUID
+
+/**
+ * 应用内导航目的地（轻量栈，无需引入 Navigation Compose）。
+ */
+private sealed class Destination {
+    data object Tabs : Destination()
+    data object AllGoals : Destination()
+    data class NewGoal(val editingId: UUID? = null) : Destination()
+    data class GoalDetail(val id: UUID) : Destination()
+    data object NewTextMemo : Destination()
+    data object NewVideoMemo : Destination()
+    data class MemoDetail(val id: UUID) : Destination()
+    data class VideoMemoPlay(val id: UUID) : Destination()
+    data class PlazaPlay(val id: UUID) : Destination()
+    data object AllMemos : Destination()
+    data object VideoMemoList : Destination()
+    data object TextMemoList : Destination()
+    data object SwingCalendar : Destination()
+    data object JustSwingMain : Destination()
+    data object OnlineVideoPicker : Destination()
+    data object AIArchive : Destination()
+    data object Login : Destination()
+    data object Register : Destination()
+    data object ResetPassword : Destination()
+    data object EditProfile : Destination()
+    data object ChangePassword : Destination()
+    data object StorageManagement : Destination()
+    data object AIConfig : Destination()
+    data object Feedback : Destination()
+    data class Legal(val type: V2LegalDocType) : Destination()
+}
+
+/**
+ * V2 Android 根容器（对齐 iOS `V2RootView`）。
+ */
+@Composable
+fun V2RootScreen(modifier: Modifier = Modifier) {
+    var selectedTab by rememberSaveable { mutableStateOf(V2Tab.HOME) }
+    var destination by remember { mutableStateOf<Destination>(Destination.Tabs) }
+    var showQuickAdd by remember { mutableStateOf(false) }
+    var bootstrapping by remember { mutableStateOf(true) }
+    var pendingOnlinePick by remember { mutableStateOf<V2OnlineVideoSelection?>(null) }
+
+    LaunchedEffect(Unit) {
+        V2GoalStore.startObserving()
+        V2MemoStore.startObserving()
+        V2PlazaStore.startObserving()
+        V2ProfileStore.startObserving()
+        V2SwingSessionStore.startObserving()
+        V2AIChatStore.loadPersisted()
+        if (V2GoalStore.goals.value.isEmpty()) V2GoalStore.resetWithMockData()
+        if (V2MemoStore.allMemos.value.isEmpty()) V2MemoStore.resetWithMockData()
+        V2PlazaStore.refresh()
+        val session = ServiceLocator.session.current()
+        if (session.isLoggedIn) {
+            val userOk = ServiceLocator.authRepo.fetchUserInfo().isSuccess
+            if (!userOk) {
+                ServiceLocator.authRepo.logout()
+                V2ProfileStore.refresh(force = true)
+            } else {
+                ServiceLocator.goalRepo.pullFromCloud()
+                ServiceLocator.goalRepo.pushDirty()
+                ServiceLocator.creditsRepo.fetchBalance(force = true)
+                V2MemoStore.pullFromCloud()
+                runCatching { ServiceLocator.golfProfileRepo.pullFromCloud() }
+            }
+        }
+        bootstrapping = false
+    }
+
+    if (bootstrapping) {
+        V2SplashScreen()
+        return
+    }
+
+    when (val d = destination) {
+        Destination.Tabs -> TabsScaffold(
+            selectedTab = selectedTab,
+            onSelectTab = { tab ->
+                if (tab == V2Tab.AI) {
+                    // AI 是中间凸起按钮，单独处理：直接切到 AI 全屏（无底栏）
+                    selectedTab = V2Tab.AI
+                } else {
+                    selectedTab = tab
+                }
+            },
+            onShowQuickAdd = { showQuickAdd = true },
+            onOpenAllGoals = { destination = Destination.AllGoals },
+            onOpenGoalDetail = { destination = Destination.GoalDetail(it) },
+            onCreateGoal = { destination = Destination.NewGoal() },
+            onCreateTextMemo = { destination = Destination.NewTextMemo },
+            onCreateVideoMemo = { destination = Destination.NewVideoMemo },
+            onOpenAllMemos = { destination = Destination.AllMemos },
+            onOpenVideoMemoList = { destination = Destination.VideoMemoList },
+            onOpenTextMemoList = { destination = Destination.TextMemoList },
+            onOpenSwingCalendar = { destination = Destination.SwingCalendar },
+            onOpenJustSwing = { destination = Destination.JustSwingMain },
+            onOpenAIArchive = { destination = Destination.AIArchive },
+            onOpenAIConfig = { destination = Destination.AIConfig },
+            onSwitchToAI = { selectedTab = V2Tab.AI },
+            onOpenMemoDetail = { memo ->
+                val m = V2MemoStore.allMemos.value.firstOrNull { it.id == memo }
+                destination = if (m?.kind == V2MemoKind.TEXT) {
+                    Destination.MemoDetail(memo)
+                } else {
+                    Destination.VideoMemoPlay(memo)
+                }
+            },
+            onOpenPlazaVideo = { destination = Destination.PlazaPlay(it) },
+            onRequestLogin = { destination = Destination.Login },
+            onOpenEditProfile = { destination = Destination.EditProfile },
+            onOpenAccountSecurity = { destination = Destination.ChangePassword },
+            onOpenStorage = { destination = Destination.StorageManagement },
+            onOpenFeedback = { destination = Destination.Feedback },
+            onOpenTerms = { destination = Destination.Legal(V2LegalDocType.TERMS) },
+            onOpenPrivacy = { destination = Destination.Legal(V2LegalDocType.PRIVACY) },
+            modifier = modifier,
+        )
+        Destination.AllGoals -> V2AllGoalsScreen(
+            onBack = { destination = Destination.Tabs },
+            onCreate = { destination = Destination.NewGoal() },
+            onSelectGoal = { destination = Destination.GoalDetail(it) },
+        )
+        is Destination.NewGoal -> V2NewGoalScreen(
+            editingGoalId = d.editingId,
+            onClose = { destination = Destination.Tabs },
+            onDeleted = { destination = Destination.Tabs },
+        )
+        is Destination.GoalDetail -> V2GoalDetailScreen(
+            goalId = d.id,
+            onBack = { destination = Destination.Tabs },
+            onEdit = { destination = Destination.NewGoal(editingId = d.id) },
+        )
+        Destination.NewTextMemo -> V2MemoCreateTextScreen(
+            onClose = { destination = Destination.Tabs },
+        )
+        Destination.NewVideoMemo -> V2MemoCreateVideoScreen(
+            onClose = { destination = Destination.Tabs },
+            onOpenOnlinePicker = { destination = Destination.OnlineVideoPicker },
+            pendingOnline = pendingOnlinePick,
+            onPendingOnlineConsumed = { pendingOnlinePick = null },
+        )
+        Destination.OnlineVideoPicker -> V2OnlineVideoSelectorScreen(
+            onBack = { destination = Destination.NewVideoMemo },
+            onConfirm = { pick ->
+                pendingOnlinePick = pick
+                destination = Destination.NewVideoMemo
+            },
+        )
+        Destination.JustSwingMain -> V2JustSwingMainScreen(
+            onBack = { destination = Destination.Tabs },
+        )
+        is Destination.MemoDetail -> V2MemoDetailScreen(
+            memoId = d.id,
+            onBack = { destination = Destination.Tabs },
+        )
+        is Destination.VideoMemoPlay -> V2VideoMemoPlayerScreen(
+            memoId = d.id,
+            onBack = { destination = Destination.Tabs },
+        )
+        is Destination.PlazaPlay -> V2PlazaPlayerScreen(
+            videoId = d.id,
+            onClose = { destination = Destination.Tabs },
+        )
+        Destination.VideoMemoList -> V2VideoMemoListScreen(
+            onBack = { destination = Destination.Tabs },
+            onOpenMemo = { memoId ->
+                destination = Destination.VideoMemoPlay(memoId)
+            },
+        )
+        Destination.TextMemoList -> V2TextMemoListScreen(
+            onBack = { destination = Destination.Tabs },
+            onOpenMemo = { memoId ->
+                destination = Destination.MemoDetail(memoId)
+            },
+        )
+        Destination.SwingCalendar -> V2JustSwingCalendarScreen(
+            onBack = { destination = Destination.Tabs },
+        )
+        Destination.AIArchive -> V2AIArchiveScreen(
+            onBack = { destination = Destination.Tabs },
+        )
+        Destination.AllMemos -> V2MemoAllListScreen(
+            onBack = { destination = Destination.Tabs },
+            onOpenMemo = { memoId ->
+                val m = V2MemoStore.allMemos.value.firstOrNull { it.id == memoId }
+                destination = if (m?.kind == V2MemoKind.TEXT) {
+                    Destination.MemoDetail(memoId)
+                } else {
+                    Destination.VideoMemoPlay(memoId)
+                }
+            },
+        )
+        Destination.Login -> V2LoginScreen(
+            onClose = { destination = Destination.Tabs },
+            onLoginSuccess = {
+                destination = Destination.Tabs
+                V2ProfileStore.refresh(force = true)
+                V2MemoStore.pullFromCloud()
+            },
+            onOpenRegister = { destination = Destination.Register },
+            onOpenResetPassword = { destination = Destination.ResetPassword },
+        )
+        Destination.Register -> V2RegisterScreen(
+            onBack = { destination = Destination.Login },
+            onRegisterSuccess = {
+                destination = Destination.Tabs
+                V2ProfileStore.refresh(force = true)
+            },
+        )
+        Destination.ResetPassword -> V2ResetPasswordScreen(
+            onBack = { destination = Destination.Login },
+            onResetSuccess = {
+                destination = Destination.Tabs
+                V2ProfileStore.refresh(force = true)
+            },
+        )
+        Destination.EditProfile -> V2EditProfileScreen(
+            onBack = { destination = Destination.Tabs },
+            onSaved = {
+                destination = Destination.Tabs
+                V2ProfileStore.refresh(force = true)
+            },
+        )
+        Destination.ChangePassword -> V2ChangePasswordScreen(
+            onBack = { destination = Destination.Tabs },
+            onChangeSuccess = { destination = Destination.Tabs },
+        )
+        Destination.StorageManagement -> V2StorageManagementScreen(
+            onBack = { destination = Destination.Tabs },
+        )
+        Destination.AIConfig -> V2AIServiceConfigScreen(
+            onBack = { destination = Destination.Tabs },
+        )
+        Destination.Feedback -> V2FeedbackScreen(
+            onBack = { destination = Destination.Tabs },
+        )
+        is Destination.Legal -> V2LegalScreen(
+            type = d.type,
+            onBack = { destination = Destination.Tabs },
+        )
+    }
+
+    if (showQuickAdd) {
+        val isHomeTab = selectedTab == V2Tab.HOME
+        V2QuickAddSheet(
+            showCreateGoal = isHomeTab,
+            onCreateGoal = { destination = Destination.NewGoal() },
+            onCreateVideoMemo = { destination = Destination.NewVideoMemo },
+            onCreateTextMemo = { destination = Destination.NewTextMemo },
+            onCreateSwingClip = {
+                showQuickAdd = false
+                destination = Destination.JustSwingMain
+            },
+            onDismiss = { showQuickAdd = false },
+        )
+    }
+
+}
+
+@Composable
+private fun TabsScaffold(
+    selectedTab: V2Tab,
+    onSelectTab: (V2Tab) -> Unit,
+    onShowQuickAdd: () -> Unit,
+    onOpenAllGoals: () -> Unit,
+    onOpenGoalDetail: (UUID) -> Unit,
+    onCreateGoal: () -> Unit,
+    onCreateTextMemo: () -> Unit,
+    onCreateVideoMemo: () -> Unit,
+    onOpenAllMemos: () -> Unit,
+    onOpenVideoMemoList: () -> Unit,
+    onOpenTextMemoList: () -> Unit,
+    onOpenSwingCalendar: () -> Unit,
+    onOpenJustSwing: () -> Unit,
+    onOpenAIArchive: () -> Unit,
+    onOpenAIConfig: () -> Unit,
+    onSwitchToAI: () -> Unit,
+    onOpenMemoDetail: (UUID) -> Unit,
+    onOpenPlazaVideo: (UUID) -> Unit,
+    onRequestLogin: () -> Unit,
+    onOpenEditProfile: () -> Unit,
+    onOpenAccountSecurity: () -> Unit,
+    onOpenStorage: () -> Unit,
+    onOpenFeedback: () -> Unit,
+    onOpenTerms: () -> Unit,
+    onOpenPrivacy: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = DSColors.warmWhite,
+        bottomBar = {
+            V2BottomTabBar(
+                selected = selectedTab,
+                onSelect = onSelectTab,
+            )
+        },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(DSColors.warmWhite),
+        ) {
+            when (selectedTab) {
+                V2Tab.HOME -> V2HomeScreen(
+                    onCreateGoal = onCreateGoal,
+                    onOpenAllGoals = onOpenAllGoals,
+                    onOpenGoalDetail = onOpenGoalDetail,
+                    onSwitchToPlaza = { onSelectTab(V2Tab.PLAZA) },
+                    onSwitchToMemo = { onSelectTab(V2Tab.MEMO) },
+                    onOpenPlazaVideo = onOpenPlazaVideo,
+                    onAddTap = onShowQuickAdd,
+                )
+                V2Tab.MEMO -> V2MemoListScreen(
+                    onCreateMemo = onShowQuickAdd,
+                    onCreateVideoMemo = onCreateVideoMemo,
+                    onCreateTextMemo = onCreateTextMemo,
+                    onOpenMemo = onOpenMemoDetail,
+                    onOpenVideoList = onOpenVideoMemoList,
+                    onOpenTextList = onOpenTextMemoList,
+                    onOpenSwingCalendar = onOpenSwingCalendar,
+                    onOpenJustSwing = onOpenJustSwing,
+                    onOpenAllMemos = onOpenAllMemos,
+                    onSwitchToAI = onSwitchToAI,
+                )
+                V2Tab.AI -> V2AIChatScreen(
+                    onSwitchToHome = { onSelectTab(V2Tab.HOME) },
+                    onOpenConfig = onOpenAIConfig,
+                )
+                V2Tab.PLAZA -> V2PlazaScreen(
+                    onOpenVideo = onOpenPlazaVideo,
+                )
+                V2Tab.ME -> V2ProfileScreen(
+                    onRequestLogin = onRequestLogin,
+                    onOpenEditProfile = onOpenEditProfile,
+                    onOpenAccountSecurity = onOpenAccountSecurity,
+                    onOpenStorage = onOpenStorage,
+                    onOpenAIConfig = onOpenAIConfig,
+                    onOpenAIArchive = onOpenAIArchive,
+                    onOpenFeedback = onOpenFeedback,
+                    onOpenTerms = onOpenTerms,
+                    onOpenPrivacy = onOpenPrivacy,
+                )
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun V2RootScreenPreview() {
+    MyGolfSwingAppAndroidTheme {
+        V2RootScreen()
+    }
+}

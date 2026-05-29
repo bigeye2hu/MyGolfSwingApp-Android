@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -31,6 +34,15 @@ object V2PlazaStore {
 
     private val _selectedCategoryId = MutableStateFlow("all")
     val selectedCategoryId: StateFlow<String> = _selectedCategoryId.asStateFlow()
+
+    private val _heroVideo = MutableStateFlow<V2PlazaVideo?>(null)
+    val heroVideo: StateFlow<V2PlazaVideo?> = _heroVideo.asStateFlow()
+
+    private val _searchKeyword = MutableStateFlow("")
+    val searchKeyword: StateFlow<String> = _searchKeyword.asStateFlow()
+
+    private val _isSearchActive = MutableStateFlow(false)
+    val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -57,6 +69,8 @@ object V2PlazaStore {
     private val _categories = MutableStateFlow(defaultCategories)
     val categories: StateFlow<List<V2PlazaCategoryChip>> = _categories.asStateFlow()
 
+    private val _allCategories = MutableStateFlow(defaultCategories)
+
     @Volatile private var collecting = false
 
     fun startObserving() {
@@ -72,6 +86,18 @@ object V2PlazaStore {
 
     fun selectCategory(id: String) {
         _selectedCategoryId.value = id
+        refresh()
+    }
+
+    fun setSearchKeyword(keyword: String) {
+        _searchKeyword.value = keyword
+        _isSearchActive.value = keyword.isNotBlank()
+        refresh()
+    }
+
+    fun clearSearch() {
+        _searchKeyword.value = ""
+        _isSearchActive.value = false
         refresh()
     }
 
@@ -95,28 +121,40 @@ object V2PlazaStore {
     fun homeRecommendations(): List<V2PlazaVideo> =
         _videos.value.sortedByDescending { it.publishedAtMs }.take(6)
 
-    fun filteredVideos(): List<V2PlazaVideo> {
-        val cid = _selectedCategoryId.value
-        val topic = _categories.value.firstOrNull { it.id == cid }?.topic ?: V2Topic.ALL
-        return if (topic == V2Topic.ALL) _videos.value else _videos.value.filter { it.topic == topic }
-    }
+    fun filteredVideos(): List<V2PlazaVideo> = _videos.value
 
     fun refresh() {
         scope.launch {
             _isLoading.value = true
             repo.fetchCategories().onSuccess { remote ->
                 if (remote.isNotEmpty()) {
-                    _categories.value = listOf(V2PlazaCategoryChip("all", "全部", V2Topic.ALL)) + remote
+                    val all = listOf(V2PlazaCategoryChip("all", "全部", V2Topic.ALL)) + remote
+                    _allCategories.value = all
+                    _categories.value = all.filter { it.id == "all" || it.isTopLevel }
+                    if (_categories.value.none { it.id == _selectedCategoryId.value }) {
+                        _selectedCategoryId.value = "all"
+                    }
                 }
             }
-            val cid = _selectedCategoryId.value.takeIf { it != "all" }
-            val result = repo.fetchVideos(limit = 30, categoryId = cid)
+            val selected = selectedCategory()
+            val cid = selected?.takeIf { it.id != "all" && !it.isTopLevel }?.id
+            val parentCid = selected?.takeIf { it.id != "all" && it.isTopLevel }?.id
+            val keyword = _searchKeyword.value.trim().takeIf { it.isNotBlank() }
+            val result = repo.fetchVideos(
+                limit = 30,
+                categoryId = cid,
+                parentCategoryId = parentCid.takeIf { keyword == null },
+                keyword = keyword,
+            )
             _isLoading.value = false
             result.onSuccess { list ->
                 _lastError.value = null
                 _isUsingMock.value = false
                 val saved = _savedIds.value
-                _videos.value = list.map { it.copy(isSaved = saved.contains(it.saveKey())) }
+                val merged = list.map { it.copy(isSaved = saved.contains(it.saveKey())) }
+                val hero = pickHero(merged)
+                _heroVideo.value = hero
+                _videos.value = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
             }.onFailure { e ->
                 _lastError.value = e.message
                 if (_videos.value.isEmpty()) {
@@ -129,7 +167,7 @@ object V2PlazaStore {
 
     fun resetWithMockData() {
         val sampleVideo = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-        _videos.value = listOf(
+        val sample = listOf(
             V2PlazaVideo(
                 title = "7 号铁中铁基础挥杆 · 4 拍节奏",
                 durationSec = 152.0,
@@ -210,5 +248,22 @@ object V2PlazaStore {
                 videoUrl = sampleVideo,
             ),
         )
+        val hero = pickHero(sample)
+        _heroVideo.value = hero
+        _videos.value = hero?.let { h -> sample.filter { it.saveKey() != h.saveKey() } } ?: sample
+    }
+
+    private fun selectedCategory(): V2PlazaCategoryChip? {
+        val selectedId = _selectedCategoryId.value
+        return _allCategories.value.firstOrNull { it.id == selectedId }
+            ?: _categories.value.firstOrNull { it.id == selectedId }
+    }
+
+    private fun pickHero(videos: List<V2PlazaVideo>): V2PlazaVideo? {
+        if (_selectedCategoryId.value != "all" || _isSearchActive.value || videos.isEmpty()) return null
+        val pool = videos.sortedByDescending { it.publishedAtMs }.take(10)
+        val day = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val idx = day.hashCode().let { if (it == Int.MIN_VALUE) 0 else kotlin.math.abs(it) } % pool.size
+        return pool[idx].copy(isFeaturedToday = true)
     }
 }

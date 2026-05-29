@@ -99,6 +99,7 @@ private fun Thumbnail(video: V2PlazaVideo, onSaveTap: () -> Unit) {
 
         Row(
             modifier = Modifier
+                .fillMaxWidth()
                 .align(Alignment.BottomStart)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -191,8 +192,9 @@ private fun InfoBlock(video: V2PlazaVideo) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .height(122.dp)
             .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         Text(
             text = video.title,
@@ -202,6 +204,8 @@ private fun InfoBlock(video: V2PlazaVideo) {
             maxLines = 2,
             minLines = 2,
         )
+
+        Spacer(modifier = Modifier.height(6.dp))
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -217,7 +221,7 @@ private fun InfoBlock(video: V2PlazaVideo) {
             )
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
+        Spacer(modifier = Modifier.weight(1f))
 
         Row {
             StatLabel(icon = Icons.Filled.PlayArrow, text = formatCount(video.viewCount))

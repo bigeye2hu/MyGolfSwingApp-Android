@@ -75,7 +75,7 @@ object ServiceLocator {
         videoDownloadRepo = V2VideoDownloadRepository(net, session)
         goalRepo = V2GoalRepository(db.goals(), net, session, appScope)
         memoRepo = V2MemoRepository(context.applicationContext, db.memos(), net, session, appScope)
-        plazaRepo = V2PlazaRepository(db.plazaSaved(), net)
+        plazaRepo = V2PlazaRepository(db.plazaSaved(), net, session)
         swingRepo = V2SwingSessionRepository(db.swingSessions(), net)
         golfProfileRepo = V2GolfProfileRepository(db.golfProfile(), net, session)
         aiChatRepo = V2AIChatRepository(db.aiChat())

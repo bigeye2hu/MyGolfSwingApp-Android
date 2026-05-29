@@ -12,6 +12,9 @@ data class V2PlazaVideo(
     val id: UUID = UUID.randomUUID(),
     /** 云端原始 videoId（跳转/收藏） */
     val sourceVideoId: String? = null,
+    val sourceCoachId: String? = null,
+    val sourceCategoryId: String? = null,
+    val sourceParentCategoryId: String? = null,
     val title: String,
     val durationSec: Double,
     val topic: V2Topic,
@@ -65,4 +68,12 @@ data class V2PlazaCoach(
     }
 }
 
-data class V2PlazaCategoryChip(val id: String, val name: String, val topic: V2Topic)
+data class V2PlazaCategoryChip(
+    val id: String,
+    val name: String,
+    val topic: V2Topic,
+    val sortOrder: Int = 0,
+    val parentId: String = "",
+) {
+    val isTopLevel: Boolean get() = parentId.isBlank()
+}

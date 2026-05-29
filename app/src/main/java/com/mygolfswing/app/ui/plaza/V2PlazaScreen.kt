@@ -8,26 +8,36 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,8 +65,9 @@ fun V2PlazaScreen(
     val selectedCat by V2PlazaStore.selectedCategoryId.collectAsState()
     val isLoading by V2PlazaStore.isLoading.collectAsState()
     val isUsingMock by V2PlazaStore.isUsingMock.collectAsState()
-    val filtered = remember(videos, selectedCat) { V2PlazaStore.filteredVideos() }
-    val hero = filtered.firstOrNull()
+    val searchKeyword by V2PlazaStore.searchKeyword.collectAsState()
+    val hero by V2PlazaStore.heroVideo.collectAsState()
+    val filtered = videos
 
     Box(
         modifier = Modifier
@@ -64,7 +75,11 @@ fun V2PlazaScreen(
             .background(DSColors.warmWhite),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            PlazaHeader()
+            PlazaHeader(
+                searchKeyword = searchKeyword,
+                onSearchChange = { V2PlazaStore.setSearchKeyword(it) },
+                onClearSearch = { V2PlazaStore.clearSearch() },
+            )
             if (isUsingMock) {
                 MockDataBanner()
             }
@@ -104,22 +119,110 @@ fun V2PlazaScreen(
 
 @Composable
 private fun PlazaHeader() {
+    PlazaHeader(
+        searchKeyword = "",
+        onSearchChange = {},
+        onClearSearch = {},
+    )
+}
+
+@Composable
+private fun PlazaHeader(
+    searchKeyword: String,
+    onSearchChange: (String) -> Unit,
+    onClearSearch: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DSColors.cardWhite.copy(alpha = 0.92f))
-            .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .background(DSColors.warmWhite)
+            .padding(horizontal = DSSpacing.lg)
+            .padding(top = DSSpacing.sm, bottom = DSSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
-            text = "广场",
-            style = DSTypography.display,
-            color = DSColors.inkGreen,
-        )
-        Text(
-            text = "教练精选 · 高手分享 · 看一段，练得更明白。",
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
+        Row(verticalAlignment = Alignment.Top) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(DSColors.fairway),
+                    )
+                    Text(
+                        text = "视频广场",
+                        style = DSTypography.titleLarge,
+                        color = DSColors.inkGreen,
+                    )
+                }
+                Text(
+                    text = "精选教学资源",
+                    style = DSTypography.caption,
+                    color = DSColors.shadowGray,
+                    modifier = Modifier.padding(start = 24.dp),
+                )
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(DSColors.warmWhite)
+                    .border(width = 1.dp, color = Color.Black.copy(alpha = 0.06f), shape = CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "搜索",
+                    tint = DSColors.inkGreen,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+
+        TextField(
+            value = searchKeyword,
+            onValueChange = onSearchChange,
+            singleLine = true,
+            textStyle = DSTypography.caption.copy(color = DSColors.inkGreen),
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = null,
+                    tint = DSColors.shadowGray,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
+            trailingIcon = {
+                if (searchKeyword.isNotBlank()) {
+                    IconButton(onClick = onClearSearch) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "清除搜索",
+                            tint = DSColors.shadowGray,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            },
+            placeholder = {
+                Text("搜索视频、教练或关键词", style = DSTypography.caption, color = DSColors.shadowGray)
+            },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = DSColors.cardWhite,
+                unfocusedContainerColor = DSColors.cardWhite,
+                disabledContainerColor = DSColors.cardWhite,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+            shape = RoundedCornerShape(18.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .border(width = 1.dp, color = Color.Black.copy(alpha = 0.06f), shape = RoundedCornerShape(18.dp)),
         )
     }
 }
@@ -147,19 +250,20 @@ private fun CategoryBar(
 @Composable
 private fun CategoryPill(label: String, selected: Boolean, onClick: () -> Unit) {
     val bg = if (selected) DSColors.fairway else DSColors.cardWhite
-    val fg = if (selected) Color.White else DSColors.inkGreen
-    val border = if (selected) DSColors.fairway else DSColors.borderLine
+    val fg = if (selected) Color.White else DSColors.inkGreen.copy(alpha = 0.7f)
+    val border = if (selected) Color.Transparent else Color.Black.copy(alpha = 0.06f)
     Text(
         text = label,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
         color = fg,
         modifier = Modifier
+            .shadow(if (selected) 3.dp else 0.dp, RoundedCornerShape(50))
             .clip(RoundedCornerShape(50))
-            .background(bg)
+            .background(if (selected) bg else DSColors.sandBeige)
             .border(width = 1.dp, color = border, shape = RoundedCornerShape(50))
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
     )
 }
 
@@ -205,4 +309,5 @@ private fun EmptyState(isLoading: Boolean) {
 
 /** 通过 video id 找到视频对象（详情页用） */
 fun findPlazaVideoById(id: UUID): V2PlazaVideo? =
-    V2PlazaStore.videos.value.firstOrNull { it.id == id }
+    V2PlazaStore.heroVideo.value?.takeIf { it.id == id }
+        ?: V2PlazaStore.videos.value.firstOrNull { it.id == id }

@@ -102,13 +102,22 @@ object V2PlazaStore {
     }
 
     fun toggleSave(videoId: UUID) {
-        val video = _videos.value.firstOrNull { it.id == videoId } ?: return
+        val video = _videos.value.firstOrNull { it.id == videoId }
+            ?: _heroVideo.value?.takeIf { it.id == videoId }
+            ?: return
         val saveKey = video.saveKey()
         val nowSaved = _savedIds.value.contains(saveKey)
         scope.launch {
             if (nowSaved) repo.unsave(saveKey) else repo.save(saveKey)
         }
         _videos.value = _videos.value.map { v ->
+            if (v.id != videoId) v
+            else v.copy(
+                isSaved = !nowSaved,
+                saveCount = if (!nowSaved) v.saveCount + 1 else (v.saveCount - 1).coerceAtLeast(0),
+            )
+        }
+        _heroVideo.value = _heroVideo.value?.let { v ->
             if (v.id != videoId) v
             else v.copy(
                 isSaved = !nowSaved,

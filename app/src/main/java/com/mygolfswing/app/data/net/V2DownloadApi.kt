@@ -8,7 +8,8 @@ import retrofit2.http.POST
 /**
  * download.mygolfai.com.cn 上的 REST 接口（积分 / 下载任务 / AI 透传）。
  *
- * 当前 Android 端实际只用到了 `credits/balance` 与 `ai/quota`，下载流程暂未接入。
+ * 下载流程对齐 iOS `CreditsBasedDownloadService`：
+ * start 冻结积分并返回视频信息，confirm 扣积分，cancel 返还冻结积分。
  */
 interface V2DownloadApi {
 
@@ -20,4 +21,13 @@ interface V2DownloadApi {
 
     @POST("ai/chat")
     suspend fun aiChat(@Body body: JsonObject): JsonObject
+
+    @POST("downloads/start")
+    suspend fun startDownload(@Body body: JsonObject): JsonObject
+
+    @POST("downloads/confirm")
+    suspend fun confirmDownload(@Body body: JsonObject): JsonObject
+
+    @POST("downloads/cancel")
+    suspend fun cancelDownload(@Body body: JsonObject): JsonObject
 }

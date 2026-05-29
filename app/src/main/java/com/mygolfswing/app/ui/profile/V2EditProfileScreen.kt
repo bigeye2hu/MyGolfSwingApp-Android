@@ -61,6 +61,7 @@ import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import androidx.compose.foundation.Image as FoundationImage
 
 /**
@@ -276,6 +277,7 @@ fun V2EditProfileScreen(
                 }
                 scope.launch {
                     saving = true
+                    val startYear = golfStartYear.toIntOrNull()
                     val r = ServiceLocator.authRepo.updateUserInfo(
                         nickname = nickname.trim(),
                         gender = gender,
@@ -283,8 +285,9 @@ fun V2EditProfileScreen(
                         location = location.ifBlank { null },
                         bio = bio.ifBlank { null },
                         handicap = handicap.ifBlank { null },
-                        golfStartYear = golfStartYear.toIntOrNull(),
-                        dominantHand = dominantHand,
+                        golfAge = startYear?.let { (LocalDate.now().year - it).coerceAtLeast(0) },
+                        golfStartYear = startYear,
+                        dominantHand = dominantHand.takeIf { it != "未设置" },
                         golfBrands = selectedBrands.toList(),
                     )
                     saving = false

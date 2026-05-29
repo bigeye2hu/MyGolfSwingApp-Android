@@ -17,10 +17,14 @@ import com.mygolfswing.app.ui.common.V2NavTopBar
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.memo.V2MemoSwingSessionCard
+import java.time.LocalDate
 
 /** 挥杆记录日历/列表（对齐 iOS `JustSwingCalendarView` 简化版） */
 @Composable
-fun V2JustSwingCalendarScreen(onBack: () -> Unit) {
+fun V2JustSwingCalendarScreen(
+    onBack: () -> Unit,
+    onOpenDay: (LocalDate) -> Unit,
+) {
     val sessions by V2SwingSessionStore.sessions.collectAsState()
     val dayItems by V2SwingSessionStore.allDayItems.collectAsState()
 
@@ -37,7 +41,7 @@ fun V2JustSwingCalendarScreen(onBack: () -> Unit) {
                 items(dayItems, key = { it.id }) { item ->
                     V2MemoSwingSessionCard(
                         item = item,
-                        onTap = {},
+                        onTap = { onOpenDay(item.day) },
                         modifier = Modifier.padding(horizontal = DSSpacing.lg, vertical = 6.dp),
                     )
                 }

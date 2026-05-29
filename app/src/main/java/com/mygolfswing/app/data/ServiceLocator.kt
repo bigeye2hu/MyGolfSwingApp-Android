@@ -11,8 +11,10 @@ import com.mygolfswing.app.data.repo.V2FeedbackRepository
 import com.mygolfswing.app.data.repo.V2GoalRepository
 import com.mygolfswing.app.data.repo.V2MemoRepository
 import com.mygolfswing.app.data.repo.V2GolfProfileRepository
+import com.mygolfswing.app.data.repo.V2ProfileCloudConsistencyAuditRepository
 import com.mygolfswing.app.data.repo.V2PlazaRepository
 import com.mygolfswing.app.data.repo.V2SwingSessionRepository
+import com.mygolfswing.app.data.repo.V2VideoDownloadRepository
 import com.mygolfswing.app.data.session.V2SessionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,11 +47,15 @@ object ServiceLocator {
         private set
     lateinit var feedbackRepo: V2FeedbackRepository
         private set
+    lateinit var videoDownloadRepo: V2VideoDownloadRepository
+        private set
     lateinit var swingRepo: V2SwingSessionRepository
         private set
     lateinit var golfProfileRepo: V2GolfProfileRepository
         private set
     lateinit var aiChatRepo: V2AIChatRepository
+        private set
+    lateinit var cloudConsistencyAuditRepo: V2ProfileCloudConsistencyAuditRepository
         private set
     lateinit var aiService: V2AIService
         private set
@@ -66,12 +72,14 @@ object ServiceLocator {
         authRepo = V2AuthRepository(net, session)
         creditsRepo = V2CreditsRepository(net, session)
         feedbackRepo = V2FeedbackRepository(net, session)
+        videoDownloadRepo = V2VideoDownloadRepository(net, session)
         goalRepo = V2GoalRepository(db.goals(), net, session, appScope)
-        memoRepo = V2MemoRepository(db.memos(), net, session, appScope)
+        memoRepo = V2MemoRepository(context.applicationContext, db.memos(), net, session, appScope)
         plazaRepo = V2PlazaRepository(db.plazaSaved(), net)
         swingRepo = V2SwingSessionRepository(db.swingSessions(), net)
         golfProfileRepo = V2GolfProfileRepository(db.golfProfile(), net, session)
         aiChatRepo = V2AIChatRepository(db.aiChat())
+        cloudConsistencyAuditRepo = V2ProfileCloudConsistencyAuditRepository(db.goals(), db.memos(), db.aiChat(), net, session)
         aiService = V2AIService(net, session)
     }
 }

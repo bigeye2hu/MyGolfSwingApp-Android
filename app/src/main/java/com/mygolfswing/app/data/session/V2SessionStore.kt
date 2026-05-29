@@ -44,6 +44,8 @@ class V2SessionStore(context: Context) {
             prefs.writeString(K_HANDICAP, session.handicap)
             prefs.writeString(K_HOME_COURSE, session.homeCourse)
             prefs.writeString(K_DOMINANT_HAND, session.dominantHand)
+            prefs.writeString(K_MEMBERSHIP_TIER, session.membershipTier)
+            session.golfAge?.let { prefs[K_GOLF_AGE] = it } ?: prefs.remove(K_GOLF_AGE)
             session.golfStartYear?.let { prefs[K_GOLF_START_YEAR] = it }
             prefs.writeString(K_GOLF_BRANDS, session.golfBrands.joinToString("|"))
             session.hasPassword?.let { prefs[K_HAS_PASSWORD] = it }
@@ -64,24 +66,102 @@ class V2SessionStore(context: Context) {
         dataStore.edit { it[K_CREDITS] = credits }
     }
 
+    suspend fun pendingDeletes(bucket: String, userId: String): Set<String> {
+        val key = pendingDeleteKey(bucket, userId)
+        return dataStore.data.first()[key]
+            ?.split("|")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+    }
+
+    suspend fun addPendingDelete(bucket: String, userId: String, id: String) {
+        val normalized = id.lowercase()
+        val key = pendingDeleteKey(bucket, userId)
+        dataStore.edit { prefs ->
+            val next = (prefs[key]
+                ?.split("|")
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.toSet()
+                ?: emptySet()) + normalized
+            prefs[key] = next.joinToString("|")
+        }
+    }
+
+    suspend fun removePendingDelete(bucket: String, userId: String, id: String) {
+        val normalized = id.lowercase()
+        val key = pendingDeleteKey(bucket, userId)
+        dataStore.edit { prefs ->
+            val next = (prefs[key]
+                ?.split("|")
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?.toSet()
+                ?: emptySet()) - normalized
+            if (next.isEmpty()) {
+                prefs.remove(key)
+            } else {
+                prefs[key] = next.joinToString("|")
+            }
+        }
+    }
+
     suspend fun logout() {
         dataStore.edit { it.clear() }
     }
 
     // ============ AI Provider ============
 
-    val aiProviderId: Flow<String?> = dataStore.data.map { it[K_AI_PROVIDER_ID] }
-    val aiApiKey: Flow<String?> = dataStore.data.map { it[K_AI_API_KEY] }
-    val aiBaseUrl: Flow<String?> = dataStore.data.map { it[K_AI_BASE_URL] }
-    val aiModel: Flow<String?> = dataStore.data.map { it[K_AI_MODEL] }
+    val aiProviderId: Flow<String?> = dataStore.data.map { prefs ->
+        prefs.readUserScopedString(K_AI_PROVIDER_ID.name) ?: prefs[K_AI_PROVIDER_ID]
+    }
+    val aiApiKey: Flow<String?> = dataStore.data.map { prefs ->
+        prefs.readUserScopedString(K_AI_API_KEY.name) ?: prefs[K_AI_API_KEY]
+    }
+    val aiBaseUrl: Flow<String?> = dataStore.data.map { prefs ->
+        prefs.readUserScopedString(K_AI_BASE_URL.name) ?: prefs[K_AI_BASE_URL]
+    }
+    val aiModel: Flow<String?> = dataStore.data.map { prefs ->
+        prefs.readUserScopedString(K_AI_MODEL.name) ?: prefs[K_AI_MODEL]
+    }
 
-    suspend fun setAIProvider(id: String, baseUrl: String?, apiKey: String?, model: String?) {
+    suspend fun setAIProvider(
+        id: String,
+        baseUrl: String?,
+        apiKey: String?,
+        model: String?,
+        verified: Boolean = true,
+    ) {
         dataStore.edit { prefs ->
-            prefs[K_AI_PROVIDER_ID] = id
-            baseUrl?.let { prefs[K_AI_BASE_URL] = it } ?: prefs.remove(K_AI_BASE_URL)
-            apiKey?.let { prefs[K_AI_API_KEY] = it } ?: prefs.remove(K_AI_API_KEY)
-            model?.let { prefs[K_AI_MODEL] = it } ?: prefs.remove(K_AI_MODEL)
+            prefs.writeAIString(K_AI_PROVIDER_ID, id)
+            prefs.writeAIString(K_AI_BASE_URL, baseUrl)
+            prefs.writeAIString(K_AI_MODEL, model)
+
+            if (id == "builtin") {
+                prefs.writeAIString(K_AI_API_KEY, null)
+                prefs.writeProviderVerified(id, true)
+            } else {
+                prefs.writeAIString(K_AI_API_KEY, apiKey)
+                apiKey?.takeIf { it.isNotBlank() }?.let { prefs.writeProviderApiKey(id, it) }
+                prefs.writeProviderVerified(id, verified && !apiKey.isNullOrBlank())
+            }
+
+            model?.takeIf { it.isNotBlank() }?.let { prefs.writeProviderModel(id, it) }
         }
+    }
+
+    suspend fun storedAIKey(providerId: String): String? =
+        dataStore.data.first().readProviderApiKey(providerId)
+
+    suspend fun storedAIModel(providerId: String): String? =
+        dataStore.data.first().readProviderModel(providerId)
+
+    suspend fun isAIProviderVerified(providerId: String): Boolean {
+        if (providerId == "builtin") return true
+        val prefs = dataStore.data.first()
+        return !prefs.readProviderApiKey(providerId).isNullOrBlank() && prefs.readProviderVerified(providerId)
     }
 
     companion object {
@@ -100,6 +180,8 @@ class V2SessionStore(context: Context) {
         private val K_HANDICAP = stringPreferencesKey("handicap")
         private val K_HOME_COURSE = stringPreferencesKey("homeCourse")
         private val K_DOMINANT_HAND = stringPreferencesKey("dominantHand")
+        private val K_MEMBERSHIP_TIER = stringPreferencesKey("membershipTier")
+        private val K_GOLF_AGE = intPreferencesKey("golfAge")
         private val K_GOLF_START_YEAR = intPreferencesKey("golfStartYear")
         private val K_GOLF_BRANDS = stringPreferencesKey("golfBrands")
         private val K_HAS_PASSWORD = booleanPreferencesKey("hasPassword")
@@ -109,6 +191,9 @@ class V2SessionStore(context: Context) {
         private val K_AI_API_KEY = stringPreferencesKey("ai_api_key")
         private val K_AI_BASE_URL = stringPreferencesKey("ai_base_url")
         private val K_AI_MODEL = stringPreferencesKey("ai_model")
+
+        fun pendingDeleteKey(bucket: String, userId: String): Preferences.Key<String> =
+            stringPreferencesKey("pending_delete_${bucket}_$userId")
     }
 }
 
@@ -128,6 +213,8 @@ data class V2Session(
     val handicap: String? = null,
     val homeCourse: String? = null,
     val dominantHand: String? = null,
+    val membershipTier: String? = null,
+    val golfAge: Int? = null,
     val golfStartYear: Int? = null,
     val golfBrands: List<String> = emptyList(),
     val hasPassword: Boolean? = null,
@@ -156,6 +243,8 @@ private fun Preferences.toSession(): V2Session = V2Session(
     handicap = readString(stringPreferencesKey("handicap")),
     homeCourse = readString(stringPreferencesKey("homeCourse")),
     dominantHand = readString(stringPreferencesKey("dominantHand")),
+    membershipTier = readString(stringPreferencesKey("membershipTier")),
+    golfAge = this[intPreferencesKey("golfAge")]?.takeIf { it > 0 },
     golfStartYear = this[intPreferencesKey("golfStartYear")]?.takeIf { it > 0 },
     golfBrands = readString(stringPreferencesKey("golfBrands"))?.split("|")?.filter { it.isNotBlank() } ?: emptyList(),
     hasPassword = this[booleanPreferencesKey("hasPassword")],
@@ -165,9 +254,70 @@ private fun Preferences.toSession(): V2Session = V2Session(
 private fun Preferences.readString(key: Preferences.Key<String>): String? =
     this[key]?.takeIf { it.isNotBlank() }
 
+private fun Preferences.readUserScopedString(baseKey: String): String? {
+    val userId = readString(stringPreferencesKey("userId")) ?: return null
+    return readString(stringPreferencesKey("${baseKey}_$userId"))
+}
+
+private fun Preferences.providerApiKeyKey(providerId: String): Preferences.Key<String>? {
+    val userId = readString(stringPreferencesKey("userId")) ?: return null
+    return stringPreferencesKey("ai_apikey_${userId}_$providerId")
+}
+
+private fun Preferences.providerModelKey(providerId: String): Preferences.Key<String>? {
+    val userId = readString(stringPreferencesKey("userId")) ?: return null
+    return stringPreferencesKey("ai_model_${userId}_$providerId")
+}
+
+private fun Preferences.providerVerifiedKey(providerId: String): Preferences.Key<Boolean>? {
+    val userId = readString(stringPreferencesKey("userId")) ?: return null
+    return booleanPreferencesKey("ai_verified_${userId}_$providerId")
+}
+
+private fun Preferences.readProviderApiKey(providerId: String): String? =
+    providerApiKeyKey(providerId)?.let { readString(it) }
+
+private fun Preferences.readProviderModel(providerId: String): String? =
+    providerModelKey(providerId)?.let { readString(it) }
+
+private fun Preferences.readProviderVerified(providerId: String): Boolean =
+    providerVerifiedKey(providerId)?.let { this[it] } == true
+
 private fun androidx.datastore.preferences.core.MutablePreferences.writeString(
     key: Preferences.Key<String>,
     value: String?,
 ) {
     if (value.isNullOrBlank()) remove(key) else this[key] = value
+}
+
+private fun androidx.datastore.preferences.core.MutablePreferences.writeAIString(
+    key: Preferences.Key<String>,
+    value: String?,
+) {
+    writeString(key, value)
+    val userId = readString(stringPreferencesKey("userId")) ?: return
+    writeString(stringPreferencesKey("${key.name}_$userId"), value)
+}
+
+private fun androidx.datastore.preferences.core.MutablePreferences.writeProviderApiKey(
+    providerId: String,
+    value: String,
+) {
+    providerApiKeyKey(providerId)?.let { writeString(it, value) }
+}
+
+private fun androidx.datastore.preferences.core.MutablePreferences.writeProviderModel(
+    providerId: String,
+    value: String,
+) {
+    providerModelKey(providerId)?.let { writeString(it, value) }
+}
+
+private fun androidx.datastore.preferences.core.MutablePreferences.writeProviderVerified(
+    providerId: String,
+    value: Boolean,
+) {
+    providerVerifiedKey(providerId)?.let {
+        if (value) this[it] = true else remove(it)
+    }
 }

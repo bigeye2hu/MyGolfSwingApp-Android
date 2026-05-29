@@ -46,6 +46,7 @@ import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2ProfileStore
+import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.data.store.V2UserProfile
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -71,10 +72,13 @@ fun V2ProfileScreen(
     onOpenFeedback: () -> Unit = {},
     onOpenTerms: () -> Unit = {},
     onOpenPrivacy: () -> Unit = {},
+    onOpenCloudAudit: () -> Unit = {},
+    onLogoutComplete: () -> Unit = {},
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
     val goals by V2GoalStore.goals.collectAsState()
     val memos by V2MemoStore.allMemos.collectAsState()
+    val swingSessions by V2SwingSessionStore.sessions.collectAsState()
     var confirmLogout by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     // 记住上一次的登录态，用于检测「刚退出」事件
@@ -95,12 +99,17 @@ fun V2ProfileScreen(
         }
     }
 
-    val activeGoals = goals.count { it.status.name == "ACTIVE" }
-    val completedGoals = goals.count { it.status.name == "COMPLETED" }
-    val videoMemoCount = memos.count {
+    val displayGoals = if (profile.isLoggedIn) goals.filterNot { it.title in demoGoalTitles } else emptyList()
+    val displayMemos = if (profile.isLoggedIn) memos.filterNot { it.displayTitle in demoMemoTitles || it.title in demoMemoTitles } else emptyList()
+    val activeGoals = displayGoals.count { it.status.name == "ACTIVE" }
+    val completedGoals = displayGoals.count { it.status.name == "COMPLETED" }
+    val videoMemoCount = displayMemos.count {
         it.kind == V2MemoKind.VIDEO || it.kind == V2MemoKind.MIXED
     }
-    val swingCount = memos.sumOf { (it.durationSec ?: 0.0).toInt() }
+    val swingCount = if (profile.isLoggedIn) swingSessions.sumOf { it.clips.size } else 0
+    val testAccounts = setOf("18851310088", "test1")
+    val isTestUser = profile.isLoggedIn &&
+        (profile.phone in testAccounts || profile.username.removePrefix("@") in testAccounts)
 
     Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
         Column(
@@ -142,9 +151,11 @@ fun V2ProfileScreen(
                 onAccountSecurityTap = {
                     if (!profile.isLoggedIn) onRequestLogin() else onOpenAccountSecurity()
                 },
+                onCloudAuditTap = onOpenCloudAudit,
                 onLogoutTap = {
                     if (profile.isLoggedIn) confirmLogout = true else onRequestLogin()
                 },
+                isTestUser = isTestUser,
             )
             Spacer(modifier = Modifier.padding(bottom = 24.dp))
         }
@@ -171,6 +182,7 @@ fun V2ProfileScreen(
                 TextButton(onClick = {
                     confirmLogout = false
                     V2ProfileStore.logout()
+                    onLogoutComplete()
                 }) {
                     Text("退出登录", color = DSColors.flagRed)
                 }
@@ -184,6 +196,21 @@ fun V2ProfileScreen(
     }
 
 }
+
+private val demoGoalTitles = setOf(
+    "用 7 号铁打 50 球",
+    "练习 40 分钟挥杆基础",
+    "推杆 5 米精度训练",
+    "每日复盘心法",
+)
+
+private val demoMemoTitles = setOf(
+    "握把压力的微调",
+    "推杆距离感的练习",
+    "教练点评：上杆速度",
+    "下杆节奏练习 · 7号铁",
+    "沙坑救球角度",
+)
 
 @Composable
 private fun Header() {
@@ -256,8 +283,8 @@ private fun GolfRecordCard(profile: V2UserProfile) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("高尔夫档案", style = DSTypography.titleMedium, color = DSColors.inkGreen)
-        RecordRow(label = "差点", value = profile.handicap)
-        RecordRow(label = "球龄", value = profile.golfYears)
+        RecordRow(label = "差点 Handicap", value = profile.handicap)
+        RecordRow(label = "球龄 Years", value = profile.golfYears)
         RecordRow(label = "惯用手", value = profile.dominantHand)
         RecordRow(label = "球杆品牌", value = profile.clubBrand)
     }

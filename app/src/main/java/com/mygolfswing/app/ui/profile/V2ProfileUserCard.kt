@@ -54,7 +54,7 @@ fun V2ProfileUserCard(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(DSSpacing.lg),
     ) {
-        AvatarBlock(avatarUrl = profile.avatar, onTap = onAvatarTap)
+        AvatarBlock(avatarUrl = profile.avatar, showVerified = profile.isLoggedIn, onTap = onAvatarTap)
 
         Column(
             modifier = Modifier.weight(1f),
@@ -87,7 +87,7 @@ fun V2ProfileUserCard(
 }
 
 @Composable
-private fun AvatarBlock(avatarUrl: String?, onTap: () -> Unit) {
+private fun AvatarBlock(avatarUrl: String?, showVerified: Boolean, onTap: () -> Unit) {
     Box(
         modifier = Modifier
             .size(85.dp)
@@ -128,10 +128,12 @@ private fun AvatarBlock(avatarUrl: String?, onTap: () -> Unit) {
                 }
             }
         }
-        VerifiedBadge(
-            modifier = Modifier
-                .align(Alignment.BottomEnd),
-        )
+        if (showVerified) {
+            VerifiedBadge(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd),
+            )
+        }
     }
 }
 

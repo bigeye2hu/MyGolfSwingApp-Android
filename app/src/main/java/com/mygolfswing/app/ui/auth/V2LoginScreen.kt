@@ -73,7 +73,7 @@ private enum class LoginMode { SMS, PASSWORD }
  */
 @Composable
 fun V2LoginScreen(
-    onClose: () -> Unit,
+    onClose: (() -> Unit)? = null,
     onLoginSuccess: () -> Unit,
     onOpenRegister: () -> Unit,
     onOpenResetPassword: () -> Unit,
@@ -172,7 +172,7 @@ fun V2LoginScreen(
 }
 
 @Composable
-private fun Hero(onClose: () -> Unit) {
+private fun Hero(onClose: (() -> Unit)?) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -183,15 +183,16 @@ private fun Hero(onClose: () -> Unit) {
                 ),
             ),
     ) {
-        // 右上角关闭按钮
-        TextButton(
-            onClick = onClose,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .v2StatusBarPadding()
-                .padding(top = 8.dp, end = 16.dp),
-        ) {
-            Text("跳过", color = DSColors.warmWhite, style = DSTypography.body)
+        if (onClose != null) {
+            TextButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .v2StatusBarPadding()
+                    .padding(top = 8.dp, end = 16.dp),
+            ) {
+                Text("关闭", color = DSColors.warmWhite, style = DSTypography.body)
+            }
         }
         Column(
             modifier = Modifier.align(Alignment.Center).padding(top = 24.dp),

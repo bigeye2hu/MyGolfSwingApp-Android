@@ -34,6 +34,12 @@ fun V2AIHistorySheet(onDismiss: () -> Unit) {
         )
         LazyColumn {
             item {
+                SessionRow("新建对话", selected = false) {
+                    V2AIChatStore.startNewSession()
+                    onDismiss()
+                }
+            }
+            item {
                 SessionRow("当前：${current.title}", selected = true) {}
             }
             items(sessions, key = { it.id }) { s ->

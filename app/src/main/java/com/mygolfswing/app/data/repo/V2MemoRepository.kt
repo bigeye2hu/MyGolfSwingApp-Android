@@ -1,8 +1,10 @@
 package com.mygolfswing.app.data.repo
 
+import android.content.Context
 import com.mygolfswing.app.data.db.MemoDao
 import com.mygolfswing.app.data.db.MemoEntity
 import com.mygolfswing.app.data.json.V2Json
+import com.mygolfswing.app.data.memo.V2MemoThumbnailStore
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoAccent
 import com.mygolfswing.app.data.model.V2MemoKind
@@ -22,6 +24,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -33,6 +36,7 @@ import java.util.UUID
  * Memo 仓库（对齐 iOS `VideoMemoCloudSyncService` + `InsightCardCloudSyncService`）。
  */
 class V2MemoRepository(
+    private val context: Context,
     private val dao: MemoDao,
     private val net: V2NetClient,
     private val session: V2SessionStore,
@@ -57,21 +61,9 @@ class V2MemoRepository(
         dao.delete(memoId)
         scope.launch {
             val uid = session.current().userId ?: return@launch
-            val action = if (memo?.kind == V2MemoKind.TEXT) "deleteInsightCard" else "deleteVideoMemo"
-            runCatching {
-                net.cloudApi.dataSync(
-                    JsonObject(
-                        mapOf(
-                            "action" to JsonPrimitive(action),
-                            "userId" to JsonPrimitive(uid),
-                            if (memo?.kind == V2MemoKind.TEXT) {
-                                "cardId" to JsonPrimitive(memoId)
-                            } else {
-                                "memoId" to JsonPrimitive(memoId)
-                            },
-                        ),
-                    ),
-                )
+            val bucket = if (memo?.kind == V2MemoKind.TEXT) BUCKET_INSIGHT_CARD else BUCKET_VIDEO_MEMO
+            if (!deleteCloudMemo(uid, memoId, bucket)) {
+                session.addPendingDelete(bucket, uid, memoId)
             }
         }
     }
@@ -80,15 +72,67 @@ class V2MemoRepository(
         dao.upsertAll(memos.map { encode(it, dirty = false) })
     }
 
+    suspend fun deleteLocalDemoMemos() = withContext(Dispatchers.IO) {
+        dao.getAll().forEach { row ->
+            val memo = runCatching { decode(row) }.getOrNull() ?: return@forEach
+            if (memo.isDemoMemo()) dao.delete(row.id)
+        }
+    }
+
     suspend fun pushDirty() = withContext(Dispatchers.IO) {
         dao.dirty().mapNotNull { runCatching { decode(it) }.getOrNull() }.forEach { pushSingle(it) }
     }
 
     suspend fun pullFromCloud(): Result<Int> = runCatching {
         val uid = session.current().userId ?: error("未登录")
+        flushPendingDeletes(uid)
         var merged = pullVideoMemos(uid)
         merged += pullInsightCards(uid)
+        recoverMissingThumbnails()
         merged
+    }
+
+    private suspend fun flushPendingDeletes(uid: String) {
+        flushPendingDeletes(uid, BUCKET_VIDEO_MEMO)
+        flushPendingDeletes(uid, BUCKET_INSIGHT_CARD)
+    }
+
+    private suspend fun flushPendingDeletes(uid: String, bucket: String) {
+        session.pendingDeletes(bucket, uid).forEach { id ->
+            if (deleteCloudMemo(uid, id, bucket)) {
+                session.removePendingDelete(bucket, uid, id)
+            }
+        }
+    }
+
+    private suspend fun deleteCloudMemo(uid: String, id: String, bucket: String): Boolean {
+        val isText = bucket == BUCKET_INSIGHT_CARD
+        val action = if (isText) "deleteInsightCard" else "deleteVideoMemo"
+        val idKey = if (isText) "cardId" else "memoId"
+        return runCatching {
+            val resp = net.cloudApi.dataSync(
+                JsonObject(
+                    mapOf(
+                        "action" to JsonPrimitive(action),
+                        "userId" to JsonPrimitive(uid),
+                        idKey to JsonPrimitive(id),
+                    ),
+                ),
+            )
+            resp.success
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 云同步后补齐缺失封面：遍历本地 memo，逐个尝试 thumb 文件 / 在线猜测 / 本地抽帧，
+     * 命中后写回 thumbnailUrl（dirty=false，不重复上传）。对齐 iOS 同步后的封面补齐。
+     */
+    suspend fun recoverMissingThumbnails() = withContext(Dispatchers.IO) {
+        dao.getAll().forEach { row ->
+            val memo = runCatching { decode(row) }.getOrNull() ?: return@forEach
+            val updated = V2MemoThumbnailStore.recoverThumbnail(context, memo) ?: return@forEach
+            dao.upsert(encode(updated, dirty = false))
+        }
     }
 
     private suspend fun pullVideoMemos(uid: String): Int {
@@ -97,6 +141,7 @@ class V2MemoRepository(
                 mapOf(
                     "action" to JsonPrimitive("getVideoMemos"),
                     "userId" to JsonPrimitive(uid),
+                    "includeDeleted" to JsonPrimitive(true),
                 ),
             ),
         )
@@ -105,6 +150,11 @@ class V2MemoRepository(
         var merged = 0
         for (element in list) {
             val cloud = element.jsonObject
+            val memoId = cloud["memoId"]?.jsonPrimitive?.contentOrNull
+            if (cloud["isDeleted"]?.jsonPrimitive?.booleanOrNull == true) {
+                applyCloudDeletedMemo(memoId, cloud)
+                continue
+            }
             val memo = parseCloudVideoMemo(cloud) ?: continue
             if (mergeIfNewer(memo, cloud)) merged++
         }
@@ -117,6 +167,7 @@ class V2MemoRepository(
                 mapOf(
                     "action" to JsonPrimitive("getInsightCards"),
                     "userId" to JsonPrimitive(uid),
+                    "includeDeleted" to JsonPrimitive(true),
                 ),
             ),
         )
@@ -125,10 +176,26 @@ class V2MemoRepository(
         var merged = 0
         for (element in list) {
             val cloud = element.jsonObject
+            val cardId = cloud["cardId"]?.jsonPrimitive?.contentOrNull
+            if (cloud["isDeleted"]?.jsonPrimitive?.booleanOrNull == true) {
+                applyCloudDeletedMemo(cardId, cloud)
+                continue
+            }
             val memo = parseCloudInsightCard(cloud) ?: continue
             if (mergeIfNewer(memo, cloud)) merged++
         }
         return merged
+    }
+
+    private suspend fun applyCloudDeletedMemo(id: String?, cloud: JsonObject) {
+        val normalizedId = id?.takeIf { it.isNotBlank() } ?: return
+        val localRow = dao.get(normalizedId) ?: return
+        val deletedAt = parseCloudMillis(cloud["deletedAt"])
+            ?: parseCloudMillis(cloud["updatedAt"])
+            ?: System.currentTimeMillis()
+        if (deletedAt >= localRow.updatedAt) {
+            dao.delete(normalizedId)
+        }
     }
 
     private suspend fun mergeIfNewer(memo: V2Memo, cloud: JsonObject): Boolean {
@@ -140,11 +207,21 @@ class V2MemoRepository(
         val localMemo = decode(localRow)
         val cloudUpdated = cloudUpdatedMillis(cloud)
         val localUpdated = localMemo.updatedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        if (cloudUpdated >= localUpdated) {
+        val shouldCorrectImportedTextTime = memo.kind == V2MemoKind.TEXT &&
+            !localRow.dirty &&
+            hasMeaningfullyDifferentCloudCreatedAt(localRow, cloud)
+        if (cloudUpdated >= localUpdated || shouldCorrectImportedTextTime) {
             dao.upsert(encode(memo, dirty = false))
             return true
         }
         return false
+    }
+
+    private fun hasMeaningfullyDifferentCloudCreatedAt(localRow: MemoEntity, cloud: JsonObject): Boolean {
+        val cloudCreated = parseCloudMillis(cloud["cardCreatedAt"])
+            ?: parseCloudMillis(cloud["createdAt"])
+            ?: return false
+        return kotlin.math.abs(localRow.createdAt - cloudCreated) > 60_000L
     }
 
     private fun parseCloudVideoMemo(o: JsonObject): V2Memo? {
@@ -176,6 +253,20 @@ class V2MemoRepository(
             plazaId != null -> V2MemoSource.PLAZA_SAVE
             else -> V2MemoSource.SELF_RECORD
         }
+        val cloudThumbUrl = firstString(
+            o,
+            "thumbnailUrl",
+            "thumbnailURL",
+            "thumbnail",
+            "coverUrl",
+            "coverURL",
+            "cover",
+            "pic",
+            "image",
+        )
+        val cloudThumbBase64Url = o["thumbnailBase64"]?.jsonPrimitive?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?.let { V2MemoThumbnailStore.saveFromBase64(context, id, it) }
         val base = if (body.isNotBlank()) {
             V2Memo.mixedMemo(displayTitle = title, body = body, videoUrl = videoUrl, durationSec = duration, tags = tags)
         } else {
@@ -190,6 +281,7 @@ class V2MemoRepository(
             isOnlineVideo = isOnline,
             platform = platform,
             plazaVideoId = plazaId,
+            thumbnailUrl = cloudThumbBase64Url ?: cloudThumbUrl ?: base.thumbnailUrl,
             pinState = if (o["isFavorite"]?.jsonPrimitive?.booleanOrNull == true) V2PinState.PINNED else V2PinState.NONE,
         )
     }
@@ -203,8 +295,12 @@ class V2MemoRepository(
         val summary = o["summary"]?.jsonPrimitive?.contentOrNull ?: ""
         val source = o["source"]?.jsonPrimitive?.contentOrNull ?: "manual"
         if (source == "welcome" || source == "tutorial") return null
-        val createdMs = parseCloudMillis(o["cardCreatedAt"]) ?: System.currentTimeMillis()
-        val updatedMs = parseCloudMillis(o["cardUpdatedAt"]) ?: createdMs
+        val updatedMs = parseCloudMillis(o["cardUpdatedAt"])
+            ?: parseCloudMillis(o["updatedAt"])
+            ?: System.currentTimeMillis()
+        val createdMs = parseCloudMillis(o["cardCreatedAt"])
+            ?: parseCloudMillis(o["createdAt"])
+            ?: updatedMs
         val createdAt = java.time.Instant.ofEpochMilli(createdMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val updatedAt = java.time.Instant.ofEpochMilli(updatedMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val tags = parseTagsJson(o["tagNames"]?.jsonPrimitive?.contentOrNull)
@@ -218,6 +314,19 @@ class V2MemoRepository(
             priorityRaw = priority,
             pinState = if (pinnedAt != null) V2PinState.PINNED else V2PinState.NONE,
         )
+    }
+
+    private fun V2Memo.isDemoMemo(): Boolean {
+        val title = title ?: displayTitle
+        val body = text.orEmpty()
+        return when (title) {
+            "握把压力的微调" -> body == "今天发现握把太用力会让手腕僵硬，松一点反而更顺。下次保持 6 分力试试。"
+            "推杆距离感的练习" -> body == "5 米推杆把节奏拉长，先 1 下半挥杆，再回正。今天命中率明显提升。"
+            "教练点评：上杆速度" -> body == "教练说上杆太快了，建议加一拍。回去录一段慢动作对比。"
+            "下杆节奏练习 · 7号铁" -> body == "录了 3 球。第 2 球节奏最稳，标记为 ⭐。"
+            "沙坑救球角度" -> body == "杆面打开 30°，瞄球后 5cm 落地，效果不错。"
+            else -> false
+        }
     }
 
     private fun parseTagsJson(raw: String?): List<String> = runCatching {
@@ -234,9 +343,14 @@ class V2MemoRepository(
     private fun parseCloudMillis(element: kotlinx.serialization.json.JsonElement?): Long? {
         if (element == null) return null
         return runCatching {
-            element.jsonPrimitive.longOrNull
-                ?: element.jsonPrimitive.contentOrNull?.toLongOrNull()
-                ?: java.time.Instant.parse(element.jsonPrimitive.contentOrNull).toEpochMilli()
+            when (element) {
+                is JsonObject -> element["\$date"]?.jsonPrimitive?.contentOrNull
+                    ?.let { java.time.Instant.parse(it).toEpochMilli() }
+                else -> element.jsonPrimitive.longOrNull
+                    ?: element.jsonPrimitive.doubleOrNull?.toLong()
+                    ?: element.jsonPrimitive.contentOrNull?.toLongOrNull()
+                    ?: java.time.Instant.parse(element.jsonPrimitive.contentOrNull).toEpochMilli()
+            }
         }.getOrNull()
     }
 
@@ -282,34 +396,39 @@ class V2MemoRepository(
         val isOnline = memo.isOnlineVideo
         val thumbPath = if (isOnline) null else memo.videoUrl?.removePrefix("file://")
         val thumbnailBase64 = V2VideoThumbnailUtil.jpegBase64ForUpload(thumbPath)
+        val remoteThumbnailUrl = memo.thumbnailUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
         return JsonObject(
-            mapOf(
-                "title" to JsonPrimitive(memo.displayTitle ?: memo.title ?: ""),
-                "memoDescription" to JsonPrimitive(memo.text ?: ""),
-                "trainingMethod" to JsonPrimitive(memo.trainingMethod ?: ""),
-                "parentCategoryId" to JsonPrimitive(""),
-                "subcategoryId" to JsonPrimitive(""),
-                "tags" to JsonPrimitive(tagsJson),
-                "category" to JsonPrimitive("training"),
-                "categoryId" to JsonPrimitive(""),
-                "customCategory" to JsonPrimitive(""),
-                "isFavorite" to JsonPrimitive(memo.isPinned),
-                "videoPath" to JsonPrimitive(memo.videoUrl ?: ""),
-                "originalURL" to JsonPrimitive(""),
-                "localFilePath" to JsonPrimitive(if (isOnline) "" else (memo.videoUrl ?: "")),
-                "fileSize" to JsonPrimitive(0),
-                "duration" to JsonPrimitive(memo.durationSec ?: 0.0),
-                "priority" to JsonPrimitive(0),
-                "memoCreatedDate" to JsonPrimitive(createdMs),
-                "lastModifiedDate" to JsonPrimitive(updatedMs),
-                "isOnlineVideo" to JsonPrimitive(isOnline),
-                "onlinePlayURL" to JsonPrimitive(if (isOnline) (memo.videoUrl ?: "") else ""),
-                "platform" to JsonPrimitive(memo.platform ?: ""),
-                "plazaVideoId" to JsonPrimitive(memo.plazaVideoId?.toString() ?: ""),
-                "photoLibraryAssetId" to JsonPrimitive(""),
-                "recordedLocationName" to JsonPrimitive(""),
-                "thumbnailBase64" to JsonPrimitive(thumbnailBase64),
-            ),
+            buildMap {
+                put("title", JsonPrimitive(memo.displayTitle ?: memo.title ?: ""))
+                put("memoDescription", JsonPrimitive(memo.text ?: ""))
+                put("trainingMethod", JsonPrimitive(memo.trainingMethod ?: ""))
+                put("parentCategoryId", JsonPrimitive(""))
+                put("subcategoryId", JsonPrimitive(""))
+                put("tags", JsonPrimitive(tagsJson))
+                put("category", JsonPrimitive("training"))
+                put("categoryId", JsonPrimitive(""))
+                put("customCategory", JsonPrimitive(""))
+                put("isFavorite", JsonPrimitive(memo.isPinned))
+                put("videoPath", JsonPrimitive(memo.videoUrl ?: ""))
+                put("originalURL", JsonPrimitive(""))
+                put("localFilePath", JsonPrimitive(if (isOnline) "" else (memo.videoUrl ?: "")))
+                put("fileSize", JsonPrimitive(0))
+                put("duration", JsonPrimitive(memo.durationSec ?: 0.0))
+                put("priority", JsonPrimitive(0))
+                put("memoCreatedDate", JsonPrimitive(createdMs))
+                put("lastModifiedDate", JsonPrimitive(updatedMs))
+                put("isOnlineVideo", JsonPrimitive(isOnline))
+                put("onlinePlayURL", JsonPrimitive(if (isOnline) (memo.videoUrl ?: "") else ""))
+                put("platform", JsonPrimitive(memo.platform ?: ""))
+                put("plazaVideoId", JsonPrimitive(memo.plazaVideoId?.toString() ?: ""))
+                put("photoLibraryAssetId", JsonPrimitive(""))
+                put("recordedLocationName", JsonPrimitive(""))
+                put("thumbnailBase64", JsonPrimitive(thumbnailBase64))
+                remoteThumbnailUrl?.let {
+                    put("thumbnailUrl", JsonPrimitive(it))
+                    put("thumbnailURL", JsonPrimitive(it))
+                }
+            },
         )
     }
 
@@ -354,5 +473,20 @@ class V2MemoRepository(
     private fun decode(row: MemoEntity): V2Memo {
         val obj = net.json.parseToJsonElement(row.memoJson).jsonObject
         return V2Json.decodeMemo(obj)
+    }
+
+    private fun firstString(o: JsonObject, vararg keys: String): String? {
+        for (key in keys) {
+            val value = runCatching {
+                o[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+            }.getOrNull()
+            if (value != null) return value
+        }
+        return null
+    }
+
+    private companion object {
+        const val BUCKET_VIDEO_MEMO = "videoMemo"
+        const val BUCKET_INSIGHT_CARD = "insightCard"
     }
 }

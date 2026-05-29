@@ -26,7 +26,7 @@ data class V2UserProfile(
     val credits: Int = 0,
     val handicap: String = "未设置",
     val golfYears: String = "未设置",
-    val dominantHand: String = "右手",
+    val dominantHand: String = "未设置",
     val clubBrand: String = "未设置",
     val gender: String = "保密",
     val birthday: String? = null,
@@ -62,11 +62,12 @@ object V2ProfileStore {
                     nickname = s.nickname ?: s.username ?: if (s.isLoggedIn) "高尔夫球友" else "未登录",
                     username = buildUsernameDisplay(s.username, s.phone, s.userId),
                     avatar = s.avatar,
-                    membershipTier = "普通会员",
+                    membershipTier = s.membershipTier?.takeIf { it.isNotBlank() }
+                        ?: if (s.isLoggedIn) "普通会员" else "游客",
                     credits = s.credits ?: 0,
-                    handicap = s.handicap?.takeIf { it.isNotBlank() } ?: "未设置",
-                    golfYears = formatGolfYears(s.golfStartYear),
-                    dominantHand = s.dominantHand?.takeIf { it.isNotBlank() } ?: "右手",
+                    handicap = formatHandicap(s.handicap),
+                    golfYears = formatGolfYears(s.golfStartYear, s.golfAge),
+                    dominantHand = s.dominantHand?.takeIf { it.isNotBlank() } ?: "未设置",
                     clubBrand = s.golfBrands.firstOrNull() ?: "未设置",
                     gender = s.gender?.takeIf { it.isNotBlank() } ?: "保密",
                     birthday = s.birthday,
@@ -115,11 +116,18 @@ object V2ProfileStore {
         return "@$raw"
     }
 
-    private fun formatGolfYears(startYear: Int?): String {
-        if (startYear == null || startYear < 1900) return "未设置"
+    private fun formatHandicap(handicap: String?): String {
+        val value = handicap?.takeIf { it.isNotBlank() }?.toDoubleOrNull() ?: return "—"
+        return "%.1f".format(value)
+    }
+
+    private fun formatGolfYears(startYear: Int?, golfAge: Int?): String {
+        if (startYear == null || startYear < 1900) {
+            return golfAge?.takeIf { it > 0 }?.let { "$it 年" } ?: "—"
+        }
         val years = LocalDate.now().year - startYear
-        if (years <= 0) return "新手"
-        return "${years} 年（${startYear} 起）"
+        if (years <= 0) return "—"
+        return "$years 年"
     }
 
     @Suppress("unused")

@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PrivacyTip
@@ -42,7 +43,9 @@ fun V2ProfileMoreList(
     onPrivacyPolicyTap: () -> Unit = {},
     onAccountSecurityTap: () -> Unit = {},
     onLogoutTap: () -> Unit = {},
+    onCloudAuditTap: () -> Unit = {},
     isLoggedIn: Boolean = true,
+    isTestUser: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -57,10 +60,41 @@ fun V2ProfileMoreList(
             onPrivacyPolicyTap = onPrivacyPolicyTap,
         )
         AccountSecurityCard(onTap = onAccountSecurityTap)
+        if (isTestUser) {
+            DeveloperToolsCard(onCloudAuditTap = onCloudAuditTap)
+        }
         if (isLoggedIn) {
             LogoutCard(onTap = onLogoutTap)
         } else {
             LoginEntryCard(onTap = onLogoutTap)
+        }
+    }
+}
+
+@Composable
+private fun DeveloperToolsCard(onCloudAuditTap: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(elevation = 8.dp, shape = RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(DSColors.cardWhite),
+    ) {
+        Text(
+            text = "开发者工具",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFFF39C12),
+            modifier = Modifier.padding(horizontal = DSSpacing.lg, vertical = DSSpacing.lg),
+        )
+        Row(modifier = Modifier.clickable { onCloudAuditTap() }) {
+            Item(
+                icon = Icons.Filled.CloudSync,
+                bg = DSColors.fairway,
+                title = "云端一致性",
+                subtitle = "检查本机与 dataSync 数据差异",
+                showDivider = false,
+            )
         }
     }
 }

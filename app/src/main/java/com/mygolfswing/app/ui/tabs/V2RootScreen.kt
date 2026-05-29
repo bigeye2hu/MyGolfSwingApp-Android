@@ -57,9 +57,13 @@ import com.mygolfswing.app.ui.plaza.V2PlazaPlayerScreen
 import com.mygolfswing.app.ui.plaza.V2PlazaScreen
 import com.mygolfswing.app.ui.profile.V2AIArchiveScreen
 import com.mygolfswing.app.ui.profile.V2EditProfileScreen
+import com.mygolfswing.app.ui.profile.V2ProfileCloudConsistencyAuditScreen
 import com.mygolfswing.app.ui.profile.V2ProfileScreen
 import com.mygolfswing.app.ui.swing.V2JustSwingCalendarScreen
+import com.mygolfswing.app.ui.swing.V2SwingDayDetailScreen
 import com.mygolfswing.app.ui.theme.MyGolfSwingAppAndroidTheme
+import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -79,6 +83,7 @@ private sealed class Destination {
     data object VideoMemoList : Destination()
     data object TextMemoList : Destination()
     data object SwingCalendar : Destination()
+    data class SwingDayDetail(val day: LocalDate) : Destination()
     data object JustSwingMain : Destination()
     data object OnlineVideoPicker : Destination()
     data object AIArchive : Destination()
@@ -89,6 +94,7 @@ private sealed class Destination {
     data object ChangePassword : Destination()
     data object StorageManagement : Destination()
     data object AIConfig : Destination()
+    data object CloudConsistencyAudit : Destination()
     data object Feedback : Destination()
     data class Legal(val type: V2LegalDocType) : Destination()
 }
@@ -112,14 +118,15 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         V2GolfProfileStore.startObserving()
         V2SwingSessionStore.startObserving()
         V2AIChatStore.loadPersisted()
-        V2PlazaStore.refresh()
+        V2MemoStore.deleteLocalDemoMemos()
         val session = ServiceLocator.session.current()
         if (session.isLoggedIn) {
             val userOk = ServiceLocator.authRepo.fetchUserInfo().isSuccess
             if (!userOk) {
                 ServiceLocator.authRepo.logout()
-                V2ProfileStore.refresh(force = true)
+                nav.resetTo(Destination.Login)
             } else {
+                V2PlazaStore.refresh()
                 V2GoalStore.syncFromCloud()
                 ServiceLocator.goalRepo.pushDirty()
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
@@ -127,8 +134,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 runCatching { V2GolfProfileStore.refreshFromCloud() }
             }
         } else {
-            if (V2GoalStore.goals.value.isEmpty()) V2GoalStore.resetWithMockData()
-            if (V2MemoStore.allMemos.value.isEmpty()) V2MemoStore.resetWithMockData()
+            nav.resetTo(Destination.Login)
         }
         bootstrapping = false
     }
@@ -138,7 +144,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         return
     }
 
-    V2BackHandler(enabled = nav.canGoBack) { nav.navigateBack() }
+    V2BackHandler(enabled = nav.canGoBack && nav.current != Destination.Login) { nav.navigateBack() }
 
     when (val d = nav.current) {
         Destination.Tabs -> TabsScaffold(
@@ -161,6 +167,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenVideoMemoList = { nav.navigateTo(Destination.VideoMemoList) },
             onOpenTextMemoList = { nav.navigateTo(Destination.TextMemoList) },
             onOpenSwingCalendar = { nav.navigateTo(Destination.SwingCalendar) },
+            onOpenSwingDay = { nav.navigateTo(Destination.SwingDayDetail(it)) },
             onOpenJustSwing = { nav.navigateTo(Destination.JustSwingMain) },
             onOpenAIArchive = { nav.navigateTo(Destination.AIArchive) },
             onOpenAIConfig = { nav.navigateTo(Destination.AIConfig) },
@@ -180,9 +187,15 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenEditProfile = { nav.navigateTo(Destination.EditProfile) },
             onOpenAccountSecurity = { nav.navigateTo(Destination.ChangePassword) },
             onOpenStorage = { nav.navigateTo(Destination.StorageManagement) },
+            onOpenCloudAudit = { nav.navigateTo(Destination.CloudConsistencyAudit) },
             onOpenFeedback = { nav.navigateTo(Destination.Feedback) },
             onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
             onOpenPrivacy = { nav.navigateTo(Destination.Legal(V2LegalDocType.PRIVACY)) },
+            onLogoutComplete = {
+                showQuickAdd = false
+                selectedTab = V2Tab.HOME
+                nav.resetTo(Destination.Login)
+            },
             modifier = modifier,
         )
         Destination.AllGoals -> V2AllGoalsScreen(
@@ -245,6 +258,11 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         )
         Destination.SwingCalendar -> V2JustSwingCalendarScreen(
             onBack = { nav.navigateBack() },
+            onOpenDay = { nav.navigateTo(Destination.SwingDayDetail(it)) },
+        )
+        is Destination.SwingDayDetail -> V2SwingDayDetailScreen(
+            day = d.day,
+            onBack = { nav.navigateBack() },
         )
         Destination.AIArchive -> V2AIArchiveScreen(
             onBack = { nav.navigateBack() },
@@ -263,12 +281,17 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             },
         )
         Destination.Login -> V2LoginScreen(
-            onClose = { nav.navigateBack() },
+            onClose = null,
             onLoginSuccess = {
                 nav.resetToRoot()
                 V2ProfileStore.refresh(force = true)
+                V2PlazaStore.refresh()
                 V2MemoStore.pullFromCloud()
                 V2GoalStore.syncFromCloud()
+                ServiceLocator.appScope.launch {
+                    ServiceLocator.creditsRepo.fetchBalance(force = true)
+                    runCatching { V2GolfProfileStore.refreshFromCloud() }
+                }
             },
             onOpenRegister = { nav.navigateTo(Destination.Register) },
             onOpenResetPassword = { nav.navigateTo(Destination.ResetPassword) },
@@ -283,8 +306,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         Destination.ResetPassword -> V2ResetPasswordScreen(
             onBack = { nav.navigateBack() },
             onResetSuccess = {
-                nav.resetToRoot()
-                V2ProfileStore.refresh(force = true)
+                nav.resetTo(Destination.Login)
             },
         )
         Destination.EditProfile -> V2EditProfileScreen(
@@ -302,6 +324,9 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onBack = { nav.navigateBack() },
         )
         Destination.AIConfig -> V2AIServiceConfigScreen(
+            onBack = { nav.navigateBack() },
+        )
+        Destination.CloudConsistencyAudit -> V2ProfileCloudConsistencyAuditScreen(
             onBack = { nav.navigateBack() },
         )
         Destination.Feedback -> V2FeedbackScreen(
@@ -344,6 +369,7 @@ private fun TabsScaffold(
     onOpenVideoMemoList: () -> Unit,
     onOpenTextMemoList: () -> Unit,
     onOpenSwingCalendar: () -> Unit,
+    onOpenSwingDay: (LocalDate) -> Unit,
     onOpenJustSwing: () -> Unit,
     onOpenAIArchive: () -> Unit,
     onOpenAIConfig: () -> Unit,
@@ -354,9 +380,11 @@ private fun TabsScaffold(
     onOpenEditProfile: () -> Unit,
     onOpenAccountSecurity: () -> Unit,
     onOpenStorage: () -> Unit,
+    onOpenCloudAudit: () -> Unit,
     onOpenFeedback: () -> Unit,
     onOpenTerms: () -> Unit,
     onOpenPrivacy: () -> Unit,
+    onLogoutComplete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -393,6 +421,7 @@ private fun TabsScaffold(
                     onOpenVideoList = onOpenVideoMemoList,
                     onOpenTextList = onOpenTextMemoList,
                     onOpenSwingCalendar = onOpenSwingCalendar,
+                    onOpenSwingDay = onOpenSwingDay,
                     onOpenJustSwing = onOpenJustSwing,
                     onOpenAllMemos = onOpenAllMemos,
                     onSwitchToAI = onSwitchToAI,
@@ -414,6 +443,8 @@ private fun TabsScaffold(
                     onOpenFeedback = onOpenFeedback,
                     onOpenTerms = onOpenTerms,
                     onOpenPrivacy = onOpenPrivacy,
+                    onOpenCloudAudit = onOpenCloudAudit,
+                    onLogoutComplete = onLogoutComplete,
                 )
             }
         }

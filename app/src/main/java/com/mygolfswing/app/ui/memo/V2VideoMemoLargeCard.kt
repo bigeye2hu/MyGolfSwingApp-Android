@@ -24,12 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.ui.designsystem.DSColors
 
@@ -57,13 +55,10 @@ fun V2VideoMemoLargeCard(
             modifier = Modifier
                 .width(72.dp)
                 .fillMaxHeight()
-                .clip(RoundedCornerShape(10.dp))
-                .background(DSColors.deepGreen),
+                .clip(RoundedCornerShape(10.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            memo.thumbnailUrl?.let {
-                AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-            }
+            V2MemoThumbnail(memo = memo, modifier = Modifier.fillMaxSize())
             Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
             memo.durationSec?.takeIf { it > 0 }?.let { sec ->
                 val t = sec.toInt()

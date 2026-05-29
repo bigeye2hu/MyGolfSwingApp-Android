@@ -141,6 +141,7 @@ class V2AuthRepository(
         location: String? = null,
         bio: String? = null,
         handicap: String? = null,
+        golfAge: Int? = null,
         golfStartYear: Int? = null,
         homeCourse: String? = null,
         dominantHand: String? = null,
@@ -158,6 +159,7 @@ class V2AuthRepository(
             put("location", location)
             put("bio", bio)
             put("handicap", handicap)
+            put("golfAge", golfAge)
             put("golfStartYear", golfStartYear)
             put("homeCourse", homeCourse)
             put("dominantHand", dominantHand)
@@ -175,6 +177,7 @@ class V2AuthRepository(
                 location = location ?: s.location,
                 bio = bio ?: s.bio,
                 handicap = handicap ?: s.handicap,
+                golfAge = golfAge ?: s.golfAge,
                 golfStartYear = golfStartYear ?: s.golfStartYear,
                 homeCourse = homeCourse ?: s.homeCourse,
                 dominantHand = dominantHand ?: s.dominantHand,
@@ -270,6 +273,31 @@ private fun JsonObject.stringField(vararg keys: String): String? {
     return null
 }
 
+private fun JsonObject.intField(vararg keys: String): Int? {
+    for (key in keys) {
+        val primitive = this[key]?.jsonPrimitive ?: continue
+        val value = primitive.intOrNull ?: primitive.contentOrNull?.trim()?.toIntOrNull()
+        if (value != null) return value
+    }
+    return null
+}
+
+private fun JsonObject.stringListField(vararg keys: String): List<String> {
+    for (key in keys) {
+        val value = this[key] ?: continue
+        val list = when (value) {
+            is JsonArray -> value.mapNotNull { it.jsonPrimitive.contentOrNull?.trim()?.takeIf { text -> text.isNotBlank() } }
+            else -> value.jsonPrimitive.contentOrNull
+                ?.split("|", ",")
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+        }
+        if (list.isNotEmpty()) return list
+    }
+    return emptyList()
+}
+
 private fun JsonObject.toSession(): V2Session = V2Session(
     userId = stringField("userId"),
     userSig = stringField("userSig"),
@@ -284,10 +312,12 @@ private fun JsonObject.toSession(): V2Session = V2Session(
     location = this["location"]?.jsonPrimitive?.contentOrNull,
     bio = this["bio"]?.jsonPrimitive?.contentOrNull,
     handicap = this["handicap"]?.jsonPrimitive?.contentOrNull,
-    homeCourse = this["homeCourse"]?.jsonPrimitive?.contentOrNull,
-    dominantHand = this["dominantHand"]?.jsonPrimitive?.contentOrNull,
-    golfStartYear = this["golfStartYear"]?.jsonPrimitive?.intOrNull,
-    golfBrands = this["golfBrands"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList(),
+    golfAge = intField("golfAge", "golf_age"),
+    homeCourse = stringField("homeCourse", "home_course"),
+    dominantHand = stringField("dominantHand", "dominant_hand"),
+    membershipTier = stringField("membershipTier", "memberTier", "memberLevel", "membershipLevel", "vipLevel"),
+    golfStartYear = intField("golfStartYear", "golf_start_year"),
+    golfBrands = stringListField("golfBrands", "golf_brands"),
     hasPassword = this["hasPassword"]?.jsonPrimitive?.booleanOrNull,
 )
 
@@ -302,10 +332,13 @@ private fun V2Session.mergedWith(data: JsonObject): V2Session = copy(
     location = data["location"]?.jsonPrimitive?.contentOrNull ?: location,
     bio = data["bio"]?.jsonPrimitive?.contentOrNull ?: bio,
     handicap = data["handicap"]?.jsonPrimitive?.contentOrNull ?: handicap,
-    homeCourse = data["homeCourse"]?.jsonPrimitive?.contentOrNull ?: homeCourse,
-    dominantHand = data["dominantHand"]?.jsonPrimitive?.contentOrNull ?: dominantHand,
-    golfStartYear = data["golfStartYear"]?.jsonPrimitive?.intOrNull ?: golfStartYear,
-    golfBrands = data["golfBrands"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: golfBrands,
+    golfAge = data.intField("golfAge", "golf_age") ?: golfAge,
+    homeCourse = data.stringField("homeCourse", "home_course") ?: homeCourse,
+    dominantHand = data.stringField("dominantHand", "dominant_hand") ?: dominantHand,
+    membershipTier = data.stringField("membershipTier", "memberTier", "memberLevel", "membershipLevel", "vipLevel")
+        ?: membershipTier,
+    golfStartYear = data.intField("golfStartYear", "golf_start_year") ?: golfStartYear,
+    golfBrands = data.stringListField("golfBrands", "golf_brands").takeIf { it.isNotEmpty() } ?: golfBrands,
     hasPassword = data["hasPassword"]?.jsonPrimitive?.booleanOrNull ?: hasPassword,
 )
 

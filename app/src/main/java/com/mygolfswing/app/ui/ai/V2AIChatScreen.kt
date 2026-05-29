@@ -18,7 +18,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.HistoryEdu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -52,6 +52,10 @@ fun V2AIChatScreen(
 ) {
     val session by V2AIChatStore.currentSession.collectAsState()
     val status by V2AIChatStore.statusBar.collectAsState()
+    val providerName by V2AIChatStore.providerName.collectAsState()
+    val modelName by V2AIChatStore.modelName.collectAsState()
+    val modelDisplay by V2AIChatStore.modelDisplay.collectAsState()
+    val requestOpenConfig by V2AIChatStore.requestOpenConfig.collectAsState()
     var draft by remember { mutableStateOf("") }
     var showHistory by remember { mutableStateOf(false) }
 
@@ -61,6 +65,12 @@ fun V2AIChatScreen(
             listState.animateScrollToItem(session.messages.size - 1)
         }
     }
+    LaunchedEffect(requestOpenConfig) {
+        if (requestOpenConfig) {
+            onOpenConfig()
+            V2AIChatStore.consumeOpenConfigRequest()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -68,13 +78,16 @@ fun V2AIChatScreen(
             .background(DSColors.warmWhite),
     ) {
         AIChatTopBar(
-            modelLabel = "${V2AIChatStore.provider.providerName} · ${V2AIChatStore.provider.modelName}",
-            onNew = { V2AIChatStore.startNewSession() },
+            modelLabel = modelDisplay,
+            onClose = {
+                V2AIChatStore.triggerReflectionIfNeeded()
+                onSwitchToHome()
+            },
             onHistory = { showHistory = true },
             onConfig = onOpenConfig,
         )
 
-        ProviderPill(provider = V2AIChatStore.provider.providerName, model = V2AIChatStore.provider.modelName)
+        ProviderPill(provider = providerName, model = modelName)
 
         LazyColumn(
             modifier = Modifier
@@ -114,7 +127,7 @@ fun V2AIChatScreen(
 @Composable
 private fun AIChatTopBar(
     modelLabel: String,
-    onNew: () -> Unit,
+    onClose: () -> Unit,
     onHistory: () -> Unit,
     onConfig: () -> Unit,
 ) {
@@ -126,15 +139,15 @@ private fun AIChatTopBar(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleIconBtn(icon = Icons.Filled.Add, onClick = onNew, tint = DSColors.fairway)
+        CircleIconBtn(icon = Icons.Filled.Close, onClick = onClose, tint = DSColors.shadowGray)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .padding(horizontal = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            horizontalAlignment = Alignment.Start,
         ) {
-            Text("AI 教练", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
-            Text(modelLabel, fontSize = 10.sp, color = DSColors.shadowGray)
+            Text("AI 教练", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
+            Text("你的专属高尔夫小高 · $modelLabel", fontSize = 11.sp, color = DSColors.shadowGray, maxLines = 1)
         }
         CircleIconBtn(icon = Icons.Filled.HistoryEdu, onClick = onHistory, tint = DSColors.fairway)
         CircleIconBtn(icon = Icons.Filled.Settings, onClick = onConfig, tint = DSColors.fairway)

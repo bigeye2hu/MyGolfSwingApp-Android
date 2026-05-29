@@ -26,14 +26,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.mygolfswing.app.data.model.V2Memo
-import com.mygolfswing.app.data.model.V2MemoThumbnailKind
 import com.mygolfswing.app.ui.designsystem.DSColors
 
 /** 视频笔记横滑卡（对齐 iOS `V2MemoMixedCard`，210×161） */
@@ -53,20 +50,10 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                 .border(0.5.dp, DSColors.borderLine, RoundedCornerShape(14.dp)),
         ) {
             Box(modifier = Modifier.width(thumbW).fillMaxHeight()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(thumbnailGradient(memo.thumbnailKind)),
-                ) {
-                    memo.thumbnailUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                        AsyncImage(
-                            model = url,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
+                V2MemoThumbnail(
+                    memo = memo,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -181,16 +168,4 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
             )
         }
     }
-}
-
-private fun thumbnailGradient(kind: V2MemoThumbnailKind): Brush {
-    val (a, b) = when (kind) {
-        V2MemoThumbnailKind.FAIRWAY -> Color(0xFF2D6A4F) to Color(0xFF95D5B2)
-        V2MemoThumbnailKind.SAND -> Color(0xFFC8930B) to Color(0xFFF6E2B3)
-        V2MemoThumbnailKind.GREEN_GRASS -> Color(0xFF52B788) to Color(0xFFD8F3DC)
-        V2MemoThumbnailKind.SUNSET -> Color(0xFFC0392B) to Color(0xFFF6B26B)
-        V2MemoThumbnailKind.MIST -> Color(0xFF6C757D) to Color(0xFFCED4DA)
-        V2MemoThumbnailKind.FOREST -> Color(0xFF1B4332) to Color(0xFF2D6A4F)
-    }
-    return Brush.linearGradient(listOf(a, b))
 }

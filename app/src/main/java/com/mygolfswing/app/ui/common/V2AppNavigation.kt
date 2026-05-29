@@ -34,6 +34,11 @@ class V2AppNavigation<D : Any>(private val root: D) {
         backStack = emptyList()
     }
 
+    fun resetTo(destination: D) {
+        current = destination
+        backStack = emptyList()
+    }
+
     val canGoBack: Boolean get() = current != root
 }
 

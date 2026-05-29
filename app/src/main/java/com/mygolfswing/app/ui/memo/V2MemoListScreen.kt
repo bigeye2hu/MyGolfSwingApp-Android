@@ -19,9 +19,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.data.store.V2GolfProfileStore
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
+import java.time.LocalDate
 import java.util.UUID
 
 private const val ROW_PREVIEW_LIMIT = 6
@@ -38,6 +40,7 @@ fun V2MemoListScreen(
     onOpenVideoList: () -> Unit,
     onOpenTextList: () -> Unit,
     onOpenSwingCalendar: () -> Unit,
+    onOpenSwingDay: (LocalDate) -> Unit = { onOpenSwingCalendar() },
     onOpenJustSwing: () -> Unit = onOpenSwingCalendar,
     onOpenAllMemos: () -> Unit,
     onSwitchToAI: () -> Unit = {},
@@ -50,6 +53,7 @@ fun V2MemoListScreen(
     val totalCount = remember(allMemos) { V2MemoStore.totalCount }
     val swingItems by V2SwingSessionStore.dayItems.collectAsState()
     val totalSwingClips = remember(swingItems) { V2SwingSessionStore.totalClipCount }
+    val golfProfile by V2GolfProfileStore.profile.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -63,6 +67,10 @@ fun V2MemoListScreen(
         item {
             V2MemoHomeAIInsightCard(
                 memoSampleCount = totalCount,
+                statusSummary = golfProfile.statusSummary,
+                currentFocus = golfProfile.currentFocus.firstOrNull()?.content,
+                painPoint = golfProfile.painPoints.firstOrNull()?.content,
+                trainingGoal = golfProfile.trainingGoals.firstOrNull(),
                 onContinueChat = onSwitchToAI,
             )
         }
@@ -152,7 +160,7 @@ fun V2MemoListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     swingItems.forEach { item ->
-                        V2MemoSwingSessionCard(item = item, onTap = onOpenSwingCalendar)
+                        V2MemoSwingSessionCard(item = item, onTap = { onOpenSwingDay(item.day) })
                     }
                 }
             }

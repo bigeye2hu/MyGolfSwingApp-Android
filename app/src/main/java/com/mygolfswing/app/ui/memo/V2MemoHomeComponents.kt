@@ -17,12 +17,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Note
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
@@ -136,7 +136,7 @@ fun V2MemoSectionEmptyCard(kind: V2MemoSectionEmptyKind, onTap: () -> Unit) {
             listOf(Color(0xFFE8E3D6), Color(0xFFEDE9DE), Color(0xFFE4DFD2)),
         )
         V2MemoSectionEmptyKind.TEXT -> Quintuple(
-            Icons.Filled.Note,
+            Icons.AutoMirrored.Filled.Note,
             "还没有随手记",
             "打完球随手写下感受和心得",
             "写下第一条 →",
@@ -172,8 +172,28 @@ fun V2MemoSectionEmptyCard(kind: V2MemoSectionEmptyKind, onTap: () -> Unit) {
 private data class Quintuple<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
 @Composable
-fun V2MemoHomeAIInsightCard(memoSampleCount: Int, onContinueChat: () -> Unit) {
+fun V2MemoHomeAIInsightCard(
+    memoSampleCount: Int,
+    statusSummary: String?,
+    currentFocus: String?,
+    painPoint: String?,
+    trainingGoal: String?,
+    onContinueChat: () -> Unit,
+) {
     val empty = memoSampleCount == 0
+    val title = when {
+        empty -> "开始记录，解锁 AI 洞察"
+        !currentFocus.isNullOrBlank() -> "当前重点：$currentFocus"
+        !trainingGoal.isNullOrBlank() -> "训练目标：$trainingGoal"
+        !statusSummary.isNullOrBlank() -> "AI 已更新训练洞察"
+        else -> "继续积累训练样本"
+    }
+    val body = when {
+        empty -> "写下或录制几条 Memo 后，AI 会结合你的练习内容给出个性化建议。"
+        !statusSummary.isNullOrBlank() -> statusSummary
+        !painPoint.isNullOrBlank() -> "最近可以优先关注「$painPoint」。继续记录视频和随手记，AI 会帮你更新训练重点。"
+        else -> "你最近记录了 $memoSampleCount 条训练内容。继续保持记录节奏，AI 档案会随着聊天和 Memo 自动沉淀。"
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -204,18 +224,14 @@ fun V2MemoHomeAIInsightCard(memoSampleCount: Int, onContinueChat: () -> Unit) {
             )
         }
         Text(
-            text = if (empty) "开始记录，解锁 AI 洞察" else "本周训练节奏不错",
+            text = title,
             fontSize = 20.sp,
             fontWeight = FontWeight.SemiBold,
             color = DSColors.inkGreen,
             modifier = Modifier.padding(top = 12.dp),
         )
         Text(
-            text = if (empty) {
-                "写下或录制几条 Memo 后，AI 会结合你的练习内容给出个性化建议。"
-            } else {
-                "你最近记录了 $memoSampleCount 条训练内容。继续保持节奏，重点可以放在下杆时机与推杆距离感。"
-            },
+            text = body,
             fontSize = 14.sp,
             color = Color(0xFF6C757D),
             lineHeight = 22.sp,
@@ -319,6 +335,6 @@ fun V2MemoHomeFooter(totalCount: Int, onViewAll: () -> Unit) {
 /** Section 图标预设 */
 object V2MemoHomeIcons {
     val videoNotes = Icons.Filled.PlayCircle
-    val textNotes = Icons.Filled.Note
+    val textNotes = Icons.AutoMirrored.Filled.Note
     val swingRecords = Icons.Filled.Videocam
 }

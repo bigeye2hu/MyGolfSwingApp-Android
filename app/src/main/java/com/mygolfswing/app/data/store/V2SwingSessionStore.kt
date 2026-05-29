@@ -33,6 +33,12 @@ object V2SwingSessionStore {
 
     val totalClipCount: Int get() = _sessions.value.sumOf { it.clips.size }
 
+    fun clipsForDay(day: LocalDate): List<V2SwingClip> =
+        _sessions.value
+            .filter { it.date == day }
+            .flatMap { it.clips }
+            .sortedBy { it.timestamp }
+
     @Volatile private var collecting = false
 
     fun startObserving() {

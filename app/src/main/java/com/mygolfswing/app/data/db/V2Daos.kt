@@ -48,6 +48,9 @@ interface MemoDao {
     @Query("SELECT * FROM v2_memo WHERE dirty = 1")
     suspend fun dirty(): List<MemoEntity>
 
+    @Query("SELECT * FROM v2_memo ORDER BY updatedAt DESC")
+    suspend fun getAll(): List<MemoEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: MemoEntity)
 

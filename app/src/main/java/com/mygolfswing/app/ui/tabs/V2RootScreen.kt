@@ -62,6 +62,7 @@ import com.mygolfswing.app.ui.profile.V2ProfileScreen
 import com.mygolfswing.app.ui.swing.V2JustSwingCalendarScreen
 import com.mygolfswing.app.ui.swing.V2SwingDayDetailScreen
 import com.mygolfswing.app.ui.theme.MyGolfSwingAppAndroidTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.util.UUID
@@ -111,6 +112,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
     var pendingOnlinePick by remember { mutableStateOf<V2OnlineVideoSelection?>(null) }
 
     LaunchedEffect(Unit) {
+        val splashStartedAt = System.currentTimeMillis()
         V2GoalStore.startObserving()
         V2MemoStore.startObserving()
         V2PlazaStore.startObserving()
@@ -136,6 +138,8 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         } else {
             nav.resetTo(Destination.Login)
         }
+        val remainingSplashMs = 1_500L - (System.currentTimeMillis() - splashStartedAt)
+        if (remainingSplashMs > 0) delay(remainingSplashMs)
         bootstrapping = false
     }
 

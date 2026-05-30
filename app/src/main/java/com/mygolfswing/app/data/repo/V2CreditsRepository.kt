@@ -17,7 +17,7 @@ class V2CreditsRepository(
     private val session: V2SessionStore,
 ) {
 
-    @Volatile private var lastFetchAt: Long = 0L
+    private val lastFetchAtByUser = mutableMapOf<String, Long>()
     private val cacheTtlMs: Long = 5 * 60 * 1000
 
     /**
@@ -29,7 +29,7 @@ class V2CreditsRepository(
         val uid = session.current().userId ?: return null
         @Suppress("UNUSED_VARIABLE") val _uid = uid
         val now = System.currentTimeMillis()
-        if (!force && now - lastFetchAt < cacheTtlMs) {
+        if (!force && now - (lastFetchAtByUser[uid] ?: 0L) < cacheTtlMs) {
             return session.current().credits
         }
         return runCatching {
@@ -38,13 +38,13 @@ class V2CreditsRepository(
                 ?: resp["credits_balance"]?.jsonPrimitive?.intOrNull
                 ?: 0
             session.updateCredits(available)
-            lastFetchAt = System.currentTimeMillis()
+            lastFetchAtByUser[uid] = System.currentTimeMillis()
             available
         }.getOrNull()
     }
 
     /** 注销时强制清缓存 */
     fun reset() {
-        lastFetchAt = 0L
+        lastFetchAtByUser.clear()
     }
 }

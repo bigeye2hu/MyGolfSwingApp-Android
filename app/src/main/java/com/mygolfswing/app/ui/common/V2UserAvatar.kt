@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.common
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,19 +15,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.mygolfswing.app.R
 import com.mygolfswing.app.ui.designsystem.DSColors
 
-/** 注册页预设头像 key → emoji（与 [com.mygolfswing.app.ui.auth] 一致） */
-private val presetAvatarEmoji = mapOf(
-    "xiaoqie" to "🐧",
-    "koala" to "🐨",
-    "fox" to "🦊",
-    "bear" to "🐻",
-    "dino" to "🦖",
+/** 注册页预设头像 key → drawable（与 iOS `DefaultAvatars` 一致） */
+private val presetAvatarDrawable = mapOf(
+    "xiaoqie" to R.drawable.avatar_xiaoqie,
+    "koala" to R.drawable.avatar_xiaokaola,
+    "fox" to R.drawable.avatar_xiaohuli,
+    "bear" to R.drawable.avatar_xiaoxiong,
+    "dino" to R.drawable.avatar_konglong,
 )
 
 private fun isRemoteAvatarUrl(avatar: String?): Boolean {
@@ -35,7 +38,7 @@ private fun isRemoteAvatarUrl(avatar: String?): Boolean {
 }
 
 /**
- * 用户头像：远程 URL → Coil；预设 key → emoji；否则占位图标（对齐 iOS 头像 3 级回退）。
+ * 用户头像：远程 URL → Coil；预设 key → 本地头像；否则占位图标（对齐 iOS 头像 3 级回退）。
  */
 @Composable
 fun V2UserAvatar(
@@ -60,9 +63,14 @@ fun V2UserAvatar(
                 )
             }
             else -> {
-                val emoji = avatar?.trim()?.let { presetAvatarEmoji[it] }
-                if (emoji != null) {
-                    Text(text = emoji, fontSize = emojiFontSize)
+                val drawable = avatar?.trim()?.let { presetAvatarDrawable[it] }
+                if (drawable != null) {
+                    Image(
+                        painter = painterResource(drawable),
+                        contentDescription = "头像",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
                 } else {
                     Icon(
                         imageVector = Icons.Filled.Person,

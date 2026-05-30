@@ -18,9 +18,10 @@ import androidx.room.PrimaryKey
 
 // ============ Goal ============
 
-@Entity(tableName = "v2_goal")
+@Entity(tableName = "v2_goal", indices = [Index(value = ["ownerUserId", "updatedAt"])])
 data class GoalEntity(
     @PrimaryKey val id: String,
+    val ownerUserId: String,
     val goalJson: String,
     val status: String,
     val priority: String,
@@ -33,9 +34,10 @@ data class GoalEntity(
 
 // ============ Memo ============
 
-@Entity(tableName = "v2_memo", indices = [Index(value = ["updatedAt"])])
+@Entity(tableName = "v2_memo", indices = [Index(value = ["ownerUserId", "updatedAt"])])
 data class MemoEntity(
     @PrimaryKey val id: String,
+    val ownerUserId: String,
     val memoJson: String,
     val kind: String,
     val topic: String,
@@ -47,9 +49,10 @@ data class MemoEntity(
 
 // ============ AI Chat ============
 
-@Entity(tableName = "v2_ai_session")
+@Entity(tableName = "v2_ai_session", indices = [Index(value = ["ownerUserId", "updatedAt"])])
 data class AISessionEntity(
     @PrimaryKey val id: String,
+    val ownerUserId: String,
     val title: String,
     val updatedAt: Long,
 )
@@ -64,10 +67,14 @@ data class AISessionEntity(
             onDelete = ForeignKey.CASCADE,
         ),
     ],
-    indices = [Index(value = ["sessionId", "createdAt"])],
+    indices = [
+        Index(value = ["ownerUserId", "sessionId", "createdAt"]),
+        Index(value = ["sessionId"]),
+    ],
 )
 data class AIMessageEntity(
     @PrimaryKey val id: String,
+    val ownerUserId: String,
     val sessionId: String,
     val role: String,
     val text: String,
@@ -77,9 +84,14 @@ data class AIMessageEntity(
 
 // ============ Plaza 收藏 ============
 
-@Entity(tableName = "v2_plaza_saved")
+@Entity(
+    tableName = "v2_plaza_saved",
+    primaryKeys = ["userId", "videoId"],
+    indices = [Index(value = ["userId", "savedAt"])],
+)
 data class PlazaSavedEntity(
-    @PrimaryKey val videoId: String,
+    val userId: String,
+    val videoId: String,
     val savedAt: Long,
 )
 

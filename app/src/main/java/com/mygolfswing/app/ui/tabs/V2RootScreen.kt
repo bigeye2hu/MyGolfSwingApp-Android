@@ -125,6 +125,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         if (session.isLoggedIn) {
             val userOk = ServiceLocator.authRepo.fetchUserInfo().isSuccess
             if (!userOk) {
+                V2ProfileStore.resetUserScopedCaches()
                 ServiceLocator.authRepo.logout()
                 nav.resetTo(Destination.Login)
             } else {
@@ -299,18 +300,37 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             },
             onOpenRegister = { nav.navigateTo(Destination.Register) },
             onOpenResetPassword = { nav.navigateTo(Destination.ResetPassword) },
+            onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
+            onOpenPrivacy = { nav.navigateTo(Destination.Legal(V2LegalDocType.PRIVACY)) },
         )
         Destination.Register -> V2RegisterScreen(
             onBack = { nav.navigateBack() },
             onRegisterSuccess = {
                 nav.resetToRoot()
                 V2ProfileStore.refresh(force = true)
+                V2PlazaStore.refresh()
+                V2MemoStore.pullFromCloud()
+                V2GoalStore.syncFromCloud()
+                ServiceLocator.appScope.launch {
+                    ServiceLocator.creditsRepo.fetchBalance(force = true)
+                    runCatching { V2GolfProfileStore.refreshFromCloud() }
+                }
             },
+            onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
+            onOpenPrivacy = { nav.navigateTo(Destination.Legal(V2LegalDocType.PRIVACY)) },
         )
         Destination.ResetPassword -> V2ResetPasswordScreen(
             onBack = { nav.navigateBack() },
             onResetSuccess = {
-                nav.resetTo(Destination.Login)
+                nav.resetToRoot()
+                V2ProfileStore.refresh(force = true)
+                V2PlazaStore.refresh()
+                V2MemoStore.pullFromCloud()
+                V2GoalStore.syncFromCloud()
+                ServiceLocator.appScope.launch {
+                    ServiceLocator.creditsRepo.fetchBalance(force = true)
+                    runCatching { V2GolfProfileStore.refreshFromCloud() }
+                }
             },
         )
         Destination.EditProfile -> V2EditProfileScreen(
@@ -414,6 +434,7 @@ private fun TabsScaffold(
                     onOpenGoalDetail = onOpenGoalDetail,
                     onSwitchToPlaza = { onSelectTab(V2Tab.PLAZA) },
                     onSwitchToMemo = { onSelectTab(V2Tab.MEMO) },
+                    onOpenMemo = onOpenMemoDetail,
                     onOpenPlazaVideo = onOpenPlazaVideo,
                     onAddTap = onShowQuickAdd,
                 )

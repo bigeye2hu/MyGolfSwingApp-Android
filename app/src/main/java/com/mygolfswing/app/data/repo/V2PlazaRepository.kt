@@ -9,7 +9,10 @@ import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
@@ -39,7 +42,12 @@ class V2PlazaRepository(
     private val net: V2NetClient,
     private val session: V2SessionStore,
 ) {
-    val savedIds: Flow<Set<String>> = savedDao.observe().map { it.map { e -> e.videoId }.toSet() }
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val savedIds: Flow<Set<String>> = session.state.flatMapLatest { current ->
+        val uid = current.userId.orEmpty()
+        if (uid.isBlank()) return@flatMapLatest flowOf(emptySet())
+        savedDao.observe(uid).map { it.map { e -> e.videoId }.toSet() }
+    }
 
     private var cachedCategories: List<V2PlazaCategoryChip> = emptyList()
     private val coachNameCache = mutableMapOf<String, String>()
@@ -97,11 +105,13 @@ class V2PlazaRepository(
     }
 
     suspend fun save(videoId: String) = withContext(Dispatchers.IO) {
-        savedDao.save(PlazaSavedEntity(videoId, System.currentTimeMillis()))
+        val uid = session.current().userId ?: return@withContext
+        savedDao.save(PlazaSavedEntity(uid, videoId, System.currentTimeMillis()))
     }
 
     suspend fun unsave(videoId: String) = withContext(Dispatchers.IO) {
-        savedDao.remove(videoId)
+        val uid = session.current().userId ?: return@withContext
+        savedDao.remove(videoId, uid)
     }
 
     private fun decodeVideo(o: JsonObject): V2PlazaVideo {

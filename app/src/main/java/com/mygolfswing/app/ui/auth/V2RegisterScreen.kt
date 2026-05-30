@@ -1,5 +1,7 @@
 package com.mygolfswing.app.ui.auth
 
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,9 +23,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -35,12 +45,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
-import com.mygolfswing.app.ui.common.V2NavTopBarCentered
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -56,26 +69,31 @@ import kotlinx.coroutines.launch
  * - 密码（至少 8 位，含字母 + 数字）
  * - 确认密码
  */
-private data class PresetAvatar(val key: String, val emoji: String, val name: String)
+private data class PresetAvatar(val key: String, @DrawableRes val drawable: Int, val name: String)
 
 private val presetAvatars = listOf(
-    PresetAvatar("xiaoqie", "🐧", "小切"),
-    PresetAvatar("koala", "🐨", "考拉"),
-    PresetAvatar("fox", "🦊", "狐狸"),
-    PresetAvatar("bear", "🐻", "小熊"),
-    PresetAvatar("dino", "🦖", "恐龙"),
+    PresetAvatar("xiaoqie", R.drawable.avatar_xiaoqie, "小切"),
+    PresetAvatar("koala", R.drawable.avatar_xiaokaola, "考拉"),
+    PresetAvatar("fox", R.drawable.avatar_xiaohuli, "狐狸"),
+    PresetAvatar("bear", R.drawable.avatar_xiaoxiong, "小熊"),
+    PresetAvatar("dino", R.drawable.avatar_konglong, "恐龙"),
 )
 
 @Composable
 fun V2RegisterScreen(
     onBack: () -> Unit,
     onRegisterSuccess: () -> Unit,
+    onOpenTerms: () -> Unit,
+    onOpenPrivacy: () -> Unit,
 ) {
     var avatarKey by remember { mutableStateOf<String?>(null) }
     var username by remember { mutableStateOf("") }
     var nickname by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+    var pwVisible by remember { mutableStateOf(false) }
+    var confirmPwVisible by remember { mutableStateOf(false) }
+    var agreed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -86,25 +104,19 @@ fun V2RegisterScreen(
             .background(DSColors.warmWhite)
             .verticalScroll(rememberScrollState()),
     ) {
-        V2NavTopBarCentered(title = "创建账户", onBack = onBack)
+        Hero(onBack = onBack)
 
-        Column(
+        AuthCard(
             modifier = Modifier
                 .padding(horizontal = DSSpacing.lg)
-                .padding(top = 4.dp, bottom = 40.dp)
-                .fillMaxWidth()
-                .background(DSColors.cardWhite, RoundedCornerShape(20.dp))
-                .padding(DSSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .offset(y = (-40).dp),
         ) {
-            Text("选择头像", style = DSTypography.bodyBold, color = DSColors.inkGreen)
+            AuthFieldLabel("选择头像", required = true)
             AvatarPicker(
                 selectedKey = avatarKey,
                 onPick = { p ->
                     avatarKey = p.key
-                    if (nickname.isBlank()) {
-                        nickname = "${p.name}${(1000..9999).random()}"
-                    }
+                    nickname = "${p.name}${(0..9999).random().toString().padStart(4, '0')}"
                 },
             )
 
@@ -112,8 +124,9 @@ fun V2RegisterScreen(
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it; error = null },
-                    placeholder = { Text("例：golfer_lee") },
+                    placeholder = { Text("字母开头，3-20位字母/数字/下划线") },
                     singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
@@ -122,8 +135,9 @@ fun V2RegisterScreen(
                 OutlinedTextField(
                     value = nickname,
                     onValueChange = { nickname = it; error = null },
-                    placeholder = { Text("展示给球友的名字") },
+                    placeholder = { Text("选择头像后自动生成，也可自定义") },
                     singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
@@ -134,7 +148,18 @@ fun V2RegisterScreen(
                     onValueChange = { password = it; error = null },
                     placeholder = { Text("设置登录密码") },
                     singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp),
+                    visualTransformation = if (pwVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = AuthPalette.placeholder) },
+                    trailingIcon = {
+                        IconButton(onClick = { pwVisible = !pwVisible }) {
+                            Icon(
+                                if (pwVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                contentDescription = null,
+                                tint = AuthPalette.placeholder,
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
@@ -145,7 +170,18 @@ fun V2RegisterScreen(
                     onValueChange = { confirmPassword = it; error = null },
                     placeholder = { Text("再次输入密码") },
                     singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(12.dp),
+                    visualTransformation = if (confirmPwVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = AuthPalette.placeholder) },
+                    trailingIcon = {
+                        IconButton(onClick = { confirmPwVisible = !confirmPwVisible }) {
+                            Icon(
+                                if (confirmPwVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                contentDescription = null,
+                                tint = AuthPalette.placeholder,
+                            )
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
@@ -155,12 +191,25 @@ fun V2RegisterScreen(
                 Text(error!!, color = DSColors.flagRed, style = DSTypography.caption)
             }
 
-            Button(
+            AuthAgreementRow(
+                agreed = agreed,
+                onAgreedChange = { agreed = it; error = null },
+                onOpenTerms = onOpenTerms,
+                onOpenPrivacy = onOpenPrivacy,
+            )
+
+            AuthPrimaryButton(
+                text = "创建账户",
+                loading = loading,
                 onClick = {
+                    if (!agreed) {
+                        error = "请先阅读并同意服务条款和隐私政策"
+                        return@AuthPrimaryButton
+                    }
                     val v = validate(avatarKey, username, nickname, password, confirmPassword)
                     if (v != null) {
                         error = v
-                        return@Button
+                        return@AuthPrimaryButton
                     }
                     scope.launch {
                         loading = true
@@ -175,24 +224,7 @@ fun V2RegisterScreen(
                             .onFailure { error = it.message ?: "注册失败" }
                     }
                 },
-                enabled = !loading,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DSColors.fairway,
-                    contentColor = DSColors.warmWhite,
-                ),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) {
-                if (loading) {
-                    CircularProgressIndicator(
-                        color = DSColors.warmWhite,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                } else {
-                    Text("创建账户", style = DSTypography.bodyBold)
-                }
-            }
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -204,6 +236,39 @@ fun V2RegisterScreen(
                     Text("立即登录", color = DSColors.fairway, style = DSTypography.bodyBold)
                 }
             }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun Hero(onBack: () -> Unit) {
+    AuthHeroBackground(height = 280.dp, bottomFadeHeight = 80.dp) {
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 54.dp, start = 20.dp)
+                .background(DSColors.warmWhite.copy(alpha = 0.18f), CircleShape)
+                .border(1.dp, DSColors.warmWhite.copy(alpha = 0.3f), CircleShape),
+        ) {
+            Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = DSColors.warmWhite)
+        }
+        Text(
+            "创建账户",
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 64.dp),
+            color = DSColors.warmWhite,
+            style = DSTypography.bodyBold,
+        )
+        Column(
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 90.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AuthLogoBadge(size = 72.dp, imageSize = 54.dp, rainbow = false)
+            Spacer(Modifier.height(10.dp))
+            Text("挥呗", color = DSColors.warmWhite, style = DSTypography.titleLarge.copy(fontSize = 28.sp))
+            Spacer(Modifier.height(4.dp))
+            Text("开始你的挥呗高尔夫成长之旅", color = DSColors.warmWhite.copy(alpha = 0.82f), style = DSTypography.caption)
         }
     }
 }
@@ -232,7 +297,14 @@ private fun AvatarPicker(selectedKey: String?, onPick: (PresetAvatar) -> Unit) {
                         .clickable { onPick(a) },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(a.emoji, fontSize = 28.sp)
+                    Image(
+                        painter = painterResource(a.drawable),
+                        contentDescription = a.name,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop,
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -248,7 +320,7 @@ private fun AvatarPicker(selectedKey: String?, onPick: (PresetAvatar) -> Unit) {
 @Composable
 private fun LabeledField(label: String, hint: String?, content: @Composable () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = DSTypography.bodyBold, color = DSColors.inkGreen)
+        AuthFieldLabel(label, required = label == "用户名" || label == "密码")
         content()
         if (hint != null) {
             Text(hint, style = DSTypography.caption, color = DSColors.shadowGray)
@@ -259,6 +331,9 @@ private fun LabeledField(label: String, hint: String?, content: @Composable () -
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = DSColors.fairway,
+    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
+    focusedContainerColor = AuthPalette.inputBg,
+    unfocusedContainerColor = AuthPalette.inputBg,
     cursorColor = DSColors.fairway,
 )
 

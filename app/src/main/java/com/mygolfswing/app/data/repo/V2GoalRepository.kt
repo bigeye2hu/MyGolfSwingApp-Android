@@ -8,7 +8,10 @@ import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -17,6 +20,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
@@ -37,43 +41,43 @@ class V2GoalRepository(
     private val session: V2SessionStore,
     private val scope: CoroutineScope,
 ) {
-    /** 本地全量 Flow（按 updatedAt 倒序） */
+    /** 当前用户本地 Flow（按 updatedAt 倒序）；未登录时不暴露任何历史数据。 */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeAll(): Flow<List<V2Goal>> =
-        dao.observeAll().map { rows ->
-            rows.mapNotNull { row -> runCatching { decode(row) }.getOrNull() }
+        session.state.flatMapLatest { current ->
+            val uid = current.userId.orEmpty()
+            if (uid.isBlank()) return@flatMapLatest flowOf(emptyList())
+            dao.observeAll(uid).map { rows ->
+                rows.mapNotNull { row -> runCatching { decode(row) }.getOrNull() }
+            }
         }
 
     suspend fun get(id: String): V2Goal? = withContext(Dispatchers.IO) {
-        dao.get(id)?.let { runCatching { decode(it) }.getOrNull() }
+        val uid = session.current().userId ?: return@withContext null
+        dao.get(id, uid)?.let { runCatching { decode(it) }.getOrNull() }
     }
 
     /** 创建 / 更新（标记为 dirty，后台异步推云） */
     suspend fun upsert(goal: V2Goal, pushToCloud: Boolean = true) = withContext(Dispatchers.IO) {
-        val entity = encode(goal, dirty = pushToCloud)
+        val uid = session.current().userId ?: return@withContext
+        val entity = encode(goal, ownerUserId = uid, dirty = pushToCloud)
         dao.upsert(entity)
         if (pushToCloud) scope.launch { pushSingle(goal) }
     }
 
     suspend fun delete(goalId: String) = withContext(Dispatchers.IO) {
-        dao.delete(goalId)
+        val uid = session.current().userId ?: return@withContext
+        dao.delete(goalId, uid)
         scope.launch {
-            val uid = session.current().userId ?: return@launch
-            runCatching {
-                net.cloudApi.dataSync(
-                    JsonObject(
-                        mapOf(
-                            "action" to JsonPrimitive("deleteV2Goal"),
-                            "userId" to JsonPrimitive(uid),
-                            "goalId" to JsonPrimitive(goalId),
-                        ),
-                    ),
-                )
+            if (!deleteCloudGoal(uid, goalId)) {
+                session.addPendingDelete(BUCKET_V2_GOAL, uid, goalId)
             }
         }
     }
 
     suspend fun bulkReplaceLocal(goals: List<V2Goal>) = withContext(Dispatchers.IO) {
-        dao.upsertAll(goals.map { encode(it, dirty = false) })
+        val uid = session.current().userId ?: return@withContext
+        dao.upsertAll(goals.map { encode(it, ownerUserId = uid, dirty = false) })
     }
 
     // ============ 云同步 ============
@@ -96,21 +100,25 @@ class V2GoalRepository(
      */
     suspend fun syncFromCloud(): Result<Int> = runCatching {
         val uid = session.current().userId ?: error("未登录")
+        flushPendingDeletes(uid)
         val resp = net.cloudApi.dataSync(
             JsonObject(
                 mapOf(
                     "action" to JsonPrimitive("getV2Goals"),
                     "userId" to JsonPrimitive(uid),
+                    "includeDeleted" to JsonPrimitive(true),
                 ),
             ),
         )
         if (!resp.success) error(resp.error ?: "拉取目标失败")
 
-        val cloudEntities = parseCloudGoalEntities(resp.data)
-        Log.i(TAG, "getV2Goals: parsed ${cloudEntities.size} goals for userId=${uid.take(8)}…")
+        val cloudRows = goalRowArray(resp.data).mapNotNull { it as? JsonObject }
+        val deletedCloudById = deletedGoalMap(cloudRows)
+        val cloudEntities = parseCloudGoalEntities(cloudRows.filterNot { isDeletedRow(it) }, ownerUserId = uid)
+        Log.i(TAG, "getV2Goals: parsed ${cloudEntities.size} active goals, ${deletedCloudById.size} deleted for userId=${uid.take(8)}…")
 
         withContext(Dispatchers.IO) {
-            mergeCloudGoals(cloudEntities)
+            mergeCloudGoals(uid, cloudEntities, deletedCloudById)
             cloudEntities.size
         }
     }
@@ -118,9 +126,13 @@ class V2GoalRepository(
     /** @deprecated 请用 [syncFromCloud] */
     suspend fun pullFromCloud(): Result<Int> = syncFromCloud()
 
-    private suspend fun mergeCloudGoals(cloudEntities: List<GoalEntity>) {
+    private suspend fun mergeCloudGoals(
+        ownerUserId: String,
+        cloudEntities: List<GoalEntity>,
+        deletedCloudById: Map<String, Long>,
+    ) {
         val cloudById = cloudEntities.associateBy { it.id }
-        val localRows = dao.all()
+        val localRows = dao.all(ownerUserId)
         val localById = localRows.associateBy { it.id }
 
         val toUpsert = mutableListOf<GoalEntity>()
@@ -145,34 +157,39 @@ class V2GoalRepository(
                 toDelete.add(local.id)
                 continue
             }
+            val deletedAt = deletedCloudById[local.id]
+            if (deletedAt != null) {
+                if (deletedAt >= local.updatedAt) {
+                    toDelete.add(local.id)
+                } else if (local.dirty) {
+                    goal?.let { toUpload.add(it) }
+                }
+                continue
+            }
             if (local.dirty) {
-                goal?.let { toUpload.add(it) }
-            } else {
                 goal?.let { toUpload.add(it) }
             }
         }
 
-        toDelete.forEach { dao.delete(it) }
+        toDelete.forEach { dao.delete(it, ownerUserId) }
         if (toUpsert.isNotEmpty()) dao.upsertAll(toUpsert)
 
         // 登录态下移除演示 mock（避免与 iOS 同步的真实目标混显）
-        dao.all().filter { row ->
+        dao.all(ownerUserId).filter { row ->
             runCatching { decode(row).title }.getOrNull() in demoGoalTitles
-        }.forEach { dao.delete(it.id) }
+        }.forEach { dao.delete(it.id, ownerUserId) }
 
         toUpload.distinctBy { it.id }.forEach { pushSingle(it) }
     }
 
-    private fun parseCloudGoalEntities(data: JsonElement?): List<GoalEntity> {
-        val list = goalRowArray(data)
-        return list.mapNotNull { element ->
-            runCatching { cloudRowToEntity(element.jsonObject) }
+    private fun parseCloudGoalEntities(rows: List<JsonObject>, ownerUserId: String): List<GoalEntity> =
+        rows.mapNotNull { row ->
+            runCatching { cloudRowToEntity(row, ownerUserId) }
                 .onFailure { e ->
                     Log.w(TAG, "decode cloud goal row failed: ${e.message}")
                 }
                 .getOrNull()
         }
-    }
 
     private fun goalRowArray(data: JsonElement?): JsonArray = when (data) {
         is JsonArray -> data
@@ -182,13 +199,30 @@ class V2GoalRepository(
         else -> JsonArray(emptyList())
     }
 
-    private fun cloudRowToEntity(o: JsonObject): GoalEntity {
+    private fun isDeletedRow(row: JsonObject): Boolean =
+        row["isDeleted"]?.jsonPrimitive?.booleanOrNull == true
+
+    private fun deletedGoalMap(rows: List<JsonObject>): Map<String, Long> = buildMap {
+        rows.filter(::isDeletedRow).forEach { row ->
+            val id = row["goalId"]?.jsonPrimitive?.contentOrNull
+                ?: row["id"]?.jsonPrimitive?.contentOrNull
+                ?: return@forEach
+            val deletedAt = epochMillisFromElement(row["deletedAt"])
+                ?: epochMillisFromElement(row["updatedAt"])
+                ?: System.currentTimeMillis()
+            val existing = this[id]
+            if (existing == null || deletedAt > existing) put(id, deletedAt)
+        }
+    }
+
+    private fun cloudRowToEntity(o: JsonObject, ownerUserId: String): GoalEntity {
         val (goalObj, goalJsonStored) = parseGoalJsonFromRow(o)
         val goal = V2Json.decodeGoal(goalObj)
         val updatedAt = epochMillisFromElement(o["updatedAt"])
             ?: goal.updatedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         return GoalEntity(
             id = goal.id.toString(),
+            ownerUserId = ownerUserId,
             goalJson = goalJsonStored,
             status = goal.status.name.lowercase(),
             priority = goal.priority.name.lowercase(),
@@ -256,7 +290,7 @@ class V2GoalRepository(
     /** 把本地所有 dirty 的目标推送到云端 */
     suspend fun pushDirty(): Result<Int> = runCatching {
         val uid = session.current().userId ?: error("未登录")
-        val rows = withContext(Dispatchers.IO) { dao.dirty() }
+        val rows = withContext(Dispatchers.IO) { dao.dirty(uid) }
         var ok = 0
         rows.forEach { row ->
             runCatching {
@@ -272,7 +306,7 @@ class V2GoalRepository(
                         ),
                     ),
                 )
-                withContext(Dispatchers.IO) { dao.markClean(row.id) }
+                withContext(Dispatchers.IO) { dao.markClean(row.id, uid) }
                 ok += 1
             }
         }
@@ -295,16 +329,38 @@ class V2GoalRepository(
                     ),
                 ),
             )
-            withContext(Dispatchers.IO) { dao.markClean(goal.id.toString()) }
+            withContext(Dispatchers.IO) { dao.markClean(goal.id.toString(), uid) }
         }
     }
 
+    private suspend fun flushPendingDeletes(uid: String) {
+        session.pendingDeletes(BUCKET_V2_GOAL, uid).forEach { id ->
+            if (deleteCloudGoal(uid, id)) {
+                session.removePendingDelete(BUCKET_V2_GOAL, uid, id)
+            }
+        }
+    }
+
+    private suspend fun deleteCloudGoal(uid: String, goalId: String): Boolean = runCatching {
+        val resp = net.cloudApi.dataSync(
+            JsonObject(
+                mapOf(
+                    "action" to JsonPrimitive("deleteV2Goal"),
+                    "userId" to JsonPrimitive(uid),
+                    "goalId" to JsonPrimitive(goalId),
+                ),
+            ),
+        )
+        resp.success
+    }.getOrDefault(false)
+
     // ============ 编解码 ============
 
-    private fun encode(goal: V2Goal, dirty: Boolean): GoalEntity {
+    private fun encode(goal: V2Goal, ownerUserId: String, dirty: Boolean): GoalEntity {
         val jsonObj = V2Json.encodeGoal(goal)
         return GoalEntity(
             id = goal.id.toString(),
+            ownerUserId = ownerUserId,
             goalJson = net.json.encodeToString(JsonObject.serializer(), jsonObj),
             status = goal.status.name.lowercase(),
             priority = goal.priority.name.lowercase(),
@@ -323,5 +379,6 @@ class V2GoalRepository(
 
     private companion object {
         const val TAG = "V2GoalRepository"
+        const val BUCKET_V2_GOAL = "v2Goal"
     }
 }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.intOrNull
@@ -62,6 +63,7 @@ object V2AIChatStore {
     val statusBar: StateFlow<String?> = _statusBar.asStateFlow()
 
     private var streamJob: Job? = null
+    @Volatile private var observingSession = false
 
     val isReplying: Boolean get() = streamJob?.isActive == true
 
@@ -71,12 +73,25 @@ object V2AIChatStore {
     )
 
     fun loadPersisted() {
+        if (observingSession) return
+        observingSession = true
         scope.launch {
-            refreshConfigState()
-            val list = runCatching { ServiceLocator.aiChatRepo.loadAllSessions() }.getOrDefault(emptyList())
-            if (list.isNotEmpty()) {
-                _currentSession.value = list.first()
-                _sessions.value = list.drop(1)
+            ServiceLocator.session.state.collect { session ->
+                streamJob?.cancel()
+                _statusBar.value = null
+                _requestOpenConfig.value = false
+                refreshConfigState()
+                if (!session.isLoggedIn) {
+                    resetInMemory()
+                    return@collect
+                }
+                val list = runCatching { ServiceLocator.aiChatRepo.loadAllSessions() }.getOrDefault(emptyList())
+                if (list.isNotEmpty()) {
+                    _currentSession.value = list.first()
+                    _sessions.value = list.drop(1)
+                } else {
+                    resetInMemory()
+                }
             }
         }
     }
@@ -92,6 +107,14 @@ object V2AIChatStore {
     }
 
     fun consumeOpenConfigRequest() {
+        _requestOpenConfig.value = false
+    }
+
+    fun resetInMemory() {
+        streamJob?.cancel()
+        _sessions.value = emptyList()
+        _currentSession.value = V2AISession(title = "新对话", messages = listOf(welcomeMessage()))
+        _statusBar.value = null
         _requestOpenConfig.value = false
     }
 

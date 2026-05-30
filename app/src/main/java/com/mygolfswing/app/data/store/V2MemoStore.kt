@@ -24,6 +24,10 @@ object V2MemoStore {
     private val _allMemos = MutableStateFlow<List<V2Memo>>(emptyList())
     val allMemos: StateFlow<List<V2Memo>> = _allMemos.asStateFlow()
 
+    fun resetInMemory() {
+        _allMemos.value = emptyList()
+    }
+
     @Volatile private var collecting = false
 
     fun startObserving() {

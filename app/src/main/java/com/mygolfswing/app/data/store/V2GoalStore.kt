@@ -36,6 +36,10 @@ object V2GoalStore {
 
     private val memoStore = V2MemoStore
 
+    fun resetInMemory() {
+        _goals.value = emptyList()
+    }
+
     /**
      * 进程启动时（[com.mygolfswing.app.V2App.onCreate]）应调用一次以启动收集。
      * 多次调用安全（启动后内部协程已活）。

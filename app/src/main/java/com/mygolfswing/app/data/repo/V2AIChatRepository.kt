@@ -6,17 +6,22 @@ import com.mygolfswing.app.data.db.AISessionEntity
 import com.mygolfswing.app.data.model.V2AIMessageRole
 import com.mygolfswing.app.data.model.V2AISession
 import com.mygolfswing.app.data.model.V2ChatMessage
+import com.mygolfswing.app.data.session.V2SessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.UUID
 
-class V2AIChatRepository(private val dao: AIChatDao) {
+class V2AIChatRepository(
+    private val dao: AIChatDao,
+    private val session: V2SessionStore,
+) {
 
     suspend fun loadAllSessions(): List<V2AISession> = withContext(Dispatchers.IO) {
-        dao.listSessions().map { row ->
-            val messages = dao.listMessages(row.id).map { decodeMessage(it) }
+        val uid = session.current().userId ?: return@withContext emptyList()
+        dao.listSessions(uid).map { row ->
+            val messages = dao.listMessages(row.id, uid).map { decodeMessage(it) }
             V2AISession(
                 id = UUID.fromString(row.id),
                 title = row.title,
@@ -28,12 +33,14 @@ class V2AIChatRepository(private val dao: AIChatDao) {
     }
 
     suspend fun saveSession(session: V2AISession) = withContext(Dispatchers.IO) {
+        val uid = this@V2AIChatRepository.session.current().userId ?: return@withContext
         val updatedMs = session.updatedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        dao.upsertSession(AISessionEntity(session.id.toString(), session.title, updatedMs))
+        dao.upsertSession(AISessionEntity(session.id.toString(), uid, session.title, updatedMs))
         session.messages.filter { !it.isStreaming }.forEach { msg ->
             dao.upsertMessage(
                 AIMessageEntity(
                     id = msg.id.toString(),
+                    ownerUserId = uid,
                     sessionId = session.id.toString(),
                     role = msg.role.name.lowercase(),
                     text = msg.text,
@@ -45,7 +52,13 @@ class V2AIChatRepository(private val dao: AIChatDao) {
     }
 
     suspend fun deleteSession(sessionId: UUID) = withContext(Dispatchers.IO) {
-        dao.deleteSession(sessionId.toString())
+        val uid = session.current().userId ?: return@withContext
+        dao.deleteSession(sessionId.toString(), uid)
+    }
+
+    suspend fun clearCurrentUser() = withContext(Dispatchers.IO) {
+        val uid = session.current().userId ?: return@withContext
+        dao.clearAll(uid)
     }
 
     private fun decodeMessage(row: AIMessageEntity) = V2ChatMessage(

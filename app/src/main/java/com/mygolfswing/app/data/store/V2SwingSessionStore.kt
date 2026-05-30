@@ -33,6 +33,12 @@ object V2SwingSessionStore {
 
     val totalClipCount: Int get() = _sessions.value.sumOf { it.clips.size }
 
+    fun resetInMemory() {
+        _sessions.value = emptyList()
+        _dayItems.value = emptyList()
+        _allDayItems.value = emptyList()
+    }
+
     fun clipsForDay(day: LocalDate): List<V2SwingClip> =
         _sessions.value
             .filter { it.date == day }
@@ -55,7 +61,7 @@ object V2SwingSessionStore {
 
     fun addClipFromVideoImport(videoPath: String, thumbnailPath: String?, durationSec: Double) {
         scope.launch {
-            val uid = ServiceLocator.session.current().userId ?: "local"
+            val uid = ServiceLocator.session.current().userId ?: return@launch
             repo.addClip(uid, videoPath, thumbnailPath, durationSec)
         }
     }

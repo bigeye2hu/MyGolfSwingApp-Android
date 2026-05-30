@@ -104,9 +104,20 @@ object V2ProfileStore {
 
     fun logout() {
         scope.launch {
+            resetUserScopedCaches()
             ServiceLocator.authRepo.logout()
             ServiceLocator.creditsRepo.reset()
         }
+    }
+
+    fun resetUserScopedCaches() {
+        V2GoalStore.resetInMemory()
+        V2MemoStore.resetInMemory()
+        V2SwingSessionStore.resetInMemory()
+        V2GolfProfileStore.resetInMemory()
+        V2AIChatStore.resetInMemory()
+        V2PlazaStore.resetUserState()
+        ServiceLocator.creditsRepo.reset()
     }
 
     // ============ 派生展示 ============

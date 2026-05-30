@@ -5,8 +5,12 @@ import com.mygolfswing.app.data.db.SwingSessionEntity
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingSession
 import com.mygolfswing.app.data.net.V2NetClient
+import com.mygolfswing.app.data.session.V2SessionStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
@@ -22,9 +26,15 @@ import java.util.UUID
 class V2SwingSessionRepository(
     private val dao: SwingSessionDao,
     private val net: V2NetClient,
+    private val session: V2SessionStore,
 ) {
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeAll(): Flow<List<V2SwingSession>> =
-        dao.observeAll().map { rows -> rows.mapNotNull { decode(it) } }
+        session.state.flatMapLatest { current ->
+            val uid = current.userId.orEmpty()
+            if (uid.isBlank()) return@flatMapLatest flowOf(emptyList())
+            dao.observeAll(uid).map { rows -> rows.mapNotNull { decode(it) } }
+        }
 
     suspend fun addClip(userId: String, videoPath: String, thumbnailPath: String?, durationSec: Double) =
         withContext(Dispatchers.IO) {

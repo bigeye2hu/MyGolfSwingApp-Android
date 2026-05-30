@@ -97,7 +97,7 @@ class V2ProfileCloudConsistencyAuditRepository(
 
     private suspend fun auditVideoMemos(uid: String): V2ProfileCloudConsistencyResult {
         val local = withContext(Dispatchers.IO) {
-            memoDao.getAll()
+            memoDao.getAll(uid)
                 .filterNot { it.kind.equals("text", ignoreCase = true) }
                 .map {
                     RecordSnapshot(
@@ -122,7 +122,7 @@ class V2ProfileCloudConsistencyAuditRepository(
 
     private suspend fun auditInsightCards(uid: String): V2ProfileCloudConsistencyResult {
         val local = withContext(Dispatchers.IO) {
-            memoDao.getAll()
+            memoDao.getAll(uid)
                 .filter { it.kind.equals("text", ignoreCase = true) }
                 .map {
                     RecordSnapshot(
@@ -147,7 +147,7 @@ class V2ProfileCloudConsistencyAuditRepository(
 
     private suspend fun auditV2Goals(uid: String): V2ProfileCloudConsistencyResult {
         val local = withContext(Dispatchers.IO) {
-            goalDao.all().map {
+            goalDao.all(uid).map {
                 RecordSnapshot(
                     rawId = it.id,
                     title = localGoalTitle(it.goalJson),
@@ -170,7 +170,7 @@ class V2ProfileCloudConsistencyAuditRepository(
 
     private suspend fun auditAIConversations(uid: String): V2ProfileCloudConsistencyResult {
         val local = withContext(Dispatchers.IO) {
-            aiChatDao.listSessions().map {
+            aiChatDao.listSessions(uid).map {
                 RecordSnapshot(
                     rawId = it.id,
                     title = it.title,

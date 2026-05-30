@@ -71,6 +71,12 @@ object V2PlazaStore {
 
     private val _allCategories = MutableStateFlow(defaultCategories)
 
+    fun resetUserState() {
+        _savedIds.value = emptySet()
+        _videos.value = _videos.value.map { it.copy(isSaved = false) }
+        _heroVideo.value = _heroVideo.value?.copy(isSaved = false)
+    }
+
     @Volatile private var collecting = false
 
     fun startObserving() {

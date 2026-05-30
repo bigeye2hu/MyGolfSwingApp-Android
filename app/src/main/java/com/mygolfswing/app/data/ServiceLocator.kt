@@ -76,9 +76,9 @@ object ServiceLocator {
         goalRepo = V2GoalRepository(db.goals(), net, session, appScope)
         memoRepo = V2MemoRepository(context.applicationContext, db.memos(), net, session, appScope)
         plazaRepo = V2PlazaRepository(db.plazaSaved(), net, session)
-        swingRepo = V2SwingSessionRepository(db.swingSessions(), net)
+        swingRepo = V2SwingSessionRepository(db.swingSessions(), net, session)
         golfProfileRepo = V2GolfProfileRepository(db.golfProfile(), net, session)
-        aiChatRepo = V2AIChatRepository(db.aiChat())
+        aiChatRepo = V2AIChatRepository(db.aiChat(), session)
         cloudConsistencyAuditRepo = V2ProfileCloudConsistencyAuditRepository(db.goals(), db.memos(), db.aiChat(), net, session)
         aiService = V2AIService(net, session)
     }

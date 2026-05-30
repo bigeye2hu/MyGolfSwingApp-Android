@@ -12,25 +12,23 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.SportsGolf
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -44,7 +42,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -77,6 +74,8 @@ fun V2LoginScreen(
     onLoginSuccess: () -> Unit,
     onOpenRegister: () -> Unit,
     onOpenResetPassword: () -> Unit,
+    onOpenTerms: () -> Unit,
+    onOpenPrivacy: () -> Unit,
 ) {
     var mode by remember { mutableStateOf(LoginMode.SMS) }
     var phone by remember { mutableStateOf("") }
@@ -84,7 +83,7 @@ fun V2LoginScreen(
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var pwVisible by remember { mutableStateOf(false) }
-    var agreed by remember { mutableStateOf(true) }
+    var agreed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var countdown by remember { mutableStateOf(0) }
@@ -105,6 +104,9 @@ fun V2LoginScreen(
     ) {
         Hero(onClose = onClose)
         Card(
+            modifier = Modifier
+                .padding(horizontal = DSSpacing.lg)
+                .offset(y = (-36).dp),
             mode = mode,
             onModeChange = { mode = it; error = null },
             phone = phone,
@@ -135,6 +137,8 @@ fun V2LoginScreen(
             error = error,
             agreed = agreed,
             onAgreedChange = { agreed = it },
+            onOpenTerms = onOpenTerms,
+            onOpenPrivacy = onOpenPrivacy,
             loading = loading,
             onSubmit = {
                 if (!agreed) {
@@ -167,22 +171,13 @@ fun V2LoginScreen(
             },
             onOpenRegister = onOpenRegister,
         )
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(24.dp).navigationBarsPadding())
     }
 }
 
 @Composable
 private fun Hero(onClose: (() -> Unit)?) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(300.dp)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(DSColors.deepGreen, DSColors.fairway),
-                ),
-            ),
-    ) {
+    AuthHeroBackground(height = 420.dp, bottomFadeHeight = 88.dp) {
         if (onClose != null) {
             TextButton(
                 onClick = onClose,
@@ -195,27 +190,17 @@ private fun Hero(onClose: (() -> Unit)?) {
             }
         }
         Column(
-            modifier = Modifier.align(Alignment.Center).padding(top = 24.dp),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 158.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .background(DSColors.warmWhite.copy(alpha = 0.15f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.SportsGolf,
-                    contentDescription = null,
-                    tint = DSColors.warmWhite,
-                    modifier = Modifier.size(38.dp),
-                )
-            }
-            Spacer(Modifier.height(16.dp))
+            AuthLogoBadge(size = 76.dp, imageSize = 74.dp)
+            Spacer(Modifier.height(8.dp))
             Text(
                 "挥呗",
                 color = DSColors.warmWhite,
-                style = DSTypography.titleLarge.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold),
+                style = DSTypography.titleLarge.copy(fontSize = 30.sp, fontWeight = FontWeight.ExtraBold),
             )
             Spacer(Modifier.height(4.dp))
             Text(
@@ -229,6 +214,7 @@ private fun Hero(onClose: (() -> Unit)?) {
 
 @Composable
 private fun Card(
+    modifier: Modifier = Modifier,
     mode: LoginMode,
     onModeChange: (LoginMode) -> Unit,
     phone: String,
@@ -247,21 +233,15 @@ private fun Card(
     error: String?,
     agreed: Boolean,
     onAgreedChange: (Boolean) -> Unit,
+    onOpenTerms: () -> Unit,
+    onOpenPrivacy: () -> Unit,
     loading: Boolean,
     onSubmit: () -> Unit,
     onOpenRegister: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .padding(horizontal = DSSpacing.lg)
-            .padding(top = 16.dp)
-            .fillMaxWidth()
-            .background(DSColors.cardWhite, RoundedCornerShape(24.dp))
-            .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.xl),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
+    AuthCard(modifier = modifier) {
         ModeTabs(mode = mode, onChange = onModeChange)
-        Spacer(Modifier.height(4.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(AuthPalette.divider))
         when (mode) {
             LoginMode.SMS -> SmsFields(
                 phone = phone,
@@ -284,30 +264,17 @@ private fun Card(
         if (!error.isNullOrBlank()) {
             Text(error, color = DSColors.flagRed, style = DSTypography.caption)
         }
-        Button(
+        AuthPrimaryButton(
+            text = if (mode == LoginMode.SMS) "登录 / 注册" else "登录",
+            loading = loading,
             onClick = onSubmit,
-            enabled = !loading,
-            shape = RoundedCornerShape(14.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = DSColors.fairway,
-                contentColor = DSColors.warmWhite,
-            ),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) {
-            if (loading) {
-                CircularProgressIndicator(
-                    color = DSColors.warmWhite,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(20.dp),
-                )
-            } else {
-                Text(
-                    text = if (mode == LoginMode.SMS) "登录 / 注册" else "登录",
-                    style = DSTypography.bodyBold,
-                )
-            }
-        }
-        TermsRow(agreed = agreed, onChange = onAgreedChange)
+        )
+        AuthAgreementRow(
+            agreed = agreed,
+            onAgreedChange = onAgreedChange,
+            onOpenTerms = onOpenTerms,
+            onOpenPrivacy = onOpenPrivacy,
+        )
         if (mode == LoginMode.PASSWORD) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -328,8 +295,7 @@ private fun ModeTabs(mode: LoginMode, onChange: (LoginMode) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DSColors.warmWhite, RoundedCornerShape(12.dp))
-            .padding(4.dp),
+            .padding(bottom = 4.dp),
     ) {
         TabPill("验证码登录", mode == LoginMode.SMS, Modifier.weight(1f)) { onChange(LoginMode.SMS) }
         TabPill("密码登录", mode == LoginMode.PASSWORD, Modifier.weight(1f)) { onChange(LoginMode.PASSWORD) }
@@ -339,20 +305,23 @@ private fun ModeTabs(mode: LoginMode, onChange: (LoginMode) -> Unit) {
 @Composable
 private fun TabPill(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Box(
-        modifier = modifier
-            .height(40.dp)
-            .background(
-                if (selected) DSColors.cardWhite else Color.Transparent,
-                RoundedCornerShape(10.dp),
-            )
-            .clickable(onClick = onClick),
+        modifier = modifier.height(44.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            color = if (selected) DSColors.inkGreen else DSColors.shadowGray,
-            style = if (selected) DSTypography.bodyBold else DSTypography.body,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = text,
+                color = if (selected) DSColors.fairway else AuthPalette.placeholder,
+                style = if (selected) DSTypography.bodyBold else DSTypography.body,
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .width(40.dp)
+                    .height(2.dp)
+                    .background(if (selected) DSColors.fairway else Color.Transparent, RoundedCornerShape(1.dp)),
+            )
+        }
     }
 }
 
@@ -365,51 +334,60 @@ private fun SmsFields(
     countdown: Int,
     onSendSms: () -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .height(56.dp)
-                .background(DSColors.warmWhite, RoundedCornerShape(12.dp))
-                .border(BorderStroke(1.dp, DSColors.borderLine), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text("🇨🇳 +86", style = DSTypography.body, color = DSColors.inkGreen)
-        }
-        Spacer(Modifier.width(8.dp))
-        OutlinedTextField(
-            value = phone,
-            onValueChange = onPhoneChange,
-            placeholder = { Text("11 位手机号") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            colors = textFieldColors(),
-        )
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = smsCode,
-            onValueChange = onSmsCodeChange,
-            placeholder = { Text("6 位验证码") },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            colors = textFieldColors(),
-        )
-        Spacer(Modifier.width(8.dp))
-        OutlinedButton(
-            onClick = onSendSms,
-            enabled = phone.length == 11 && countdown == 0,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.height(56.dp),
-            border = BorderStroke(1.dp, DSColors.fairway),
-        ) {
-            Text(
-                if (countdown > 0) "${countdown}s" else "获取验证码",
-                color = if (countdown > 0) DSColors.shadowGray else DSColors.fairway,
-                style = DSTypography.body,
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AuthFieldLabel("手机号")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .height(56.dp)
+                    .background(DSColors.cardWhite, RoundedCornerShape(12.dp))
+                    .border(BorderStroke(1.dp, AuthPalette.goldAccent), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("🇨🇳 +86", style = DSTypography.bodyBold, color = DSColors.fairway)
+            }
+            Spacer(Modifier.width(8.dp))
+            OutlinedTextField(
+                value = phone,
+                onValueChange = onPhoneChange,
+                placeholder = { Text("请输入手机号") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                colors = textFieldColors(),
             )
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AuthFieldLabel("验证码")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = smsCode,
+                onValueChange = onSmsCodeChange,
+                placeholder = { Text("请输入验证码") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                colors = textFieldColors(),
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = onSendSms,
+                enabled = phone.length == 11 && countdown == 0,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (countdown > 0) AuthPalette.placeholder else DSColors.fairway,
+                    contentColor = DSColors.warmWhite,
+                    disabledContainerColor = AuthPalette.placeholder,
+                    disabledContentColor = DSColors.warmWhite,
+                ),
+                modifier = Modifier.height(56.dp).width(110.dp),
+            ) {
+                Text(if (countdown > 0) "${countdown}s" else "获取验证码", style = DSTypography.caption.copy(fontWeight = FontWeight.Bold))
+            }
         }
     }
 }
@@ -424,67 +402,45 @@ private fun PasswordFields(
     onToggle: () -> Unit,
     onForgot: () -> Unit,
 ) {
-    OutlinedTextField(
-        value = username,
-        onValueChange = onUsernameChange,
-        placeholder = { Text("用户名或邮箱") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-        colors = textFieldColors(),
-    )
-    OutlinedTextField(
-        value = password,
-        onValueChange = onPasswordChange,
-        placeholder = { Text("密码") },
-        singleLine = true,
-        visualTransformation = if (pwVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = DSColors.shadowGray) },
-        trailingIcon = {
-            IconButton(onClick = onToggle) {
-                Icon(
-                    if (pwVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                    contentDescription = null,
-                    tint = DSColors.shadowGray,
-                )
-            }
-        },
-        modifier = Modifier.fillMaxWidth(),
-        colors = textFieldColors(),
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-    ) {
-        TextButton(onClick = onForgot) {
-            Text("忘记密码?", color = DSColors.fairway, style = DSTypography.caption)
-        }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AuthFieldLabel("账号")
+        OutlinedTextField(
+            value = username,
+            onValueChange = onUsernameChange,
+            placeholder = { Text("用户名或邮箱") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+            colors = textFieldColors(),
+        )
     }
-}
-
-@Composable
-private fun TermsRow(agreed: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(20.dp)
-                .background(
-                    if (agreed) DSColors.fairway else DSColors.warmWhite,
-                    CircleShape,
-                )
-                .border(
-                    BorderStroke(1.dp, if (agreed) DSColors.fairway else DSColors.shadowGray),
-                    CircleShape,
-                )
-                .clickable { onChange(!agreed) },
-            contentAlignment = Alignment.Center,
-        ) {
-            if (agreed) Text("✓", color = DSColors.warmWhite, fontSize = 12.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            AuthFieldLabel("密码")
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onForgot) {
+                Text("忘记密码?", color = AuthPalette.goldAccent, style = DSTypography.caption)
+            }
         }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "我已阅读并同意 《用户协议》《隐私政策》",
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            placeholder = { Text("请输入密码") },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            visualTransformation = if (pwVisible) VisualTransformation.None else PasswordVisualTransformation(),
+            leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = AuthPalette.placeholder) },
+            trailingIcon = {
+                IconButton(onClick = onToggle) {
+                    Icon(
+                        if (pwVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                        contentDescription = null,
+                        tint = AuthPalette.placeholder,
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = textFieldColors(),
         )
     }
 }
@@ -492,6 +448,9 @@ private fun TermsRow(agreed: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 private fun textFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedBorderColor = DSColors.fairway,
+    unfocusedBorderColor = Color.Transparent,
+    focusedContainerColor = AuthPalette.inputBg,
+    unfocusedContainerColor = AuthPalette.inputBg,
     cursorColor = DSColors.fairway,
 )
 

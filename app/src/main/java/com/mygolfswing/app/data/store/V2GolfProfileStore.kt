@@ -8,6 +8,7 @@ import com.mygolfswing.app.data.model.V2ProfileSource
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -27,8 +28,25 @@ object V2GolfProfileStore {
 
     val isProfileEmpty: Boolean get() = _profile.value.isEmpty
 
+    @Volatile private var collecting = false
+
+    fun resetInMemory() {
+        _profile.value = V2GolfProfileData()
+        _isSyncing.value = false
+    }
+
     fun startObserving() {
-        scope.launch { reloadFromLocal() }
+        if (collecting) return
+        collecting = true
+        scope.launch {
+            ServiceLocator.session.state.collect { session ->
+                if (session.isLoggedIn) {
+                    reloadFromLocal()
+                } else {
+                    resetInMemory()
+                }
+            }
+        }
     }
 
     suspend fun reloadFromLocal() {

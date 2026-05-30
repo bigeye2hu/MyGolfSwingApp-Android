@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.mygolfswing.app.data.ServiceLocator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -44,8 +45,9 @@ object V2VideoFileStore {
      * 返回 null 表示读不到源（权限失败 / 文件不存在）。
      */
     suspend fun importVideo(context: Context, src: Uri): ImportResult? = withContext(Dispatchers.IO) {
+        val userId = ServiceLocator.session.current().userId ?: return@withContext null
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val videoFile = File(videoDir(context), "memo_$ts.mp4")
+        val videoFile = File(videoDir(context, userId), "memo_$ts.mp4")
         val ok = runCatching {
             context.contentResolver.openInputStream(src)?.use { input ->
                 FileOutputStream(videoFile).use { out ->
@@ -56,7 +58,7 @@ object V2VideoFileStore {
         }.getOrDefault(false)
         if (!ok || !videoFile.exists() || videoFile.length() == 0L) return@withContext null
 
-        val (duration, w, h, thumb) = extractMetadata(context, videoFile)
+        val (duration, w, h, thumb) = extractMetadata(context, userId, videoFile)
         ImportResult(
             absolutePath = videoFile.absolutePath,
             thumbnailPath = thumb,
@@ -72,9 +74,10 @@ object V2VideoFileStore {
      * 把它移到私有目录 + 抽缩略图。
      */
     suspend fun adoptLocalFile(context: Context, file: File): ImportResult? = withContext(Dispatchers.IO) {
+        val userId = ServiceLocator.session.current().userId ?: return@withContext null
         if (!file.exists() || file.length() == 0L) return@withContext null
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val target = File(videoDir(context), "memo_$ts.mp4")
+        val target = File(videoDir(context, userId), "memo_$ts.mp4")
         // FileProvider 临时文件通常在 cacheDir/videos/，rename 到 filesDir/videos/
         val moved = runCatching {
             if (file.absolutePath == target.absolutePath) return@runCatching true
@@ -83,7 +86,7 @@ object V2VideoFileStore {
             true
         }.getOrDefault(false)
         if (!moved) return@withContext null
-        val (duration, w, h, thumb) = extractMetadata(context, target)
+        val (duration, w, h, thumb) = extractMetadata(context, userId, target)
         ImportResult(
             absolutePath = target.absolutePath,
             thumbnailPath = thumb,
@@ -113,32 +116,37 @@ object V2VideoFileStore {
 
     /** 计算所有已导入视频 / 缩略图占用的字节数，用于「存储管理」页。 */
     suspend fun calculateUsedBytes(context: Context): Long = withContext(Dispatchers.IO) {
+        val userId = ServiceLocator.session.current().userId ?: return@withContext 0L
         fun sumDir(dir: File): Long {
             if (!dir.exists()) return 0L
             return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         }
-        sumDir(videoDir(context)) + sumDir(thumbDir(context))
+        sumDir(videoDir(context, userId)) + sumDir(thumbDir(context, userId))
     }
 
     /** 清空所有视频 + 缩略图缓存。返回回收字节数。 */
     suspend fun clearAll(context: Context): Long = withContext(Dispatchers.IO) {
+        val userId = ServiceLocator.session.current().userId ?: return@withContext 0L
         val before = calculateUsedBytes(context)
-        videoDir(context).deleteRecursively()
-        thumbDir(context).deleteRecursively()
+        videoDir(context, userId).deleteRecursively()
+        thumbDir(context, userId).deleteRecursively()
         before
     }
 
     // ============ 私有 ============
 
-    private fun videoDir(context: Context): File =
-        File(context.filesDir, VIDEO_DIR).apply { mkdirs() }
+    private fun userRoot(context: Context, userId: String): File =
+        File(context.filesDir, "users/$userId").apply { mkdirs() }
 
-    private fun thumbDir(context: Context): File =
-        File(context.filesDir, THUMB_DIR).apply { mkdirs() }
+    private fun videoDir(context: Context, userId: String): File =
+        File(userRoot(context, userId), VIDEO_DIR).apply { mkdirs() }
+
+    private fun thumbDir(context: Context, userId: String): File =
+        File(userRoot(context, userId), THUMB_DIR).apply { mkdirs() }
 
     private data class Meta(val durationSec: Double, val w: Int, val h: Int, val thumbPath: String?)
 
-    private fun extractMetadata(context: Context, videoFile: File): Meta {
+    private fun extractMetadata(context: Context, userId: String, videoFile: File): Meta {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(videoFile.absolutePath)
@@ -146,7 +154,7 @@ object V2VideoFileStore {
             val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
             val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-            val thumbPath = frame?.let { saveThumbnail(context, it, videoFile.nameWithoutExtension) }
+            val thumbPath = frame?.let { saveThumbnail(context, userId, it, videoFile.nameWithoutExtension) }
             Meta(durMs / 1000.0, w, h, thumbPath)
         } catch (t: Throwable) {
             Meta(0.0, 0, 0, null)
@@ -155,8 +163,8 @@ object V2VideoFileStore {
         }
     }
 
-    private fun saveThumbnail(context: Context, bitmap: Bitmap, baseName: String): String? {
-        val out = File(thumbDir(context), "${baseName}.jpg")
+    private fun saveThumbnail(context: Context, userId: String, bitmap: Bitmap, baseName: String): String? {
+        val out = File(thumbDir(context, userId), "${baseName}.jpg")
         return runCatching {
             FileOutputStream(out).use { fos ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 80, fos)

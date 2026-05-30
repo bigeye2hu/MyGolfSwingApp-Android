@@ -15,7 +15,10 @@ import com.mygolfswing.app.data.session.V2SessionStore
 import com.mygolfswing.app.data.video.V2VideoThumbnailUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,25 +45,32 @@ class V2MemoRepository(
     private val session: V2SessionStore,
     private val scope: CoroutineScope,
 ) {
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeAll(): Flow<List<V2Memo>> =
-        dao.observeAll().map { rows ->
-            rows.mapNotNull { row -> runCatching { decode(row) }.getOrNull() }
+        session.state.flatMapLatest { current ->
+            val uid = current.userId.orEmpty()
+            if (uid.isBlank()) return@flatMapLatest flowOf(emptyList())
+            dao.observeAll(uid).map { rows ->
+                rows.mapNotNull { row -> runCatching { decode(row) }.getOrNull() }
+            }
         }
 
     suspend fun get(id: String): V2Memo? = withContext(Dispatchers.IO) {
-        dao.get(id)?.let { runCatching { decode(it) }.getOrNull() }
+        val uid = session.current().userId ?: return@withContext null
+        dao.get(id, uid)?.let { runCatching { decode(it) }.getOrNull() }
     }
 
     suspend fun upsert(memo: V2Memo, pushToCloud: Boolean = true) = withContext(Dispatchers.IO) {
-        dao.upsert(encode(memo, dirty = pushToCloud))
+        val uid = session.current().userId ?: return@withContext
+        dao.upsert(encode(memo, ownerUserId = uid, dirty = pushToCloud))
         if (pushToCloud) scope.launch { pushSingle(memo) }
     }
 
     suspend fun delete(memoId: String) = withContext(Dispatchers.IO) {
-        val memo = dao.get(memoId)?.let { runCatching { decode(it) }.getOrNull() }
-        dao.delete(memoId)
+        val uid = session.current().userId ?: return@withContext
+        val memo = dao.get(memoId, uid)?.let { runCatching { decode(it) }.getOrNull() }
+        dao.delete(memoId, uid)
         scope.launch {
-            val uid = session.current().userId ?: return@launch
             val bucket = if (memo?.kind == V2MemoKind.TEXT) BUCKET_INSIGHT_CARD else BUCKET_VIDEO_MEMO
             if (!deleteCloudMemo(uid, memoId, bucket)) {
                 session.addPendingDelete(bucket, uid, memoId)
@@ -69,18 +79,21 @@ class V2MemoRepository(
     }
 
     suspend fun bulkReplaceLocal(memos: List<V2Memo>) = withContext(Dispatchers.IO) {
-        dao.upsertAll(memos.map { encode(it, dirty = false) })
+        val uid = session.current().userId ?: return@withContext
+        dao.upsertAll(memos.map { encode(it, ownerUserId = uid, dirty = false) })
     }
 
     suspend fun deleteLocalDemoMemos() = withContext(Dispatchers.IO) {
-        dao.getAll().forEach { row ->
+        val uid = session.current().userId ?: return@withContext
+        dao.getAll(uid).forEach { row ->
             val memo = runCatching { decode(row) }.getOrNull() ?: return@forEach
-            if (memo.isDemoMemo()) dao.delete(row.id)
+            if (memo.isDemoMemo()) dao.delete(row.id, uid)
         }
     }
 
     suspend fun pushDirty() = withContext(Dispatchers.IO) {
-        dao.dirty().mapNotNull { runCatching { decode(it) }.getOrNull() }.forEach { pushSingle(it) }
+        val uid = session.current().userId ?: return@withContext
+        dao.dirty(uid).mapNotNull { runCatching { decode(it) }.getOrNull() }.forEach { pushSingle(it) }
     }
 
     suspend fun pullFromCloud(): Result<Int> = runCatching {
@@ -128,10 +141,11 @@ class V2MemoRepository(
      * 命中后写回 thumbnailUrl（dirty=false，不重复上传）。对齐 iOS 同步后的封面补齐。
      */
     suspend fun recoverMissingThumbnails() = withContext(Dispatchers.IO) {
-        dao.getAll().forEach { row ->
+        val uid = session.current().userId ?: return@withContext
+        dao.getAll(uid).forEach { row ->
             val memo = runCatching { decode(row) }.getOrNull() ?: return@forEach
-            val updated = V2MemoThumbnailStore.recoverThumbnail(context, memo) ?: return@forEach
-            dao.upsert(encode(updated, dirty = false))
+            val updated = V2MemoThumbnailStore.recoverThumbnail(context, memo, uid) ?: return@forEach
+            dao.upsert(encode(updated, ownerUserId = uid, dirty = false))
         }
     }
 
@@ -155,7 +169,7 @@ class V2MemoRepository(
                 applyCloudDeletedMemo(memoId, cloud)
                 continue
             }
-            val memo = parseCloudVideoMemo(cloud) ?: continue
+            val memo = parseCloudVideoMemo(cloud, uid) ?: continue
             if (mergeIfNewer(memo, cloud)) merged++
         }
         return merged
@@ -189,19 +203,21 @@ class V2MemoRepository(
 
     private suspend fun applyCloudDeletedMemo(id: String?, cloud: JsonObject) {
         val normalizedId = id?.takeIf { it.isNotBlank() } ?: return
-        val localRow = dao.get(normalizedId) ?: return
+        val uid = session.current().userId ?: return
+        val localRow = dao.get(normalizedId, uid) ?: return
         val deletedAt = parseCloudMillis(cloud["deletedAt"])
             ?: parseCloudMillis(cloud["updatedAt"])
             ?: System.currentTimeMillis()
         if (deletedAt >= localRow.updatedAt) {
-            dao.delete(normalizedId)
+            dao.delete(normalizedId, uid)
         }
     }
 
     private suspend fun mergeIfNewer(memo: V2Memo, cloud: JsonObject): Boolean {
-        val localRow = dao.get(memo.id.toString())
+        val uid = session.current().userId ?: return false
+        val localRow = dao.get(memo.id.toString(), uid)
         if (localRow == null) {
-            dao.upsert(encode(memo, dirty = false))
+            dao.upsert(encode(memo, ownerUserId = uid, dirty = false))
             return true
         }
         val localMemo = decode(localRow)
@@ -211,7 +227,7 @@ class V2MemoRepository(
             !localRow.dirty &&
             hasMeaningfullyDifferentCloudCreatedAt(localRow, cloud)
         if (cloudUpdated >= localUpdated || shouldCorrectImportedTextTime) {
-            dao.upsert(encode(memo, dirty = false))
+            dao.upsert(encode(memo, ownerUserId = uid, dirty = false))
             return true
         }
         return false
@@ -224,7 +240,7 @@ class V2MemoRepository(
         return kotlin.math.abs(localRow.createdAt - cloudCreated) > 60_000L
     }
 
-    private fun parseCloudVideoMemo(o: JsonObject): V2Memo? {
+    private fun parseCloudVideoMemo(o: JsonObject, ownerUserId: String): V2Memo? {
         val memoIdStr = o["memoId"]?.jsonPrimitive?.contentOrNull ?: return null
         val id = runCatching { UUID.fromString(memoIdStr) }.getOrNull() ?: return null
         val title = o["title"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: "视频 Memo"
@@ -266,7 +282,7 @@ class V2MemoRepository(
         )
         val cloudThumbBase64Url = o["thumbnailBase64"]?.jsonPrimitive?.contentOrNull
             ?.takeIf { it.isNotBlank() }
-            ?.let { V2MemoThumbnailStore.saveFromBase64(context, id, it) }
+            ?.let { V2MemoThumbnailStore.saveFromBase64(context, id, it, ownerUserId) }
         val base = if (body.isNotBlank()) {
             V2Memo.mixedMemo(displayTitle = title, body = body, videoUrl = videoUrl, durationSec = duration, tags = tags)
         } else {
@@ -386,7 +402,7 @@ class V2MemoRepository(
                 }
             }
         }.getOrDefault(false)
-        if (ok) withContext(Dispatchers.IO) { dao.markClean(memo.id.toString()) }
+        if (ok) withContext(Dispatchers.IO) { dao.markClean(memo.id.toString(), uid) }
     }
 
     private fun buildVideoMemoData(memo: V2Memo): JsonObject {
@@ -456,10 +472,11 @@ class V2MemoRepository(
         )
     }
 
-    private fun encode(memo: V2Memo, dirty: Boolean): MemoEntity {
+    private fun encode(memo: V2Memo, ownerUserId: String, dirty: Boolean): MemoEntity {
         val jsonObj = V2Json.encodeMemo(memo)
         return MemoEntity(
             id = memo.id.toString(),
+            ownerUserId = ownerUserId,
             memoJson = net.json.encodeToString(JsonObject.serializer(), jsonObj),
             kind = memo.kind.name.lowercase(),
             topic = memo.topic.name.lowercase(),

@@ -160,6 +160,9 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                     selectedTab = V2Tab.AI
                 } else {
                     selectedTab = tab
+                    if (tab == V2Tab.ME) {
+                        V2ProfileStore.refresh(force = true)
+                    }
                 }
             },
             onShowQuickAdd = { showQuickAdd = true },

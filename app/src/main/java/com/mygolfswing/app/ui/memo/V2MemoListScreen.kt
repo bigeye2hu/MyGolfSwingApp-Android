@@ -23,7 +23,6 @@ import com.mygolfswing.app.data.store.V2GolfProfileStore
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
-import java.time.LocalDate
 import java.util.UUID
 
 private const val ROW_PREVIEW_LIMIT = 6
@@ -40,7 +39,6 @@ fun V2MemoListScreen(
     onOpenVideoList: () -> Unit,
     onOpenTextList: () -> Unit,
     onOpenSwingCalendar: () -> Unit,
-    onOpenSwingDay: (LocalDate) -> Unit = { onOpenSwingCalendar() },
     onOpenJustSwing: () -> Unit = onOpenSwingCalendar,
     onOpenAllMemos: () -> Unit,
     onSwitchToAI: () -> Unit = {},
@@ -160,7 +158,7 @@ fun V2MemoListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     swingItems.forEach { item ->
-                        V2MemoSwingSessionCard(item = item, onTap = { onOpenSwingDay(item.day) })
+                        V2MemoSwingSessionCard(item = item, onTap = onOpenSwingCalendar)
                     }
                 }
             }

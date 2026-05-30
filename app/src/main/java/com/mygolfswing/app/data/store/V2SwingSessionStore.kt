@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.store
 
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2SwingClip
+import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.model.V2SwingDayItem
 import com.mygolfswing.app.data.model.V2SwingSession
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,6 +65,18 @@ object V2SwingSessionStore {
             val uid = ServiceLocator.session.current().userId ?: return@launch
             repo.addClip(uid, videoPath, thumbnailPath, durationSec)
         }
+    }
+
+    fun updateClipRetention(clipId: UUID, retention: V2SwingClipRetention) {
+        scope.launch { repo.updateClipRetention(clipId, retention) }
+    }
+
+    fun deleteClips(clipIds: Set<UUID>) {
+        scope.launch { repo.deleteClips(clipIds) }
+    }
+
+    fun cleanupExpiredTemporaryClips() {
+        scope.launch { repo.cleanupExpiredTemporaryClips() }
     }
 
     private fun buildDayItems(sessions: List<V2SwingSession>, limit: Int): List<V2SwingDayItem> {

@@ -103,15 +103,20 @@ object V2VideoFileStore {
      * 录制完成后，调用 [adoptLocalFile] 移到私有目录。
      */
     fun createCameraOutputUri(context: Context): Pair<File, Uri> {
-        val dir = File(context.cacheDir, "videos").apply { mkdirs() }
-        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val file = File(dir, "capture_$ts.mp4")
+        val file = createCameraOutputFile(context)
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             file,
         )
         return file to uri
+    }
+
+    /** 为 App 内相机录制创建临时输出文件；录制完成后调用 [adoptLocalFile] 归档。 */
+    fun createCameraOutputFile(context: Context): File {
+        val dir = File(context.cacheDir, "videos").apply { mkdirs() }
+        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        return File(dir, "capture_$ts.mp4")
     }
 
     /** 计算所有已导入视频 / 缩略图占用的字节数，用于「存储管理」页。 */

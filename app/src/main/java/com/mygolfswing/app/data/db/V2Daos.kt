@@ -141,6 +141,9 @@ interface SwingSessionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: SwingSessionEntity)
+
+    @Query("DELETE FROM v2_swing_session WHERE id = :id")
+    suspend fun deleteById(id: String)
 }
 
 @Dao

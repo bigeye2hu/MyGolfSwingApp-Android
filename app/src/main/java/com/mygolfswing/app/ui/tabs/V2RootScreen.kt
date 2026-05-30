@@ -60,6 +60,7 @@ import com.mygolfswing.app.ui.profile.V2EditProfileScreen
 import com.mygolfswing.app.ui.profile.V2ProfileCloudConsistencyAuditScreen
 import com.mygolfswing.app.ui.profile.V2ProfileScreen
 import com.mygolfswing.app.ui.swing.V2JustSwingCalendarScreen
+import com.mygolfswing.app.ui.swing.V2SwingClipDetailScreen
 import com.mygolfswing.app.ui.swing.V2SwingDayDetailScreen
 import com.mygolfswing.app.ui.theme.MyGolfSwingAppAndroidTheme
 import kotlinx.coroutines.delay
@@ -85,6 +86,7 @@ private sealed class Destination {
     data object TextMemoList : Destination()
     data object SwingCalendar : Destination()
     data class SwingDayDetail(val day: LocalDate) : Destination()
+    data class SwingClipDetail(val clipId: UUID) : Destination()
     data object JustSwingMain : Destination()
     data object OnlineVideoPicker : Destination()
     data object AIArchive : Destination()
@@ -134,6 +136,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 ServiceLocator.goalRepo.pushDirty()
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
                 V2MemoStore.pullFromCloud()
+                V2SwingSessionStore.cleanupExpiredTemporaryClips()
                 runCatching { V2GolfProfileStore.refreshFromCloud() }
             }
         } else {
@@ -175,7 +178,6 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenVideoMemoList = { nav.navigateTo(Destination.VideoMemoList) },
             onOpenTextMemoList = { nav.navigateTo(Destination.TextMemoList) },
             onOpenSwingCalendar = { nav.navigateTo(Destination.SwingCalendar) },
-            onOpenSwingDay = { nav.navigateTo(Destination.SwingDayDetail(it)) },
             onOpenJustSwing = { nav.navigateTo(Destination.JustSwingMain) },
             onOpenAIArchive = { nav.navigateTo(Destination.AIArchive) },
             onOpenAIConfig = { nav.navigateTo(Destination.AIConfig) },
@@ -266,10 +268,14 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         )
         Destination.SwingCalendar -> V2JustSwingCalendarScreen(
             onBack = { nav.navigateBack() },
-            onOpenDay = { nav.navigateTo(Destination.SwingDayDetail(it)) },
+            onOpenClip = { nav.navigateTo(Destination.SwingClipDetail(it)) },
         )
         is Destination.SwingDayDetail -> V2SwingDayDetailScreen(
             day = d.day,
+            onBack = { nav.navigateBack() },
+        )
+        is Destination.SwingClipDetail -> V2SwingClipDetailScreen(
+            clipId = d.clipId,
             onBack = { nav.navigateBack() },
         )
         Destination.AIArchive -> V2AIArchiveScreen(
@@ -396,7 +402,6 @@ private fun TabsScaffold(
     onOpenVideoMemoList: () -> Unit,
     onOpenTextMemoList: () -> Unit,
     onOpenSwingCalendar: () -> Unit,
-    onOpenSwingDay: (LocalDate) -> Unit,
     onOpenJustSwing: () -> Unit,
     onOpenAIArchive: () -> Unit,
     onOpenAIConfig: () -> Unit,
@@ -449,7 +454,6 @@ private fun TabsScaffold(
                     onOpenVideoList = onOpenVideoMemoList,
                     onOpenTextList = onOpenTextMemoList,
                     onOpenSwingCalendar = onOpenSwingCalendar,
-                    onOpenSwingDay = onOpenSwingDay,
                     onOpenJustSwing = onOpenJustSwing,
                     onOpenAllMemos = onOpenAllMemos,
                     onSwitchToAI = onSwitchToAI,

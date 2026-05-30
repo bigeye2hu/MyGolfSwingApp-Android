@@ -26,7 +26,22 @@ data class V2SwingClip(
     val thumbnailPath: String? = null,
     val timestamp: LocalDateTime = LocalDateTime.now(),
     val durationSec: Double = 0.0,
+    val retention: V2SwingClipRetention = V2SwingClipRetention.TEMPORARY,
 )
+
+enum class V2SwingClipRetention(val wire: String) {
+    TEMPORARY("temporary"),
+    FAVORITED("favorited"),
+    PROMOTED("promoted"),
+    ;
+
+    val isPermanent: Boolean get() = this == FAVORITED || this == PROMOTED
+
+    companion object {
+        fun fromWire(value: String?): V2SwingClipRetention =
+            entries.firstOrNull { it.wire == value } ?: TEMPORARY
+    }
+}
 
 data class V2SwingSession(
     val id: UUID = UUID.randomUUID(),

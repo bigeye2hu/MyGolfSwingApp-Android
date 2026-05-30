@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.home
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,10 +36,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.model.V2Goal
 
 private val Gold = Color(0xFFE0A82E)
@@ -56,35 +60,15 @@ fun V2GoalHeroCard(
     onTap: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val darkGreen = Color(0xFF1B4332)
-    val midGreen = Color(0xFF2D6A4F)
-
     Box(
         modifier = modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 210.dp)
             .shadow(elevation = 20.dp, shape = RoundedCornerShape(24.dp))
             .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(darkGreen, midGreen),
-                    start = Offset(0f, Float.POSITIVE_INFINITY),
-                    end = Offset(Float.POSITIVE_INFINITY, 0f),
-                ),
-            )
             .clickable { onTap() },
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.0f to darkGreen.copy(alpha = 0.72f),
-                        0.55f to darkGreen.copy(alpha = 0.10f),
-                        1.0f to Color.Transparent,
-                    ),
-                ),
-        )
+        GolfScapeBackground(modifier = Modifier.matchParentSize())
 
         Column(
             modifier = Modifier.padding(20.dp),
@@ -110,6 +94,67 @@ fun V2GoalHeroCard(
                 onComplete = onComplete,
             )
         }
+    }
+}
+
+/**
+ * Hero 卡背景（对齐 iOS `golfScapeBackground` 四层叠加）。
+ * 背景层使用 [Modifier.matchParentSize]，避免图片 intrinsic 尺寸撑大卡片。
+ */
+@Composable
+private fun GolfScapeBackground(modifier: Modifier = Modifier) {
+    val darkGreen = Color(0xFF1B4332)
+    val midGreen = Color(0xFF2D6A4F)
+    val lightOverlay = Color(0xFFD8E2DC)
+
+    BoxWithConstraints(modifier = modifier) {
+        val gradientStart = Offset(constraints.maxWidth * 0.25f, constraints.maxHeight.toFloat())
+        val gradientEnd = Offset(constraints.maxWidth * 0.75f, 0f)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(darkGreen, midGreen),
+                        start = gradientStart,
+                        end = gradientEnd,
+                    ),
+                ),
+        )
+        Image(
+            painter = painterResource(id = R.drawable.v2_hero_grass_bg),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.BottomEnd,
+            alpha = 0.45f,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            lightOverlay.copy(alpha = 0.18f),
+                            midGreen.copy(alpha = 0.5f),
+                        ),
+                        start = gradientStart,
+                        end = gradientEnd,
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to darkGreen.copy(alpha = 0.72f),
+                        0.55f to darkGreen.copy(alpha = 0.10f),
+                        1.0f to Color.Transparent,
+                    ),
+                ),
+        )
     }
 }
 

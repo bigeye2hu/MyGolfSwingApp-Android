@@ -50,6 +50,7 @@ fun V2HomeScreen(
     onSwitchToPlaza: () -> Unit = {},
     onSwitchToMemo: () -> Unit = {},
     onOpenPlazaVideo: (UUID) -> Unit = {},
+    onOpenMemo: (UUID) -> Unit = {},
     onAddTap: () -> Unit = {},
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
@@ -113,6 +114,7 @@ fun V2HomeScreen(
             V2HomeMemoSection(
                 memos = recentMemos,
                 onSeeAll = onSwitchToMemo,
+                onMemoTap = { onOpenMemo(it.id) },
             )
 
             V2HomePlazaSection(

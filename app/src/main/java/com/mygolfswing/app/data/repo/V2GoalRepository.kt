@@ -95,7 +95,7 @@ class V2GoalRepository(
      *
      * - Last-Write-Wins：同 id 比较 `updatedAt`
      * - 云端有、本地无 → 写入本地
-     * - 本地有、云端无 → 非演示数据且较新则上传；演示 mock 则删除
+     * - 本地有、云端无 → dirty 则上传；已同步（dirty=false）则删本地（云端物理删除）
      * - 拉取成功后移除仍留在本地的演示目标（避免与 iOS 真实目标混显）
      */
     suspend fun syncFromCloud(): Result<Int> = runCatching {
@@ -113,8 +113,26 @@ class V2GoalRepository(
         if (!resp.success) error(resp.error ?: "拉取目标失败")
 
         val cloudRows = goalRowArray(resp.data).mapNotNull { it as? JsonObject }
+        val activeRows = cloudRows.filterNot { isDeletedRow(it) }
+        val rowsForMerge = if (hasDuplicateGoalIds(activeRows)) {
+            Log.i(TAG, "duplicate goalId detected, running repairV2Goals")
+            repairCloudGoals(uid)
+            val repaired = net.cloudApi.dataSync(
+                JsonObject(
+                    mapOf(
+                        "action" to JsonPrimitive("getV2Goals"),
+                        "userId" to JsonPrimitive(uid),
+                        "includeDeleted" to JsonPrimitive(true),
+                    ),
+                ),
+            )
+            if (!repaired.success) error(repaired.error ?: "拉取目标失败")
+            goalRowArray(repaired.data).mapNotNull { it as? JsonObject }.filterNot { isDeletedRow(it) }
+        } else {
+            activeRows
+        }
         val deletedCloudById = deletedGoalMap(cloudRows)
-        val cloudEntities = parseCloudGoalEntities(cloudRows.filterNot { isDeletedRow(it) }, ownerUserId = uid)
+        val cloudEntities = dedupeGoalEntities(parseCloudGoalEntities(rowsForMerge, ownerUserId = uid))
         Log.i(TAG, "getV2Goals: parsed ${cloudEntities.size} active goals, ${deletedCloudById.size} deleted for userId=${uid.take(8)}…")
 
         withContext(Dispatchers.IO) {
@@ -167,7 +185,11 @@ class V2GoalRepository(
                 continue
             }
             if (local.dirty) {
+                // 本地有改动、云端无 → 待上传（含离线新建）
                 goal?.let { toUpload.add(it) }
+            } else {
+                // 已同步过（dirty=false）但云端不存在且无删除墓碑 → 云端已物理删除，清本地
+                toDelete.add(local.id)
             }
         }
 
@@ -201,6 +223,53 @@ class V2GoalRepository(
 
     private fun isDeletedRow(row: JsonObject): Boolean =
         row["isDeleted"]?.jsonPrimitive?.booleanOrNull == true
+
+    private fun hasDuplicateGoalIds(rows: List<JsonObject>): Boolean {
+        val seen = mutableSetOf<String>()
+        for (row in rows) {
+            val id = row["goalId"]?.jsonPrimitive?.contentOrNull ?: continue
+            if (!seen.add(id)) return true
+        }
+        return false
+    }
+
+    private suspend fun repairCloudGoals(uid: String): Boolean = runCatching {
+        val resp = net.cloudApi.dataSync(
+            JsonObject(
+                mapOf(
+                    "action" to JsonPrimitive("repairV2Goals"),
+                    "userId" to JsonPrimitive(uid),
+                ),
+            ),
+        )
+        if (resp.success) {
+            Log.i(TAG, "repairV2Goals completed for userId=${uid.take(8)}…")
+        } else {
+            Log.w(TAG, "repairV2Goals failed: ${resp.error}")
+        }
+        resp.success
+    }.getOrDefault(false)
+
+    /** 同一 goalId 多行时保留 updatedAt 最新的一条（对齐 iOS latestGoalMap）。 */
+    private fun dedupeGoalEntities(entities: List<GoalEntity>): List<GoalEntity> {
+        val byId = linkedMapOf<String, GoalEntity>()
+        var duplicateCount = 0
+        for (entity in entities) {
+            val existing = byId[entity.id]
+            if (existing == null) {
+                byId[entity.id] = entity
+            } else {
+                duplicateCount += 1
+                if (entity.updatedAt >= existing.updatedAt) {
+                    byId[entity.id] = entity
+                }
+            }
+        }
+        if (duplicateCount > 0) {
+            Log.w(TAG, "cloud goals had $duplicateCount duplicate goalId rows, kept latest updatedAt")
+        }
+        return byId.values.toList()
+    }
 
     private fun deletedGoalMap(rows: List<JsonObject>): Map<String, Long> = buildMap {
         rows.filter(::isDeletedRow).forEach { row ->

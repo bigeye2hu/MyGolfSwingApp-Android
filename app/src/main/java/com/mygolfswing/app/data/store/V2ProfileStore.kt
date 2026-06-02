@@ -37,6 +37,7 @@ data class V2UserProfile(
     val phone: String? = null,
     val golfBrands: List<String> = emptyList(),
     val hasPassword: Boolean = false,
+    val createdAt: String? = null,
     val isLoggedIn: Boolean = false,
 )
 
@@ -78,6 +79,7 @@ object V2ProfileStore {
                     phone = s.phone,
                     golfBrands = s.golfBrands,
                     hasPassword = s.hasPassword ?: false,
+                    createdAt = formatCreatedAt(s.createdAt),
                     isLoggedIn = s.isLoggedIn,
                 )
             }.collect()
@@ -103,21 +105,16 @@ object V2ProfileStore {
     }
 
     fun logout() {
-        scope.launch {
-            resetUserScopedCaches()
-            ServiceLocator.authRepo.logout()
-            ServiceLocator.creditsRepo.reset()
-        }
+        scope.launch { logoutAndWait() }
+    }
+
+    suspend fun logoutAndWait() {
+        V2UserScopedCache.onLogout()
+        ServiceLocator.authRepo.logout()
     }
 
     fun resetUserScopedCaches() {
-        V2GoalStore.resetInMemory()
-        V2MemoStore.resetInMemory()
-        V2SwingSessionStore.resetInMemory()
-        V2GolfProfileStore.resetInMemory()
-        V2AIChatStore.resetInMemory()
-        V2PlazaStore.resetUserState()
-        ServiceLocator.creditsRepo.reset()
+        V2UserScopedCache.clearActiveUserMemory()
     }
 
     // ============ 派生展示 ============
@@ -139,6 +136,20 @@ object V2ProfileStore {
         val years = LocalDate.now().year - startYear
         if (years <= 0) return "—"
         return "$years 年"
+    }
+
+    private fun formatCreatedAt(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return runCatching {
+            val instant = java.time.Instant.parse(raw)
+            val date = instant.atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+            DateTimeFormatter.ofPattern("yyyy年M月d日").format(date)
+        }.getOrElse {
+            runCatching {
+                val date = LocalDate.parse(raw.take(10))
+                DateTimeFormatter.ofPattern("yyyy年M月d日").format(date)
+            }.getOrNull() ?: raw
+        }
     }
 
     @Suppress("unused")

@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -100,13 +103,14 @@ fun V2LoginScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(DSColors.warmWhite)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .imePadding(),
     ) {
         Hero(onClose = onClose)
         Card(
             modifier = Modifier
                 .padding(horizontal = DSSpacing.lg)
-                .offset(y = (-36).dp),
+                .offset(y = (-28).dp),
             mode = mode,
             onModeChange = { mode = it; error = null },
             phone = phone,
@@ -177,7 +181,7 @@ fun V2LoginScreen(
 
 @Composable
 private fun Hero(onClose: (() -> Unit)?) {
-    AuthHeroBackground(height = 420.dp, bottomFadeHeight = 88.dp) {
+    AuthHeroBackground(height = 380.dp, bottomFadeHeight = 80.dp) {
         if (onClose != null) {
             TextButton(
                 onClick = onClose,
@@ -192,7 +196,7 @@ private fun Hero(onClose: (() -> Unit)?) {
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 158.dp),
+                .padding(top = 132.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             AuthLogoBadge(size = 76.dp, imageSize = 74.dp)
@@ -334,59 +338,79 @@ private fun SmsFields(
     countdown: Int,
     onSendSms: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AuthFieldLabel("手机号")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .height(56.dp)
-                    .background(DSColors.cardWhite, RoundedCornerShape(12.dp))
-                    .border(BorderStroke(1.dp, AuthPalette.goldAccent), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp),
-                contentAlignment = Alignment.Center,
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AuthFieldLabel("手机号")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("🇨🇳 +86", style = DSTypography.bodyBold, color = DSColors.fairway)
+                Box(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .background(DSColors.cardWhite, RoundedCornerShape(12.dp))
+                        .border(BorderStroke(1.dp, AuthPalette.goldAccent), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("🇨🇳 +86", style = DSTypography.caption.copy(fontWeight = FontWeight.Bold), color = DSColors.fairway)
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = onPhoneChange,
+                    placeholder = { Text("请输入手机号") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .widthIn(min = 0.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    colors = textFieldColors(),
+                )
             }
-            Spacer(Modifier.width(8.dp))
-            OutlinedTextField(
-                value = phone,
-                onValueChange = onPhoneChange,
-                placeholder = { Text("请输入手机号") },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                colors = textFieldColors(),
-            )
         }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AuthFieldLabel("验证码")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = smsCode,
-                onValueChange = onSmsCodeChange,
-                placeholder = { Text("请输入验证码") },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                colors = textFieldColors(),
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(
-                onClick = onSendSms,
-                enabled = phone.length == 11 && countdown == 0,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (countdown > 0) AuthPalette.placeholder else DSColors.fairway,
-                    contentColor = DSColors.warmWhite,
-                    disabledContainerColor = AuthPalette.placeholder,
-                    disabledContentColor = DSColors.warmWhite,
-                ),
-                modifier = Modifier.height(56.dp).width(110.dp),
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AuthFieldLabel("验证码")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(if (countdown > 0) "${countdown}s" else "获取验证码", style = DSTypography.caption.copy(fontWeight = FontWeight.Bold))
+                OutlinedTextField(
+                    value = smsCode,
+                    onValueChange = onSmsCodeChange,
+                    placeholder = { Text("请输入验证码") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .widthIn(min = 0.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = textFieldColors(),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = onSendSms,
+                    enabled = phone.length == 11 && countdown == 0,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (countdown > 0) AuthPalette.placeholder else DSColors.fairway,
+                        contentColor = DSColors.warmWhite,
+                        disabledContainerColor = AuthPalette.placeholder,
+                        disabledContentColor = DSColors.warmWhite,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 6.dp),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .width(110.dp),
+                ) {
+                    Text(
+                        text = if (countdown > 0) "${countdown}s" else "获取验证码",
+                        maxLines = 1,
+                        softWrap = false,
+                        style = DSTypography.caption.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
+                    )
+                }
             }
         }
     }

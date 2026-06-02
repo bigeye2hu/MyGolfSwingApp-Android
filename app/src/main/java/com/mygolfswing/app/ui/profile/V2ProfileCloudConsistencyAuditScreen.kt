@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.repo.V2ProfileCloudConsistencyIssue
 import com.mygolfswing.app.data.repo.V2ProfileCloudConsistencyIssueTone
 import com.mygolfswing.app.data.repo.V2ProfileCloudConsistencyResult
+import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -52,6 +54,28 @@ import java.util.Locale
 
 @Composable
 fun V2ProfileCloudConsistencyAuditScreen(onBack: () -> Unit) {
+    val profile by V2ProfileStore.profile.collectAsState()
+    if (!V2DeveloperToolsAccess.isCloudAuditEnabled(profile)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(DSColors.warmWhite),
+        ) {
+            V2NavTopBarCentered(title = "云端一致性", onBack = onBack)
+            Box(
+                modifier = Modifier.fillMaxSize().padding(DSSpacing.lg),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "此功能仅对测试账号 test1 开放",
+                    style = DSTypography.caption,
+                    color = DSColors.shadowGray,
+                )
+            }
+        }
+        return
+    }
+
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }

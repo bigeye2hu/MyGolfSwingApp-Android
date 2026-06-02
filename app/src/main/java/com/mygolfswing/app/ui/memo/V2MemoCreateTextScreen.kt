@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,8 +43,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Memo
-import com.mygolfswing.app.data.model.V2MemoAccent
-import com.mygolfswing.app.data.model.V2Topic
+import com.mygolfswing.app.data.memo.V2MemoBridge
+import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 
@@ -59,9 +57,7 @@ fun V2MemoCreateTextScreen(
 ) {
     var title by rememberSaveable { mutableStateOf("") }
     var body by rememberSaveable { mutableStateOf("") }
-    var topic by remember { mutableStateOf(V2Topic.SWING) }
-    var accent by remember { mutableStateOf<V2MemoAccent?>(null) }
-    var tags by remember { mutableStateOf(listOf<String>()) }
+    var selectedTagIds by remember { mutableStateOf(setOf<String>()) }
 
     val canSave = title.isNotBlank() || body.isNotBlank()
 
@@ -81,13 +77,14 @@ fun V2MemoCreateTextScreen(
                 canSave = canSave,
                 onClose = onClose,
                 onSave = {
+                    val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
+                    val topic = V2MemoBridge.inferTopic(null, tagNames, title)
                     val memo = V2Memo.textMemo(
                         title = title.ifBlank { body.lineSequence().firstOrNull()?.take(20) ?: "新 Memo" },
                         body = body,
                         topic = topic,
-                        tags = tags,
-                        accent = accent,
-                    )
+                        tags = tagNames,
+                    ).copy(tagIds = selectedTagIds.toList())
                     V2MemoStore.create(memo)
                     onClose()
                 },
@@ -121,28 +118,21 @@ fun V2MemoCreateTextScreen(
 
                     Divider()
 
-                    SectionLabel("话题")
-                    TopicChipRow(topic = topic, onSelect = { topic = it })
-
-                    Divider()
-
-                    SectionLabel("标签")
-                    V2MemoTagPicker(selected = tags, onChange = { tags = it })
-
-                    Divider()
-
-                    SectionLabel("高亮")
-                    AccentChipRow(accent = accent, onSelect = { accent = if (accent == it) null else it })
+                    V2MemoTagPicker(
+                        selectedTagIds = selectedTagIds,
+                        onSelectedTagIdsChange = { selectedTagIds = it },
+                    )
                 }
 
                 SubmitButton(canSubmit = canSave, onSubmit = {
+                    val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
+                    val topic = V2MemoBridge.inferTopic(null, tagNames, title)
                     val memo = V2Memo.textMemo(
                         title = title.ifBlank { body.lineSequence().firstOrNull()?.take(20) ?: "新 Memo" },
                         body = body,
                         topic = topic,
-                        tags = tags,
-                        accent = accent,
-                    )
+                        tags = tagNames,
+                    ).copy(tagIds = selectedTagIds.toList())
                     V2MemoStore.create(memo)
                     onClose()
                 })
@@ -270,49 +260,6 @@ private fun OutlineField(
             singleLine = singleLine,
         )
     }
-}
-
-@Composable
-private fun TopicChipRow(topic: V2Topic, onSelect: (V2Topic) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(V2Topic.assignable, key = { it.name }) { t ->
-            TogglePill(label = t.displayName, selected = t == topic, onClick = { onSelect(t) })
-        }
-    }
-}
-
-@Composable
-private fun AccentChipRow(accent: V2MemoAccent?, onSelect: (V2MemoAccent) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(V2MemoAccent.entries.toList(), key = { it.name }) { a ->
-            TogglePill(label = a.displayName, selected = a == accent, onClick = { onSelect(a) })
-        }
-    }
-}
-
-@Composable
-private fun TogglePill(label: String, selected: Boolean, onClick: () -> Unit) {
-    val bg = if (selected) Color(0xFF2D6A4F) else Color.White
-    val fg = if (selected) Color.White else Color(0xFF1B2A21)
-    val border = if (selected) Color(0xFF2D6A4F) else Color(0xFFE5E7EB)
-    Text(
-        text = label,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        color = fg,
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(bg)
-            .border(width = 1.dp, color = border, shape = RoundedCornerShape(50))
-            .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    )
 }
 
 @Composable

@@ -1,12 +1,10 @@
 package com.mygolfswing.app.ui.auth
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,9 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,9 +23,6 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,14 +38,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.ui.common.V2PresetAvatar
+import com.mygolfswing.app.ui.common.V2PresetAvatars
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -63,22 +59,12 @@ import kotlinx.coroutines.launch
  * 注册页（对齐 iOS `RegisterPage`）。
  *
  * 字段：
- * - 头像（5 个预设 emoji 选其一，自动填充昵称）
+ * - 头像（5 个预设，key 与 iOS `Avatar_*` 一致，自动填充昵称）
  * - 用户名（字母开头，3–20 字符）
  * - 昵称
  * - 密码（至少 8 位，含字母 + 数字）
  * - 确认密码
  */
-private data class PresetAvatar(val key: String, @DrawableRes val drawable: Int, val name: String)
-
-private val presetAvatars = listOf(
-    PresetAvatar("xiaoqie", R.drawable.avatar_xiaoqie, "小切"),
-    PresetAvatar("koala", R.drawable.avatar_xiaokaola, "考拉"),
-    PresetAvatar("fox", R.drawable.avatar_xiaohuli, "狐狸"),
-    PresetAvatar("bear", R.drawable.avatar_xiaoxiong, "小熊"),
-    PresetAvatar("dino", R.drawable.avatar_konglong, "恐龙"),
-)
-
 @Composable
 fun V2RegisterScreen(
     onBack: () -> Unit,
@@ -115,8 +101,8 @@ fun V2RegisterScreen(
             AvatarPicker(
                 selectedKey = avatarKey,
                 onPick = { p ->
-                    avatarKey = p.key
-                    nickname = "${p.name}${(0..9999).random().toString().padStart(4, '0')}"
+                    avatarKey = p.assetKey
+                    nickname = "${p.displayName}${(0..9999).random().toString().padStart(4, '0')}"
                 },
             )
 
@@ -274,43 +260,44 @@ private fun Hero(onBack: () -> Unit) {
 }
 
 @Composable
-private fun AvatarPicker(selectedKey: String?, onPick: (PresetAvatar) -> Unit) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+private fun AvatarPicker(selectedKey: String?, onPick: (V2PresetAvatar) -> Unit) {
+    Row(
         modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.Top,
     ) {
-        items(items = presetAvatars, key = { it.key }) { a ->
-            val selected = a.key == selectedKey
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
+        V2PresetAvatars.all.forEach { avatar ->
+            val selected = avatar.assetKey == selectedKey
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.clickable { onPick(avatar) },
+            ) {
+                Image(
+                    painter = painterResource(avatar.drawableRes),
+                    contentDescription = avatar.displayName,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .size(64.dp)
-                        .background(
-                            if (selected) DSColors.mistGreen else DSColors.warmWhite,
-                            CircleShape,
+                        .size(48.dp)
+                        .then(
+                            if (selected) {
+                                Modifier.shadow(6.dp, CircleShape, spotColor = DSColors.fairway.copy(alpha = 0.3f))
+                            } else {
+                                Modifier
+                            },
                         )
+                        .clip(CircleShape)
                         .border(
-                            width = if (selected) 2.dp else 1.dp,
-                            color = if (selected) DSColors.fairway else DSColors.borderLine,
+                            width = if (selected) 2.5.dp else 1.dp,
+                            color = if (selected) DSColors.fairway else AuthPalette.divider,
                             shape = CircleShape,
-                        )
-                        .clickable { onPick(a) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Image(
-                        painter = painterResource(a.drawable),
-                        contentDescription = a.name,
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-                Spacer(Modifier.height(4.dp))
+                        ),
+                )
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    a.name,
-                    style = DSTypography.caption,
-                    color = if (selected) DSColors.fairway else DSColors.shadowGray,
+                    text = avatar.displayName,
+                    fontSize = 11.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) DSColors.fairway else AuthPalette.placeholder,
                 )
             }
         }

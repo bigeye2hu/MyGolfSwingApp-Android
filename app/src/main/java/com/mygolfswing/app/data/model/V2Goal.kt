@@ -156,11 +156,12 @@ data class V2Goal(
     val isPinned: Boolean get() = pinState == V2PinState.PINNED || pinState == V2PinState.CANCELLING
     val isCompleted: Boolean get() = status == Status.COMPLETED
 
-    /** 今天是否已打卡 */
+    /** 今天是否已打卡（对齐 iOS：lastIncrementAt + checkInDates 双重判断） */
     val hasCheckedInToday: Boolean
         get() {
-            val last = progress.lastIncrementAt ?: return false
-            return last.toLocalDate() == LocalDate.now()
+            val today = LocalDate.now()
+            progress.lastIncrementAt?.toLocalDate()?.let { if (it == today) return true }
+            return progress.checkInDates.any { it.toLocalDate() == today }
         }
 
     /** "3 / 5 次" 或 "已 X 次" */

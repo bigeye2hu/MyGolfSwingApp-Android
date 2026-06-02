@@ -29,7 +29,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayCircle
@@ -73,8 +75,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2Memo
-import com.mygolfswing.app.data.model.V2Topic
+import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
@@ -111,7 +114,7 @@ fun V2MemoCreateVideoScreen(
     var onlinePlatform by remember { mutableStateOf<String?>(null) }
     var onlineThumbUrl by remember { mutableStateOf<String?>(null) }
     var showOnlineDialog by remember { mutableStateOf(false) }
-    var tags by remember { mutableStateOf(listOf<String>()) }
+    var selectedTagIds by remember { mutableStateOf(setOf<String>()) }
     var selectedGoalIds by remember { mutableStateOf(setOf<UUID>()) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
 
@@ -161,7 +164,7 @@ fun V2MemoCreateVideoScreen(
     // 表单状态
     var title by rememberSaveable { mutableStateOf("") }
     var note by rememberSaveable { mutableStateOf("") }
-    var topic by remember { mutableStateOf(V2Topic.SWING) }
+    var noteExpanded by remember { mutableStateOf(false) }
 
     androidx.compose.runtime.LaunchedEffect(pendingOnline) {
         val pick = pendingOnline ?: return@LaunchedEffect
@@ -200,7 +203,8 @@ fun V2MemoCreateVideoScreen(
 
     val hasVideo = localAbsolutePath != null || onlineUrl != null
     val canSave = hasVideo && title.isNotBlank() && !importing
-    val hasDraft = title.isNotBlank() || note.isNotBlank() || hasVideo || tags.isNotEmpty() || selectedGoalIds.isNotEmpty()
+    val hasDraft = title.isNotBlank() || note.isNotBlank() || hasVideo ||
+        selectedTagIds.isNotEmpty() || selectedGoalIds.isNotEmpty()
 
     fun attemptClose() {
         if (hasDraft) showDiscardConfirm = true else onClose()
@@ -210,10 +214,17 @@ fun V2MemoCreateVideoScreen(
         val isOnline = onlineUrl != null
         val videoStringForStore = onlineUrl ?: localAbsolutePath?.let { "file://$it" }
         val thumbStringForStore = localThumbPath?.let { "file://$it" }
+        val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
+        val tagIds = selectedTagIds.toList()
+        val topic = V2MemoBridge.inferTopic(
+            category = V2CategoryStore.groupForItemId(tagIds.firstOrNull() ?: "")?.name,
+            tags = tagNames,
+            title = title.trim(),
+        )
         val training = when (sourceKind) {
             SourceKind.CAMERA -> "拍摄"
             SourceKind.ALBUM -> "本地上传"
-            SourceKind.ONLINE -> "在线"
+            SourceKind.ONLINE -> "在线视频"
             null -> null
         }
         val memo = V2Memo.mixedMemo(
@@ -222,17 +233,16 @@ fun V2MemoCreateVideoScreen(
             videoUrl = videoStringForStore,
             durationSec = localDurationSec,
             topic = topic,
-            tags = tags,
-            metaText = buildMetaText(
-                isOnline = isOnline,
-                durationSec = localDurationSec,
-            ),
+            tags = tagNames,
+            metaText = buildMetaText(isOnline = isOnline, durationSec = localDurationSec),
         ).apply {
+            this.tagIds = tagIds
             thumbnailUrl = if (isOnline) onlineThumbUrl else thumbStringForStore
             trainingMethod = training
             isOnlineVideo = isOnline
             platform = if (isOnline) onlinePlatform else null
             linkedGoalIds = selectedGoalIds.toList()
+            thumbnailKind = V2MemoBridge.thumbnailKindFor(topic)
         }
         V2MemoStore.create(memo)
         selectedGoalIds.forEach { goalId -> V2GoalStore.linkMemo(memo.id, goalId) }
@@ -242,13 +252,7 @@ fun V2MemoCreateVideoScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    0.0f to Color(0xFFF0F8F4),
-                    0.5f to Color(0xFFF5F5F0),
-                    1.0f to Color(0xFFFAF7F0),
-                ),
-            ),
+            .background(Color(0xFFFAF7F0)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             NavBar(canSave = canSave, onClose = ::attemptClose, onSave = ::buildAndSave)
@@ -257,8 +261,9 @@ fun V2MemoCreateVideoScreen(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 24.dp, bottom = 160.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 VideoSourceBlock(
                     sourceKind = sourceKind,
@@ -298,51 +303,27 @@ fun V2MemoCreateVideoScreen(
                         onlineThumbUrl = null
                     },
                 )
-
-                FormCard {
-                    SectionLabel("标题")
-                    OutlineField(
-                        text = title,
-                        onChange = { if (it.length <= 24) title = it },
-                        placeholder = "如：7号铁下杆节奏",
-                    )
-
-                    DividerLine()
-
-                    SectionLabel("笔记（可选）")
-                    OutlineField(
-                        text = note,
-                        onChange = { if (it.length <= 240) note = it },
-                        placeholder = "记下今天的观察 / 教练点评……",
-                        minHeight = 100.dp,
-                        singleLine = false,
-                    )
-
-                    DividerLine()
-
-                    SectionLabel("话题")
-                    TopicChipRow(topic = topic, onSelect = { topic = it })
-
-                    DividerLine()
-
-                    SectionLabel("标签")
-                    V2MemoTagPicker(selected = tags, onChange = { tags = it })
-
-                    DividerLine()
-
-                    SectionLabel("关联目标")
-                    LinkedGoalsField(
-                        goals = activeGoals.filter { it.status == V2Goal.Status.ACTIVE },
-                        selected = selectedGoalIds,
-                        onToggle = { id ->
-                            selectedGoalIds = if (id in selectedGoalIds) selectedGoalIds - id else selectedGoalIds + id
-                        },
-                    )
-                }
-
-                SubmitButton(canSubmit = canSave, onClick = ::buildAndSave)
+                TitleSection(title = title, onChange = { if (it.length <= 24) title = it })
+                NoteSection(
+                    note = note,
+                    expanded = noteExpanded,
+                    onToggleExpand = { noteExpanded = !noteExpanded },
+                    onChange = { if (it.length <= 240) note = it },
+                )
+                V2MemoTagPicker(
+                    selectedTagIds = selectedTagIds,
+                    onSelectedTagIdsChange = { selectedTagIds = it },
+                )
+                LinkedGoalsSection(
+                    goals = activeGoals.filter { it.status == V2Goal.Status.ACTIVE },
+                    selected = selectedGoalIds,
+                    onToggle = { id ->
+                        selectedGoalIds = if (id in selectedGoalIds) selectedGoalIds - id else selectedGoalIds + id
+                    },
+                )
             }
         }
+        BottomSaveBar(canSave = canSave, onSave = ::buildAndSave, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
     if (showOnlineDialog && onOpenOnlinePicker == null) {
@@ -412,6 +393,123 @@ private fun buildMetaText(isOnline: Boolean, durationSec: Double?): String {
 }
 
 // =================================================================
+// 标题 / 笔记 / 底部栏
+// =================================================================
+
+@Composable
+private fun TitleSection(title: String, onChange: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("标题", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+        Row(verticalAlignment = Alignment.Bottom) {
+            BasicTextField(
+                value = title,
+                onValueChange = onChange,
+                textStyle = TextStyle(fontSize = 15.sp, color = Color(0xFF1B2A21)),
+                cursorBrush = SolidColor(Color(0xFF2D6A4F)),
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                decorationBox = { inner ->
+                    if (title.isEmpty()) {
+                        Text("给这条 Memo 起个标题…", fontSize = 15.sp, color = Color(0xFF9CA3AF))
+                    }
+                    inner()
+                },
+            )
+            Text("${title.length}/24", fontSize = 11.sp, color = Color(0xFF9CA3AF))
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE5E7EB)))
+    }
+}
+
+@Composable
+private fun NoteSection(
+    note: String,
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onChange: (String) -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFFFAF7F0))
+                .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(12.dp))
+                .clickable { onToggleExpand() }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (note.isEmpty()) "加点笔记…" else "笔记",
+                fontSize = 15.sp,
+                color = if (note.isEmpty()) Color(0xFF9CA3AF) else Color(0xFF1B2A21),
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                contentDescription = null,
+                tint = Color(0xFF9CA3AF),
+            )
+        }
+        if (expanded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 100.dp)
+                    .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
+                    .background(Color(0xFFFAF7F0))
+                    .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
+                    .padding(16.dp),
+            ) {
+                BasicTextField(
+                    value = note,
+                    onValueChange = onChange,
+                    textStyle = TextStyle(fontSize = 15.sp, color = Color(0xFF1B2A21)),
+                    cursorBrush = SolidColor(Color(0xFF2D6A4F)),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (note.isEmpty()) {
+                    Text("今天练习推杆时注意力不集中…", fontSize = 15.sp, color = Color(0xFFC5C5C5))
+                }
+                Text(
+                    "${note.length}/240",
+                    fontSize = 11.sp,
+                    color = Color(0xFF9CA3AF),
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomSaveBar(canSave: Boolean, onSave: () -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFFFAF7F0))
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("将保存到 视频笔记 · 视频 Memo", fontSize = 11.sp, color = Color(0xFF9CA3AF))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .clip(RoundedCornerShape(50))
+                .background(if (canSave) Color(0xFF2D6A4F) else Color(0xFF2D6A4F).copy(alpha = 0.4f))
+                .clickable(enabled = canSave, onClick = onSave),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text("保存视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+    }
+}
+
+// =================================================================
 // NavBar
 // =================================================================
 
@@ -437,7 +535,7 @@ private fun NavBar(canSave: Boolean, onClose: () -> Unit, onSave: () -> Unit) {
             Icon(Icons.Filled.Close, contentDescription = "关闭", tint = Color(0xFF1B2A21), modifier = Modifier.size(14.dp))
         }
         Spacer(modifier = Modifier.weight(1f))
-        Text("视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+        Text("新建视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text = "保存",
@@ -481,7 +579,7 @@ private fun VideoSourceBlock(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("视频源", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B2A21))
+            Text("视频来源", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
             Spacer(Modifier.weight(1f))
             if (sourceKind != null && !importing) {
                 Text(
@@ -533,40 +631,34 @@ private fun VideoSourceBlock(
 }
 
 @Composable
-private fun LinkedGoalsField(
+private fun LinkedGoalsSection(
     goals: List<com.mygolfswing.app.data.model.V2Goal>,
     selected: Set<UUID>,
     onToggle: (UUID) -> Unit,
 ) {
-    if (goals.isEmpty()) {
-        Text(
-            "暂无进行中的目标，可先创建目标后再关联",
-            fontSize = 12.sp,
-            color = Color(0xFF9CA3AF),
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-        )
-        return
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        goals.take(8).forEach { goal ->
-            val on = goal.id in selected
-            Text(
-                text = goal.title,
-                fontSize = 13.sp,
-                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                color = if (on) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (on) Color(0xFFEBF5EC) else Color(0xFFF9FAFB))
-                    .border(
-                        1.dp,
-                        if (on) Color(0xFF2D6A4F) else Color(0xFFE5E7EB),
-                        RoundedCornerShape(12.dp),
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("关联到目标", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+        if (goals.isEmpty()) {
+            Text("还没有进行中的目标", fontSize = 12.sp, color = Color(0xFF9CA3AF), modifier = Modifier.padding(vertical = 8.dp))
+        } else {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(goals, key = { it.id }) { goal ->
+                    val on = goal.id in selected
+                    Text(
+                        text = goal.title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (on) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(if (on) Color(0xFFE8F5E9) else Color.White)
+                            .border(1.dp, if (on) Color(0xFF2D6A4F) else Color(0xFFE5E7EB), RoundedCornerShape(50))
+                            .clickable { onToggle(goal.id) }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
                     )
-                    .clickable { onToggle(goal.id) }
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            )
+                }
+            }
         }
     }
 }
@@ -813,130 +905,4 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
-}
-
-// =================================================================
-// 表单子组件
-// =================================================================
-
-@Composable
-private fun FormCard(content: @Composable () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.White.copy(alpha = 0.92f))
-            .padding(vertical = 4.dp),
-    ) { content() }
-}
-
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text = text,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFF1B2A21),
-        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp),
-    )
-}
-
-@Composable
-private fun DividerLine() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp)
-            .height(1.dp)
-            .background(Color.Black.copy(alpha = 0.06f)),
-    )
-}
-
-@Composable
-private fun OutlineField(
-    text: String,
-    onChange: (String) -> Unit,
-    placeholder: String,
-    minHeight: androidx.compose.ui.unit.Dp = 44.dp,
-    singleLine: Boolean = true,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFFFAF7F0))
-            .border(width = 1.dp, color = Color(0xFFE5E7EB), shape = RoundedCornerShape(12.dp))
-            .defaultMinSize(minHeight = minHeight)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-    ) {
-        if (text.isEmpty()) {
-            Text(text = placeholder, fontSize = 14.sp, color = Color(0xFFB8BEC4))
-        }
-        BasicTextField(
-            value = text,
-            onValueChange = onChange,
-            textStyle = TextStyle(fontSize = 14.sp, color = Color(0xFF1B2A21)),
-            cursorBrush = SolidColor(Color(0xFF2D6A4F)),
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = singleLine,
-        )
-    }
-}
-
-@Composable
-private fun TopicChipRow(topic: V2Topic, onSelect: (V2Topic) -> Unit) {
-    LazyRow(
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(V2Topic.assignable, key = { it.name }) { t ->
-            val selected = t == topic
-            Text(
-                text = t.displayName,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = if (selected) Color.White else Color(0xFF1B2A21),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(if (selected) Color(0xFF2D6A4F) else Color.White)
-                    .border(width = 1.dp, color = if (selected) Color(0xFF2D6A4F) else Color(0xFFE5E7EB), shape = RoundedCornerShape(50))
-                    .clickable { onSelect(t) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SubmitButton(canSubmit: Boolean, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .shadow(elevation = if (canSubmit) 10.dp else 0.dp, shape = RoundedCornerShape(16.dp))
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        if (canSubmit) Color(0xFF2D6A4F) else Color(0xFFB8BEC4),
-                        if (canSubmit) Color(0xFF40916C) else Color(0xFFD1D5DB),
-                    ),
-                ),
-            )
-            .clickable(enabled = canSubmit, onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = Icons.Filled.CheckCircle,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier
-                .size(16.dp)
-                .padding(end = 4.dp),
-        )
-        Text(text = "保存视频 Memo", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-    }
 }

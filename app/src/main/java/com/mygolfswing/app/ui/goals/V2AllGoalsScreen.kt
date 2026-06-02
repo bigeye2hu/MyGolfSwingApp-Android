@@ -489,7 +489,7 @@ private fun CardCheckInButton(goal: V2Goal, onClick: () -> Unit) {
             .shadow(elevation = if (enabled) 4.dp else 0.dp, shape = CircleShape)
             .clip(CircleShape)
             .background(bg)
-            .clickable(enabled = enabled, onClick = onClick),
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

@@ -452,7 +452,7 @@ private fun PrimaryBtn(
             .shadow(elevation = if (enabled) 8.dp else 0.dp, shape = RoundedCornerShape(14.dp))
             .clip(RoundedCornerShape(14.dp))
             .background(bg)
-            .clickable(enabled = enabled, onClick = onClick),
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {

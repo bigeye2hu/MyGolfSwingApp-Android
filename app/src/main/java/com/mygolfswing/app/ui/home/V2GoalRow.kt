@@ -61,7 +61,6 @@ fun V2GoalRow(
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White)
             .border(width = 1.dp, color = Color.Black.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp))
-            .clickable { onTap() }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -69,7 +68,9 @@ fun V2GoalRow(
         IconBox(goal = goal)
 
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onTap),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
@@ -147,7 +148,7 @@ private fun CompleteButton(goal: V2Goal, onComplete: () -> Unit) {
         goal.hasCheckedInToday ->
             ButtonStyle("今日已打", Icons.Filled.CheckCircle, DSColors.fairway.copy(alpha = 0.12f), DSColors.fairway, false)
         else ->
-            ButtonStyle("打卡", Icons.Filled.Check, DSColors.fairway, Color.White, true)
+            ButtonStyle("打卡", null, DSColors.fairway, Color.White, true)
     }
 
     Row(
@@ -157,9 +158,17 @@ private fun CompleteButton(goal: V2Goal, onComplete: () -> Unit) {
             .shadow(elevation = if (style.enabled) 4.dp else 0.dp, shape = RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
             .background(style.background)
-            .clickable(enabled = style.enabled, onClick = onComplete)
+            .then(if (style.enabled) Modifier.clickable(onClick = onComplete) else Modifier)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
+        style.icon?.let { icon ->
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = style.foreground,
+                modifier = Modifier.size(12.dp),
+            )
+        }
         Text(
             text = style.title,
             fontSize = 12.sp,

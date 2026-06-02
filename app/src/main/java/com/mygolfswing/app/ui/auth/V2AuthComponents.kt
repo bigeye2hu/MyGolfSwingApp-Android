@@ -28,7 +28,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +39,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -252,6 +257,13 @@ internal fun AuthAgreementRow(
     onOpenPrivacy: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val linkStyle = TextLinkStyles(
+        style = SpanStyle(
+            color = DSColors.fairway,
+            fontWeight = FontWeight.Medium,
+            textDecoration = TextDecoration.Underline,
+        ),
+    )
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
@@ -278,15 +290,25 @@ internal fun AuthAgreementRow(
             }
         }
         Spacer(Modifier.width(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("我已阅读并同意 ", style = DSTypography.caption, color = AuthPalette.labelText)
-            TextButton(onClick = onOpenTerms, modifier = Modifier.height(24.dp)) {
-                Text("《用户协议》", color = DSColors.fairway, style = DSTypography.caption)
-            }
-            Text(" 和 ", style = DSTypography.caption, color = AuthPalette.labelText)
-            TextButton(onClick = onOpenPrivacy, modifier = Modifier.height(24.dp)) {
-                Text("《隐私政策》", color = DSColors.fairway, style = DSTypography.caption)
-            }
-        }
+        Text(
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onAgreedChange(!agreed) },
+            style = DSTypography.caption.copy(color = AuthPalette.labelText),
+            text = buildAnnotatedString {
+                append("我已阅读并同意 ")
+                withLink(
+                    LinkAnnotation.Clickable(tag = "terms", styles = linkStyle) { onOpenTerms() },
+                ) {
+                    append("《用户协议》")
+                }
+                append(" 和 ")
+                withLink(
+                    LinkAnnotation.Clickable(tag = "privacy", styles = linkStyle) { onOpenPrivacy() },
+                ) {
+                    append("《隐私政策》")
+                }
+            },
+        )
     }
 }

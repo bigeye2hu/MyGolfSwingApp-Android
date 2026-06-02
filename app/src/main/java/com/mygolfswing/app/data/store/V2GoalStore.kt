@@ -6,11 +6,8 @@ import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2Topic
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.util.UUID
@@ -50,9 +47,21 @@ object V2GoalStore {
         if (collecting) return
         collecting = true
         scope.launch {
-            repo.observeAll().onEach { latest ->
-                _goals.value = latest
-            }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+            repo.observeAll().collect { latest ->
+                _goals.value = mergeRoomGoals(latest)
+            }
+        }
+    }
+
+    /**
+     * Room 推送可能早于 [upsert] 完成，避免覆盖 [checkIn] 等操作的乐观更新（对齐 iOS 先 save 再 reload）。
+     */
+    private fun mergeRoomGoals(room: List<V2Goal>): List<V2Goal> {
+        val memoryById = _goals.value.associateBy { it.id }
+        if (memoryById.isEmpty()) return room
+        return room.map { row ->
+            val mem = memoryById[row.id] ?: return@map row
+            if (mem.updatedAt.isAfter(row.updatedAt)) mem else row
         }
     }
 
@@ -149,10 +158,15 @@ object V2GoalStore {
         scope.launch { repo.delete(goalId.toString()) }
     }
 
-    fun checkIn(goalId: UUID): V2Goal? {
-        val current = _goals.value.firstOrNull { it.id == goalId } ?: return null
-        if (current.status != V2Goal.Status.ACTIVE) return null
-        if (current.hasCheckedInToday) return null
+    /**
+     * 打卡 +1（对齐 iOS `V2GoalStore.checkIn`）。
+     *
+     * @return 是否成功打卡（今日已打 / 非 active 返回 false）
+     */
+    fun checkIn(goalId: UUID): Boolean {
+        val current = _goals.value.firstOrNull { it.id == goalId } ?: return false
+        if (current.status != V2Goal.Status.ACTIVE) return false
+        if (current.hasCheckedInToday) return false
         val now = LocalDateTime.now()
         val newCurrent = current.progress.current + 1
         val newProgress = current.progress.copy(
@@ -160,16 +174,27 @@ object V2GoalStore {
             lastIncrementAt = now,
             checkInDates = current.progress.checkInDates + now,
         )
-        val total = current.targetSessions
-        val isComplete = total != null && newCurrent >= total
+        val isComplete = isGoalReached(current, newCurrent)
         val updated = current.copy(
             progress = newProgress,
             status = if (isComplete) V2Goal.Status.COMPLETED else current.status,
             completedAt = if (isComplete) now else current.completedAt,
             updatedAt = now,
         )
+        // 乐观更新 UI（iOS 同步 reload）；Room Flow 随后会再对齐一次
+        _goals.value = _goals.value.map { if (it.id == goalId) updated else it }
         scope.launch { repo.upsert(updated) }
-        return updated
+        return true
+    }
+
+    /** 完成判定：优先 targetSessions，否则回退 metric.target（与 iOS 一致） */
+    private fun isGoalReached(goal: V2Goal, progressCurrent: Double): Boolean {
+        goal.targetSessions?.takeIf { it > 0 }?.let { total ->
+            return progressCurrent >= total
+        }
+        if (goal.metric.kind == V2Goal.Metric.Kind.FREE) return false
+        if (goal.metric.target <= 0) return false
+        return progressCurrent >= goal.metric.target
     }
 
     fun pause(goalId: UUID) {

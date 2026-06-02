@@ -5,7 +5,7 @@ import com.mygolfswing.app.data.ai.V2AIService
 import com.mygolfswing.app.data.db.V2Database
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.repo.V2AIChatRepository
-import com.mygolfswing.app.data.repo.V2AuthRepository
+import com.mygolfswing.app.data.repo.V2CategoryRepository
 import com.mygolfswing.app.data.repo.V2CreditsRepository
 import com.mygolfswing.app.data.repo.V2FeedbackRepository
 import com.mygolfswing.app.data.repo.V2GoalRepository
@@ -15,7 +15,9 @@ import com.mygolfswing.app.data.repo.V2ProfileCloudConsistencyAuditRepository
 import com.mygolfswing.app.data.repo.V2PlazaRepository
 import com.mygolfswing.app.data.repo.V2SwingSessionRepository
 import com.mygolfswing.app.data.repo.V2VideoDownloadRepository
+import com.mygolfswing.app.data.repo.V2AuthRepository
 import com.mygolfswing.app.data.session.V2SessionStore
+import com.mygolfswing.app.data.store.V2CategoryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,6 +59,11 @@ object ServiceLocator {
         private set
     lateinit var cloudConsistencyAuditRepo: V2ProfileCloudConsistencyAuditRepository
         private set
+    lateinit var categoryRepo: V2CategoryRepository
+        private set
+    lateinit var appContext: Context
+        private set
+
     lateinit var aiService: V2AIService
         private set
 
@@ -65,6 +72,7 @@ object ServiceLocator {
     @Synchronized
     fun init(context: Context) {
         if (::db.isInitialized) return
+        appContext = context.applicationContext
         db = V2Database.get(context)
         session = V2SessionStore(context)
         net = V2NetClient(session)
@@ -80,6 +88,8 @@ object ServiceLocator {
         golfProfileRepo = V2GolfProfileRepository(db.golfProfile(), net, session)
         aiChatRepo = V2AIChatRepository(db.aiChat(), session)
         cloudConsistencyAuditRepo = V2ProfileCloudConsistencyAuditRepository(db.goals(), db.memos(), db.aiChat(), net, session)
+        categoryRepo = V2CategoryRepository(appContext, net)
+        V2CategoryStore.init(categoryRepo)
         aiService = V2AIService(net, session)
     }
 }

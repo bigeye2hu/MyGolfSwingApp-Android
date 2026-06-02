@@ -80,6 +80,9 @@ interface MemoDao {
 
     @Query("DELETE FROM v2_memo")
     suspend fun clear()
+
+    @Query("DELETE FROM v2_memo WHERE ownerUserId = :ownerUserId")
+    suspend fun clearForUser(ownerUserId: String)
 }
 
 @Dao
@@ -108,9 +111,17 @@ interface AIChatDao {
     @Query("DELETE FROM v2_ai_session WHERE id = :id AND ownerUserId = :ownerUserId")
     suspend fun deleteSession(id: String, ownerUserId: String)
 
-    @Transaction
+    @Query("DELETE FROM v2_ai_message WHERE ownerUserId = :ownerUserId")
+    suspend fun clearMessages(ownerUserId: String)
+
     @Query("DELETE FROM v2_ai_session WHERE ownerUserId = :ownerUserId")
-    suspend fun clearAll(ownerUserId: String)
+    suspend fun clearSessions(ownerUserId: String)
+
+    @Transaction
+    suspend fun clearAll(ownerUserId: String) {
+        clearMessages(ownerUserId)
+        clearSessions(ownerUserId)
+    }
 }
 
 @Dao
@@ -144,6 +155,9 @@ interface SwingSessionDao {
 
     @Query("DELETE FROM v2_swing_session WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("DELETE FROM v2_swing_session WHERE userId = :userId")
+    suspend fun clear(userId: String)
 }
 
 @Dao
@@ -153,4 +167,7 @@ interface GolfProfileDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: GolfProfileEntity)
+
+    @Query("DELETE FROM v2_golf_profile WHERE userId = :userId")
+    suspend fun delete(userId: String)
 }

@@ -20,17 +20,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.mygolfswing.app.R
 import com.mygolfswing.app.ui.designsystem.DSColors
-
-/** 注册页预设头像 key → drawable（与 iOS `DefaultAvatars` 一致） */
-private val presetAvatarDrawable = mapOf(
-    "xiaoqie" to R.drawable.avatar_xiaoqie,
-    "koala" to R.drawable.avatar_xiaokaola,
-    "fox" to R.drawable.avatar_xiaohuli,
-    "bear" to R.drawable.avatar_xiaoxiong,
-    "dino" to R.drawable.avatar_konglong,
-)
 
 private fun isRemoteAvatarUrl(avatar: String?): Boolean {
     val v = avatar?.trim().orEmpty()
@@ -38,7 +28,7 @@ private fun isRemoteAvatarUrl(avatar: String?): Boolean {
 }
 
 /**
- * 用户头像：远程 URL → Coil；预设 key → 本地头像；否则占位图标（对齐 iOS 头像 3 级回退）。
+ * 用户头像：远程 URL → Coil；预设 `Avatar_*` key → 本地头像；否则占位图标。
  */
 @Composable
 fun V2UserAvatar(
@@ -46,6 +36,7 @@ fun V2UserAvatar(
     modifier: Modifier = Modifier,
     emojiFontSize: TextUnit = 28.sp,
     placeholderIconSize: androidx.compose.ui.unit.Dp = 28.dp,
+    contentScale: ContentScale = ContentScale.Crop,
 ) {
     Box(
         modifier = modifier
@@ -59,17 +50,17 @@ fun V2UserAvatar(
                     model = avatar,
                     contentDescription = "头像",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
+                    contentScale = contentScale,
                 )
             }
             else -> {
-                val drawable = avatar?.trim()?.let { presetAvatarDrawable[it] }
+                val drawable = V2PresetAvatars.drawableFor(avatar)
                 if (drawable != null) {
                     Image(
                         painter = painterResource(drawable),
                         contentDescription = "头像",
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
+                        contentScale = contentScale,
                     )
                 } else {
                     Icon(

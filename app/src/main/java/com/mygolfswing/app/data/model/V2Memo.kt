@@ -23,6 +23,7 @@ data class V2Memo(
     var title: String? = null,
 
     var topic: V2Topic,
+    var tagIds: List<String> = emptyList(),
     var tags: List<String> = emptyList(),
 
     var pinState: V2PinState = V2PinState.NONE,

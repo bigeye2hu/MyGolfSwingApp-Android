@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2PinState
+import com.mygolfswing.app.data.memo.V2MemoBridge
+import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
@@ -73,7 +75,17 @@ fun V2MemoDetailScreen(
 
     var title by remember(memo.id) { mutableStateOf(memo.title ?: memo.displayTitle ?: "") }
     var body by remember(memo.id) { mutableStateOf(memo.text ?: "") }
-    var tags by remember(memo.id) { mutableStateOf(memo.tags) }
+    var selectedTagIds by remember(memo.id) {
+        mutableStateOf(
+            if (memo.tagIds.isNotEmpty()) {
+                memo.tagIds.toSet()
+            } else {
+                memo.tags.mapNotNull { name ->
+                    V2CategoryStore.getAllItems().firstOrNull { it.name == name }?.id
+                }.toSet()
+            },
+        )
+    }
     var dirty by remember { mutableStateOf(false) }
 
     Box(
@@ -124,7 +136,10 @@ fun V2MemoDetailScreen(
                         cursorBrush = SolidColor(DSColors.fairway),
                     )
                 }
-                V2MemoTagPicker(selected = tags, onChange = { tags = it; dirty = true })
+                V2MemoTagPicker(
+                    selectedTagIds = selectedTagIds,
+                    onSelectedTagIdsChange = { selectedTagIds = it; dirty = true },
+                )
                 val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
                 Text(
                     "创建于 ${fmt.format(memo.createdAt)} · 更新于 ${fmt.format(memo.updatedAt)}",
@@ -142,11 +157,14 @@ fun V2MemoDetailScreen(
                         .clip(RoundedCornerShape(50))
                         .background(DSColors.fairway)
                         .clickable {
+                            val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
                             val updated = memo.copy(
                                 title = title.ifBlank { null },
                                 displayTitle = title.ifBlank { memo.displayTitle },
                                 text = body,
-                                tags = tags,
+                                tags = tagNames,
+                                tagIds = selectedTagIds.toList(),
+                                topic = V2MemoBridge.inferTopic(null, tagNames, title),
                             )
                             V2MemoStore.update(updated)
                             dirty = false

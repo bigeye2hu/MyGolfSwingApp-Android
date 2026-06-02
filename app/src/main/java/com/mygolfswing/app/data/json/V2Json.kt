@@ -175,6 +175,7 @@ object V2Json {
         memo.title?.let { o["title"] = JsonPrimitive(it) }
         o["topic"] = JsonPrimitive(memo.topic.name.lowercase())
         o["tags"] = JsonArray(memo.tags.map { JsonPrimitive(it) })
+        o["tagIds"] = JsonArray(memo.tagIds.map { JsonPrimitive(it) })
         o["pinState"] = JsonPrimitive(memo.pinState.name.lowercase())
         o["linkedGoalIds"] = JsonArray(memo.linkedGoalIds.map { JsonPrimitive(it.toString()) })
         o["createdAt"] = JsonPrimitive(memo.createdAt.toEpochMillis())
@@ -204,6 +205,7 @@ object V2Json {
         title = json["title"]?.jsonPrimitive?.contentOrNull,
         topic = enumByName(json["topic"]!!.jsonPrimitive.content, V2Topic.entries),
         tags = json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
+        tagIds = json["tagIds"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
         pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { enumByName(it, V2PinState.entries) } ?: V2PinState.NONE,
         linkedGoalIds = json["linkedGoalIds"]?.jsonArray?.map { UUID.fromString(it.jsonPrimitive.content) } ?: emptyList(),
         createdAt = json["createdAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),

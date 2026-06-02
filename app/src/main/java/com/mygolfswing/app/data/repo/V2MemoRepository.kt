@@ -12,6 +12,7 @@ import com.mygolfswing.app.data.model.V2MemoSource
 import com.mygolfswing.app.data.model.V2PinState
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.video.V2VideoThumbnailUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -260,6 +261,7 @@ class V2MemoRepository(
             }
         }
         val duration = o["duration"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+        val tagIds = parseTagsJson(o["tagIds"]?.jsonPrimitive?.contentOrNull)
         val tags = parseTagsJson(o["tags"]?.jsonPrimitive?.contentOrNull)
         val createdMs = parseCloudMillis(o["memoCreatedDate"]) ?: System.currentTimeMillis()
         val updatedMs = cloudUpdatedMillis(o)
@@ -290,6 +292,7 @@ class V2MemoRepository(
         }
         return base.copy(
             id = id,
+            tagIds = tagIds,
             source = source,
             createdAt = createdAt,
             updatedAt = updatedAt,
@@ -409,6 +412,9 @@ class V2MemoRepository(
         val createdMs = memo.createdAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val updatedMs = memo.updatedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val tagsJson = JsonArray(memo.tags.map { JsonPrimitive(it) }).toString()
+        val tagIdsJson = JsonArray(memo.tagIds.map { JsonPrimitive(it) }).toString()
+        val parentCategoryId = memo.tagIds.firstOrNull()?.let { V2CategoryStore.groupForItemId(it)?.id } ?: "technical_details"
+        val subcategoryId = memo.tagIds.firstOrNull() ?: "default"
         val isOnline = memo.isOnlineVideo
         val thumbPath = if (isOnline) null else memo.videoUrl?.removePrefix("file://")
         val thumbnailBase64 = V2VideoThumbnailUtil.jpegBase64ForUpload(thumbPath)
@@ -418,9 +424,10 @@ class V2MemoRepository(
                 put("title", JsonPrimitive(memo.displayTitle ?: memo.title ?: ""))
                 put("memoDescription", JsonPrimitive(memo.text ?: ""))
                 put("trainingMethod", JsonPrimitive(memo.trainingMethod ?: ""))
-                put("parentCategoryId", JsonPrimitive(""))
-                put("subcategoryId", JsonPrimitive(""))
+                put("parentCategoryId", JsonPrimitive(parentCategoryId))
+                put("subcategoryId", JsonPrimitive(subcategoryId))
                 put("tags", JsonPrimitive(tagsJson))
+                put("tagIds", JsonPrimitive(tagIdsJson))
                 put("category", JsonPrimitive("training"))
                 put("categoryId", JsonPrimitive(""))
                 put("customCategory", JsonPrimitive(""))

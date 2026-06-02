@@ -528,9 +528,13 @@ private fun DrawingToolsPanel(state: DrawingState, onClose: () -> Unit, modifier
     ) {
         ToolButton("自由", selected = state.currentTool == DrawingTool.Freehand) { state.currentTool = DrawingTool.Freehand }
         ToolButton("直线", selected = state.currentTool == DrawingTool.Line) { state.currentTool = DrawingTool.Line }
+        ToolButton("选择", selected = state.currentTool == DrawingTool.Select) { state.currentTool = DrawingTool.Select }
         ToolButton("角度", selected = state.currentTool == DrawingTool.Angle) { state.currentTool = DrawingTool.Angle }
         drawingColors.forEach { color ->
             ColorToolButton(color = color, selected = state.currentColor == color) { state.currentColor = color }
+        }
+        if (state.hasSelection) {
+            ToolButton("删除", tint = Color(0xFFFF5252)) { state.deleteSelected() }
         }
         ToolButton("清空") { state.clearAll() }
         ToolButton("撤销") { state.undo() }
@@ -541,30 +545,54 @@ private fun DrawingToolsPanel(state: DrawingState, onClose: () -> Unit, modifier
 @Composable
 private fun DrawingOverlay(state: DrawingState, modifier: Modifier = Modifier) {
     Canvas(
-        modifier = modifier.pointerInput(state.currentTool) {
+        modifier = modifier.pointerInput(state.currentTool, state.selectedStrokeId, state.strokes.size) {
+            var gestureStart: Offset? = null
+            var lastPosition = Offset.Zero
             detectDragGestures(
                 onDragStart = { point ->
-                    if (state.currentTool == DrawingTool.Angle) {
-                        state.handleAngleTap(point)
-                    } else {
-                        state.begin(point)
+                    gestureStart = point
+                    lastPosition = point
+                    when (state.currentTool) {
+                        DrawingTool.Angle -> state.handleAngleTap(point)
+                        DrawingTool.Select -> state.beginEdit(point)
+                        else -> state.begin(point)
                     }
                 },
                 onDrag = { change, _ ->
-                    if (state.currentTool != DrawingTool.Angle) {
+                    lastPosition = change.position
+                    if (state.editDrag != null) {
+                        state.continueEdit(change.position)
+                    } else if (state.currentTool != DrawingTool.Angle && state.currentTool != DrawingTool.Select) {
                         state.move(change.position)
                     }
                 },
                 onDragEnd = {
-                    if (state.currentTool != DrawingTool.Angle) {
+                    if (state.editDrag != null) {
+                        state.endEdit()
+                    } else if (state.currentTool == DrawingTool.Select) {
+                        val start = gestureStart
+                        if (start != null) {
+                            val dist = kotlin.math.hypot(
+                                (lastPosition.x - start.x).toDouble(),
+                                (lastPosition.y - start.y).toDouble(),
+                            ).toFloat()
+                            if (dist < 8f) {
+                                if (!state.selectStroke(lastPosition)) {
+                                    state.clearSelection()
+                                }
+                            }
+                        }
+                    } else if (state.currentTool != DrawingTool.Angle) {
                         state.end()
                     }
+                    gestureStart = null
                 },
             )
         },
     ) {
-        fun drawStroke(stroke: DrawingStroke, alpha: Float = 1f) {
-            val strokeStyle = Stroke(width = stroke.lineWidth, cap = StrokeCap.Round)
+        fun drawStroke(stroke: DrawingStroke, alpha: Float = 1f, selected: Boolean = false) {
+            val lineWidth = if (selected) stroke.lineWidth + 1.5f else stroke.lineWidth
+            val strokeStyle = Stroke(width = lineWidth, cap = StrokeCap.Round)
             when (stroke.tool) {
                 DrawingTool.Freehand -> {
                     val points = stroke.points
@@ -580,9 +608,9 @@ private fun DrawingOverlay(state: DrawingState, modifier: Modifier = Modifier) {
                     val start = stroke.start
                     val end = stroke.end
                     if (start != null && end != null) {
-                        drawLine(stroke.color.copy(alpha = alpha), start, end, stroke.lineWidth, StrokeCap.Round)
+                        drawLine(stroke.color.copy(alpha = alpha), start, end, lineWidth, StrokeCap.Round)
                     }
-                    if (stroke.angle != null && stroke.vertex != null && start != null && end != null) {
+                    if (stroke.tool == DrawingTool.Angle && stroke.angle != null && stroke.vertex != null && start != null && end != null) {
                         val radius = 40f
                         val startAngle = Math.toDegrees(atan2((end.y - start.y).toDouble(), (end.x - start.x).toDouble()))
                         val endAngle = Math.toDegrees(
@@ -616,14 +644,42 @@ private fun DrawingOverlay(state: DrawingState, modifier: Modifier = Modifier) {
                         )
                     }
                 }
+                DrawingTool.Select -> Unit
             }
         }
-        state.strokes.forEach { drawStroke(it) }
+        state.strokes.forEach { stroke ->
+            drawStroke(stroke, selected = stroke.id == state.selectedStrokeId && stroke.tool == DrawingTool.Line)
+        }
         state.inProgress?.let { drawStroke(it, alpha = 0.9f) }
+
+        val selected = state.selectedStroke
+        if (selected != null && selected.tool == DrawingTool.Line) {
+            val start = selected.start
+            val end = selected.end
+            if (start != null && end != null) {
+                val handleRadius = 7f
+                drawCircle(Color.White, handleRadius, start)
+                drawCircle(selected.color, handleRadius - 2f, start, style = Stroke(width = 2f))
+                drawCircle(Color.White, handleRadius, end)
+                drawCircle(selected.color, handleRadius - 2f, end, style = Stroke(width = 2f))
+            }
+        }
     }
 }
 
-private enum class DrawingTool { Freehand, Line, Angle }
+private enum class DrawingTool { Freehand, Line, Angle, Select }
+
+private enum class LineEditHandle { Start, End, Body }
+
+private data class LineHitResult(val strokeId: String, val handle: LineEditHandle, val distance: Float)
+
+private data class EditDragState(
+    val strokeId: String,
+    val handle: LineEditHandle,
+    val dragStart: Offset,
+    val originalStart: Offset,
+    val originalEnd: Offset,
+)
 
 private data class DrawingStroke(
     val tool: DrawingTool,
@@ -634,22 +690,78 @@ private data class DrawingStroke(
     val angle: Double? = null,
     val color: Color,
     val lineWidth: Float = 3f,
+    val id: String = java.util.UUID.randomUUID().toString(),
 )
+
+private object DrawingHitTest {
+    private const val ENDPOINT_RADIUS = 22f
+    private const val LINE_RADIUS = 12f
+
+    fun hitTestLines(point: Offset, strokes: List<DrawingStroke>): LineHitResult? {
+        var best: LineHitResult? = null
+        for (stroke in strokes) {
+            if (stroke.tool != DrawingTool.Line) continue
+            val start = stroke.start ?: continue
+            val end = stroke.end ?: continue
+
+            val dStart = distance(point, start)
+            if (dStart <= ENDPOINT_RADIUS) {
+                val hit = LineHitResult(stroke.id, LineEditHandle.Start, dStart)
+                if (best == null || hit.distance < best!!.distance) best = hit
+            }
+
+            val dEnd = distance(point, end)
+            if (dEnd <= ENDPOINT_RADIUS) {
+                val hit = LineHitResult(stroke.id, LineEditHandle.End, dEnd)
+                if (best == null || hit.distance < best!!.distance) best = hit
+            }
+
+            val (dSeg, t) = distanceToSegment(point, start, end)
+            if (dSeg <= LINE_RADIUS && t > 0.02f && t < 0.98f) {
+                val hit = LineHitResult(stroke.id, LineEditHandle.Body, dSeg)
+                if (best == null || hit.distance < best!!.distance) best = hit
+            }
+        }
+        return best
+    }
+
+    private fun distance(a: Offset, b: Offset): Float =
+        kotlin.math.hypot((a.x - b.x).toDouble(), (a.y - b.y).toDouble()).toFloat()
+
+    private fun distanceToSegment(point: Offset, segStart: Offset, segEnd: Offset): Pair<Float, Float> {
+        val dx = segEnd.x - segStart.x
+        val dy = segEnd.y - segStart.y
+        val len2 = dx * dx + dy * dy
+        if (len2 < 1e-4f) return distance(point, segStart) to 0f
+        var t = ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / len2
+        t = t.coerceIn(0f, 1f)
+        val proj = Offset(segStart.x + t * dx, segStart.y + t * dy)
+        return distance(point, proj) to t
+    }
+}
 
 private class DrawingState {
     var currentTool by mutableStateOf(DrawingTool.Freehand)
     var currentColor by mutableStateOf(drawingColors.first())
     val strokes = mutableStateListOf<DrawingStroke>()
     var inProgress by mutableStateOf<DrawingStroke?>(null)
+    var selectedStrokeId by mutableStateOf<String?>(null)
+    var editDrag by mutableStateOf<EditDragState?>(null)
     private val undoStack = mutableListOf<DrawingStroke>()
     private var a: Offset? = null
     private var b: Offset? = null
 
+    val hasSelection: Boolean get() = selectedStrokeId != null
+
+    val selectedStroke: DrawingStroke?
+        get() = selectedStrokeId?.let { id -> strokes.firstOrNull { it.id == id } }
+
     fun begin(point: Offset) {
+        editDrag = null
         inProgress = when (currentTool) {
             DrawingTool.Freehand -> DrawingStroke(currentTool, points = listOf(point), color = currentColor)
             DrawingTool.Line -> DrawingStroke(currentTool, start = point, end = point, color = currentColor)
-            DrawingTool.Angle -> null
+            DrawingTool.Angle, DrawingTool.Select -> null
         }
     }
 
@@ -658,14 +770,83 @@ private class DrawingState {
         inProgress = when (current.tool) {
             DrawingTool.Freehand -> current.copy(points = current.points + point)
             DrawingTool.Line -> current.copy(end = point)
-            DrawingTool.Angle -> current
+            DrawingTool.Angle, DrawingTool.Select -> current
         }
     }
 
     fun end() {
-        inProgress?.let { strokes.add(it) }
+        val stroke = inProgress ?: return
+        strokes.add(stroke)
         inProgress = null
         undoStack.clear()
+        if (stroke.tool == DrawingTool.Line) {
+            selectedStrokeId = stroke.id
+            currentTool = DrawingTool.Select
+        }
+    }
+
+    fun selectStroke(point: Offset): Boolean {
+        val hit = DrawingHitTest.hitTestLines(point, strokes) ?: return false
+        selectedStrokeId = hit.strokeId
+        return true
+    }
+
+    fun clearSelection() {
+        selectedStrokeId = null
+        editDrag = null
+    }
+
+    fun deleteSelected() {
+        val id = selectedStrokeId ?: return
+        strokes.removeAll { it.id == id }
+        selectedStrokeId = null
+        editDrag = null
+    }
+
+    fun beginEdit(point: Offset): Boolean {
+        if (currentTool != DrawingTool.Select && selectedStrokeId == null) return false
+        val hit = DrawingHitTest.hitTestLines(point, strokes) ?: run {
+            if (currentTool == DrawingTool.Select) clearSelection()
+            return false
+        }
+        selectedStrokeId = hit.strokeId
+        val stroke = strokes.firstOrNull { it.id == hit.strokeId } ?: return false
+        val start = stroke.start ?: return false
+        val end = stroke.end ?: return false
+        editDrag = EditDragState(
+            strokeId = hit.strokeId,
+            handle = hit.handle,
+            dragStart = point,
+            originalStart = start,
+            originalEnd = end,
+        )
+        return true
+    }
+
+    fun continueEdit(point: Offset) {
+        val drag = editDrag ?: return
+        val index = strokes.indexOfFirst { it.id == drag.strokeId }
+        if (index < 0) return
+        val stroke = strokes[index]
+        if (stroke.tool != DrawingTool.Line) return
+
+        val updated = when (drag.handle) {
+            LineEditHandle.Start -> stroke.copy(start = point)
+            LineEditHandle.End -> stroke.copy(end = point)
+            LineEditHandle.Body -> {
+                val dx = point.x - drag.dragStart.x
+                val dy = point.y - drag.dragStart.y
+                stroke.copy(
+                    start = Offset(drag.originalStart.x + dx, drag.originalStart.y + dy),
+                    end = Offset(drag.originalEnd.x + dx, drag.originalEnd.y + dy),
+                )
+            }
+        }
+        strokes[index] = updated
+    }
+
+    fun endEdit() {
+        editDrag = null
     }
 
     fun handleAngleTap(point: Offset) {
@@ -696,13 +877,20 @@ private class DrawingState {
     }
 
     fun undo() {
-        strokes.removeLastOrNull()?.let { undoStack.add(it) }
+        val removed = strokes.removeLastOrNull() ?: return
+        if (removed.id == selectedStrokeId) {
+            selectedStrokeId = null
+        }
+        editDrag = null
+        undoStack.add(removed)
     }
 
     fun clearAll() {
         strokes.clear()
         undoStack.clear()
         inProgress = null
+        selectedStrokeId = null
+        editDrag = null
         a = null
         b = null
     }
@@ -774,7 +962,12 @@ private fun FloatingIconButton(icon: androidx.compose.ui.graphics.vector.ImageVe
 }
 
 @Composable
-private fun ToolButton(label: String, selected: Boolean = false, onClick: () -> Unit) {
+private fun ToolButton(
+    label: String,
+    selected: Boolean = false,
+    tint: Color = Color.White,
+    onClick: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .size(44.dp)
@@ -783,7 +976,7 @@ private fun ToolButton(label: String, selected: Boolean = false, onClick: () -> 
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
     }
 }
 

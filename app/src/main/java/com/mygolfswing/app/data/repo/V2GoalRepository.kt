@@ -161,6 +161,9 @@ class V2GoalRepository(
             val local = localById[cloud.id]
             if (local == null) {
                 toUpsert.add(cloud)
+            } else if (local.dirty) {
+                // 本地有未上云改动（含刚打卡）：不以云端覆盖，优先上传本地
+                runCatching { toUpload.add(decode(local)) }
             } else if (cloud.updatedAt >= local.updatedAt) {
                 toUpsert.add(cloud)
             } else {

@@ -34,6 +34,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,7 @@ import com.mygolfswing.app.data.store.V2UserProfile
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.launch
 
 /**
  * V2「我」页面（对齐 iOS `V2ProfileView`）。
@@ -81,6 +83,7 @@ fun V2ProfileScreen(
     val swingSessions by V2SwingSessionStore.sessions.collectAsState()
     var confirmLogout by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     // 记住上一次的登录态，用于检测「刚退出」事件
     val previousLoggedIn = remember { mutableStateOf(profile.isLoggedIn) }
 
@@ -107,9 +110,7 @@ fun V2ProfileScreen(
         it.kind == V2MemoKind.VIDEO || it.kind == V2MemoKind.MIXED
     }
     val swingCount = if (profile.isLoggedIn) swingSessions.sumOf { it.clips.size } else 0
-    val testAccounts = setOf("18851310088", "test1")
-    val isTestUser = profile.isLoggedIn &&
-        (profile.phone in testAccounts || profile.username.removePrefix("@") in testAccounts)
+    val isTestUser = V2DeveloperToolsAccess.isCloudAuditEnabled(profile)
 
     Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
         Column(
@@ -181,8 +182,10 @@ fun V2ProfileScreen(
             confirmButton = {
                 TextButton(onClick = {
                     confirmLogout = false
-                    V2ProfileStore.logout()
-                    onLogoutComplete()
+                    scope.launch {
+                        V2ProfileStore.logoutAndWait()
+                        onLogoutComplete()
+                    }
                 }) {
                     Text("退出登录", color = DSColors.flagRed)
                 }

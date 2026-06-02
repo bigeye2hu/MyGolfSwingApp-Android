@@ -1,0 +1,147 @@
+{
+  "version": "4.1",
+  "lastUpdated": "2026-01-11T21:00:00Z",
+  "description": "高尔夫分类体系 v4.1 - 挥杆阶段 + 身体部位 + 下场实战",
+
+  "nodeGroups": [
+    {
+      "id": "swing_phases",
+      "name": "挥杆阶段",
+      "color": "#3498DB",
+      "icon": "figure.golf",
+      "bindView": "timeline",
+      "nodes": [
+        { "id": "setup", "name": "准备与站位", "color": "#5DADE2" },
+        { "id": "backswing", "name": "上杆", "color": "#48C9B0" },
+        { "id": "downswing", "name": "下杆", "color": "#F4D03F" },
+        { "id": "impact", "name": "击球", "color": "#E74C3C" },
+        { "id": "finish", "name": "收杆", "color": "#27AE60" }
+      ]
+    },
+    {
+      "id": "body_parts",
+      "name": "身体部位",
+      "color": "#9B59B6",
+      "icon": "figure.stand",
+      "bindView": "bodyMap",
+      "nodes": [
+        { "id": "head", "name": "头部", "color": "#AF7AC5", "hotspotId": "head" },
+        { "id": "thoracic", "name": "胸椎", "color": "#BB8FCE", "hotspotId": "torso" },
+        { "id": "arms", "name": "手臂", "color": "#D2B4DE" },
+        { "id": "hips", "name": "髋部", "color": "#F5B041", "hotspotId": "hips" },
+        { "id": "legs", "name": "腿", "color": "#58D68D", "hotspotId": "knees" },
+        { "id": "feet", "name": "脚", "color": "#5DADE2", "hotspotId": "feet" }
+      ]
+    },
+    {
+      "id": "on_course",
+      "name": "下场实战",
+      "color": "#27AE60",
+      "icon": "flag.fill",
+      "bindView": "list",
+      "nodes": [
+        { "id": "tee_shot", "name": "开球", "color": "#58D68D" },
+        { "id": "approach", "name": "攻果岭", "color": "#82E0AA" },
+        { "id": "chipping", "name": "切杆", "color": "#ABEBC6" },
+        { "id": "putting", "name": "推杆", "color": "#795548" },
+        { "id": "course_strategy", "name": "球场策略", "color": "#607D8B" }
+      ]
+    }
+  ],
+
+  "trees": [
+    {
+      "id": "tree_swing_phases",
+      "name": "挥杆阶段分解",
+      "description": "从准备到收杆的完整流程",
+      "rootNode": null,
+      "childGroups": ["swing_phases"],
+      "viewType": "timeline",
+      "bindToPages": ["video_detail"]
+    },
+    {
+      "id": "tree_body_parts",
+      "name": "身体部位要点",
+      "description": "各身体部位的挥杆要点",
+      "rootNode": null,
+      "childGroups": ["body_parts"],
+      "viewType": "bodyMap",
+      "bindToPages": ["home_bodymap", "video_detail"]
+    },
+    {
+      "id": "tree_on_course",
+      "name": "下场实战技巧",
+      "description": "球场实战策略与技巧",
+      "rootNode": null,
+      "childGroups": ["on_course"],
+      "viewType": "list",
+      "bindToPages": ["insight_list"]
+    }
+  ],
+
+  "appPages": [
+    {
+      "id": "home_bodymap",
+      "name": "首页-热力图",
+      "swiftFile": "HomeMainScreen.swift",
+      "component": "InteractiveBodyMapView",
+      "description": "主页的身体部位交互区"
+    },
+    {
+      "id": "video_detail",
+      "name": "视频备忘录-详情",
+      "swiftFile": "VideoMemoDetailView.swift",
+      "component": "VideoDetailView",
+      "description": "视频备忘录详情页"
+    },
+    {
+      "id": "video_list",
+      "name": "视频备忘录-列表",
+      "swiftFile": "VideoMemoListView.swift",
+      "component": "VideoListView",
+      "description": "视频备忘录列表页"
+    },
+    {
+      "id": "insight_list",
+      "name": "训练心得-列表",
+      "swiftFile": "InsightCardListView.swift",
+      "component": "InsightListView",
+      "description": "训练心得列表页"
+    },
+    {
+      "id": "insight_detail",
+      "name": "训练心得-详情",
+      "swiftFile": "InsightCardDetailView.swift",
+      "component": "InsightDetailView",
+      "description": "训练心得详情页"
+    },
+    {
+      "id": "ai_coach",
+      "name": "AI助手",
+      "swiftFile": "AIGolfCoachView.swift",
+      "component": "AIGolfCoachView",
+      "description": "AI助手对话页"
+    }
+  ],
+
+  "appViews": {
+    "bodyMap": {
+      "name": "热力图",
+      "icon": "figure.stand",
+      "swiftView": "InteractiveBodyMapView",
+      "description": "人体部位点击交互"
+    },
+    "timeline": {
+      "name": "时间轴",
+      "icon": "timer",
+      "swiftView": "SwingPhaseTimelineView",
+      "description": "动作阶段时间线"
+    },
+    "list": {
+      "name": "列表",
+      "icon": "list.bullet",
+      "swiftView": "ContentListView",
+      "description": "传统列表展示"
+    }
+  }
+}

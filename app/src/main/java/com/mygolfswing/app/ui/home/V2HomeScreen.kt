@@ -20,7 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
+import com.mygolfswing.app.data.model.V2Goal
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -73,7 +75,9 @@ fun V2HomeScreen(
         }
     }
 
-    val activeCount = V2GoalStore.activeCount
+    val activeCount = remember(goals) {
+        goals.count { it.status == V2Goal.Status.ACTIVE }
+    }
     val isEmpty = activeCount == 0
     val headerName = profile.headerDisplayName()
     val recentMemos = remember(memos) { memos.sortedByDescending { it.createdAt }.take(6) }
@@ -135,9 +139,20 @@ private fun GoalsBlock(
     onOpenAllGoals: () -> Unit,
     onOpenGoalDetail: (UUID) -> Unit,
 ) {
-    val focused = V2GoalStore.focusedGoal
-    val others = V2GoalStore.listedGoalsForHome()
-    val remaining = V2GoalStore.remainingGoalCountForHome()
+    val goals by V2GoalStore.goals.collectAsState()
+    val activeGoals = remember(goals) {
+        goals.filter { it.status == V2Goal.Status.ACTIVE }
+    }
+    val focused = remember(activeGoals) {
+        activeGoals.firstOrNull { it.todayFocus } ?: activeGoals.firstOrNull()
+    }
+    val others = remember(activeGoals, focused) {
+        activeGoals.filter { it.id != focused?.id }.take(2)
+    }
+    val remaining = remember(activeGoals, focused) {
+        val visible = activeGoals.count { it.id != focused?.id }
+        (visible - 2).coerceAtLeast(0)
+    }
 
     Column(
         modifier = Modifier
@@ -146,21 +161,25 @@ private fun GoalsBlock(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         focused?.let { g ->
-            V2GoalHeroCard(
-                goal = g,
-                linkedMemoCount = V2GoalStore.linkedMemoCount(g),
-                linkedVideoCount = V2GoalStore.linkedVideoCount(g),
-                onEdit = onOpenAllGoals,
-                onComplete = { V2GoalStore.checkIn(g.id) },
-                onTap = { onOpenGoalDetail(g.id) },
-            )
+            key(g.id, g.status, g.progress.current, g.progress.lastIncrementAt, g.hasCheckedInToday) {
+                V2GoalHeroCard(
+                    goal = g,
+                    linkedMemoCount = V2GoalStore.linkedMemoCount(g),
+                    linkedVideoCount = V2GoalStore.linkedVideoCount(g),
+                    onEdit = onOpenAllGoals,
+                    onComplete = { V2GoalStore.checkIn(g.id) },
+                    onTap = { onOpenGoalDetail(g.id) },
+                )
+            }
         }
         others.forEach { g ->
-            V2GoalRow(
-                goal = g,
-                onTap = { onOpenGoalDetail(g.id) },
-                onComplete = { V2GoalStore.checkIn(g.id) },
-            )
+            key(g.id, g.status, g.progress.current, g.progress.lastIncrementAt, g.hasCheckedInToday) {
+                V2GoalRow(
+                    goal = g,
+                    onTap = { onOpenGoalDetail(g.id) },
+                    onComplete = { V2GoalStore.checkIn(g.id) },
+                )
+            }
         }
         ManageAllGoalsFooter(
             remaining = remaining,

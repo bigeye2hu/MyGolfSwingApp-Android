@@ -48,7 +48,11 @@ import com.mygolfswing.app.data.model.V2Goal
 private val Gold = Color(0xFFE0A82E)
 
 /**
- * 主页 Hero 聚焦目标卡（对齐 iOS `V2GoalHeroCard`）。
+ * 主页 Hero 聚焦目标卡（对齐 iOS `V2GoalHeroCard.swift`）。
+ *
+ * 布局要点（与 iOS 一致）：
+ * - `ZStack` + 背景层 + 内容 `VStack(spacing: 12)`，**不要** `matchParentSize` + `weight` 撑满，否则 footer 打卡按钮会被 `clip` 裁切。
+ * - Footer：`HStack` 左 Memo/视频 + `Spacer` + 右打卡按钮（按钮 intrinsic 宽度，永不被挤没）。
  */
 @Composable
 fun V2GoalHeroCard(
@@ -63,30 +67,43 @@ fun V2GoalHeroCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 210.dp)
-            .shadow(elevation = 20.dp, shape = RoundedCornerShape(24.dp))
+            .shadow(
+                elevation = 24.dp,
+                shape = RoundedCornerShape(24.dp),
+                spotColor = Color(0xFF2D6A4F).copy(alpha = 0.18f),
+            )
             .clip(RoundedCornerShape(24.dp))
-            .clickable { onTap() },
+            .background(Color.Transparent)
+            .defaultMinSize(minHeight = 210.dp),
     ) {
         GolfScapeBackground(modifier = Modifier.matchParentSize())
 
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             HeaderRow(onEdit = onEdit)
 
-            Text(
-                text = goal.title,
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onTap),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = goal.title,
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                MetricRow(goal = goal)
+                ProgressRow(goal = goal)
+            }
 
-            MetricRow(goal = goal)
-            ProgressRow(goal = goal)
             FooterRow(
                 goal = goal,
                 linkedMemoCount = linkedMemoCount,
@@ -97,10 +114,6 @@ fun V2GoalHeroCard(
     }
 }
 
-/**
- * Hero 卡背景（对齐 iOS `golfScapeBackground` 四层叠加）。
- * 背景层使用 [Modifier.matchParentSize]，避免图片 intrinsic 尺寸撑大卡片。
- */
 @Composable
 private fun GolfScapeBackground(modifier: Modifier = Modifier) {
     val darkGreen = Color(0xFF1B4332)
@@ -144,6 +157,7 @@ private fun GolfScapeBackground(modifier: Modifier = Modifier) {
                     ),
                 ),
         )
+        // iOS ④ 顶 vignette：底为 transparent
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -253,10 +267,10 @@ private fun MetricRow(goal: V2Goal) {
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .padding(bottom = 6.dp)
                 .weight(1f, fill = false),
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -264,7 +278,11 @@ private fun MetricRow(goal: V2Goal) {
 @Composable
 private fun ProgressRow(goal: V2Goal) {
     val ratio = goal.ratio.coerceIn(0.0, 1.0).toFloat()
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
@@ -280,16 +298,17 @@ private fun ProgressRow(goal: V2Goal) {
                     .background(Gold),
             )
         }
-        Spacer(modifier = Modifier.width(12.dp))
         Text(
             text = goal.sessionProgressDisplay,
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
     }
 }
 
+/** iOS `footerRow`：左 Memo/视频，Spacer，右打卡（按钮不被挤压） */
 @Composable
 private fun FooterRow(
     goal: V2Goal,
@@ -297,69 +316,115 @@ private fun FooterRow(
     linkedVideoCount: Int,
     onComplete: () -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.Bottom) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Bottom,
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.weight(1f),
         ) {
             Text(
                 text = "📚 $linkedMemoCount 条 Memo",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
+                maxLines = 1,
             )
-            Text(text = "·", color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp)
+            Text(
+                text = "·",
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 10.sp,
+                letterSpacing = 2.sp,
+            )
             Text(
                 text = "🎬 $linkedVideoCount 个视频",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 12.sp,
+                maxLines = 1,
             )
         }
-        CheckInButton(goal = goal, onComplete = onComplete)
+        Spacer(modifier = Modifier.weight(1f))
+        HeroCheckInButton(goal = goal, onComplete = onComplete)
     }
 }
 
+/** iOS `checkInButton`：文案与图标始终为白色；仅背景色随状态变化 */
 @Composable
-private fun CheckInButton(goal: V2Goal, onComplete: () -> Unit) {
-    data class ButtonStyle(
-        val title: String,
-        val icon: ImageVector,
-        val background: Color,
-        val enabled: Boolean,
-    )
-
-    val style = when {
-        goal.status == V2Goal.Status.COMPLETED ->
-            ButtonStyle("已完成", Icons.Filled.EmojiEvents, Gold.copy(alpha = 0.55f), false)
-        goal.status == V2Goal.Status.PAUSED ->
-            ButtonStyle("已暂停", Icons.Filled.Pause, Color.White.copy(alpha = 0.18f), false)
-        goal.hasCheckedInToday ->
-            ButtonStyle("今日已打", Icons.Filled.CheckCircle, Color.White.copy(alpha = 0.18f), false)
-        else ->
-            ButtonStyle("打卡", Icons.Filled.Check, Gold, true)
-    }
+private fun HeroCheckInButton(goal: V2Goal, onComplete: () -> Unit) {
+    val state = heroButtonState(goal)
+    val shape = RoundedCornerShape(12.dp)
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
-            .shadow(elevation = if (style.enabled) 6.dp else 0.dp, shape = RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp))
-            .background(style.background)
-            .clickable(enabled = style.enabled, onClick = onComplete)
+            .shadow(
+                elevation = if (state == HeroButtonState.Active) 6.dp else 0.dp,
+                shape = shape,
+                spotColor = Gold.copy(alpha = 0.4f),
+            )
+            .clip(shape)
+            .background(state.backgroundColor(Gold))
+            .then(
+                if (state == HeroButtonState.Active) {
+                    Modifier.clickable(onClick = onComplete)
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Icon(
-            imageVector = style.icon,
-            contentDescription = style.title,
+            imageVector = state.icon,
+            contentDescription = state.title,
             tint = Color.White,
-            modifier = Modifier.size(13.dp),
+            modifier = Modifier.size(12.dp),
         )
         Text(
-            text = style.title,
+            text = state.title,
             color = Color.White,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
     }
+}
+
+/** 对齐 iOS `HeroButtonState` */
+private enum class HeroButtonState {
+    Active,
+    CheckedInToday,
+    AllDone,
+    Paused,
+    ;
+
+    val title: String
+        get() = when (this) {
+            Active -> "打卡"
+            CheckedInToday -> "今日已打"
+            AllDone -> "已完成"
+            Paused -> "已暂停"
+        }
+
+    val icon: ImageVector
+        get() = when (this) {
+            Active -> Icons.Filled.Check
+            CheckedInToday -> Icons.Filled.CheckCircle
+            AllDone -> Icons.Filled.EmojiEvents
+            Paused -> Icons.Filled.Pause
+        }
+
+    fun backgroundColor(gold: Color): Color = when (this) {
+        Active -> gold
+        CheckedInToday -> Color.White.copy(alpha = 0.18f)
+        AllDone -> gold.copy(alpha = 0.55f)
+        Paused -> Color.White.copy(alpha = 0.18f)
+    }
+}
+
+private fun heroButtonState(goal: V2Goal): HeroButtonState = when {
+    goal.status == V2Goal.Status.COMPLETED -> HeroButtonState.AllDone
+    goal.status == V2Goal.Status.PAUSED -> HeroButtonState.Paused
+    goal.hasCheckedInToday -> HeroButtonState.CheckedInToday
+    else -> HeroButtonState.Active
 }

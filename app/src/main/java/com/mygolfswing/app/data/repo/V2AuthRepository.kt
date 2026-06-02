@@ -224,6 +224,22 @@ class V2AuthRepository(
         session.logout()
     }
 
+    suspend fun bindPhoneNumber(phone: String, code: String): Result<V2Session> = runCatching {
+        val uid = session.current().userId ?: error("未登录")
+        call(
+            "bindPhoneNumber",
+            "userId" to uid,
+            "phoneNumber" to phone,
+            "code" to code,
+        )
+        val updated = session.current().copy(phone = phone)
+        session.login(updated)
+        updated
+    }
+
+    suspend fun updateNickname(nickname: String): Result<V2Session> =
+        updateUserInfo(nickname = nickname)
+
     // ============ 内部 ============
 
     private suspend fun call(action: String, vararg fields: Pair<String, Any?>): JsonObject {
@@ -319,6 +335,7 @@ private fun JsonObject.toSession(): V2Session = V2Session(
     golfStartYear = intField("golfStartYear", "golf_start_year"),
     golfBrands = stringListField("golfBrands", "golf_brands"),
     hasPassword = this["hasPassword"]?.jsonPrimitive?.booleanOrNull,
+    createdAt = stringField("createdAt"),
 )
 
 private fun V2Session.mergedWith(data: JsonObject): V2Session = copy(
@@ -340,6 +357,7 @@ private fun V2Session.mergedWith(data: JsonObject): V2Session = copy(
     golfStartYear = data.intField("golfStartYear", "golf_start_year") ?: golfStartYear,
     golfBrands = data.stringListField("golfBrands", "golf_brands").takeIf { it.isNotEmpty() } ?: golfBrands,
     hasPassword = data["hasPassword"]?.jsonPrimitive?.booleanOrNull ?: hasPassword,
+    createdAt = data.stringField("createdAt") ?: createdAt,
 )
 
 /** 工具：bitmap 等比缩放到最长边 ≤ [maxSide] */

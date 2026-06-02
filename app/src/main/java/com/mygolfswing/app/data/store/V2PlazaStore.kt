@@ -73,8 +73,12 @@ object V2PlazaStore {
 
     fun resetUserState() {
         _savedIds.value = emptySet()
-        _videos.value = _videos.value.map { it.copy(isSaved = false) }
-        _heroVideo.value = _heroVideo.value?.copy(isSaved = false)
+        _videos.value = emptyList()
+        _heroVideo.value = null
+        _searchKeyword.value = ""
+        _isSearchActive.value = false
+        _lastError.value = null
+        _isUsingMock.value = false
     }
 
     @Volatile private var collecting = false

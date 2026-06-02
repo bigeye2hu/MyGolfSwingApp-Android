@@ -138,6 +138,11 @@ object V2VideoFileStore {
         before
     }
 
+    /** 删除指定用户的本地媒体目录（账号删除时调用）。 */
+    suspend fun deleteUserDirectory(context: Context, userId: String) = withContext(Dispatchers.IO) {
+        File(context.filesDir, "users/$userId").deleteRecursively()
+    }
+
     // ============ 私有 ============
 
     private fun userRoot(context: Context, userId: String): File =

@@ -21,6 +21,8 @@ import com.mygolfswing.app.ui.swing.V2JustSwingMainScreen
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.mygolfswing.app.data.model.V2MemoKind
+import com.mygolfswing.app.data.store.V2CategoryStore
+import com.mygolfswing.app.data.store.V2UserScopedCache
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2GolfProfileStore
 import com.mygolfswing.app.data.store.V2MemoStore
@@ -28,6 +30,8 @@ import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.ai.V2AIChatScreen
 import com.mygolfswing.app.ui.auth.V2ChangePasswordScreen
+import com.mygolfswing.app.ui.profile.V2AccountDeletionScreen
+import com.mygolfswing.app.ui.profile.V2AccountSecurityScreen
 import com.mygolfswing.app.ui.auth.V2LoginScreen
 import com.mygolfswing.app.ui.auth.V2RegisterScreen
 import com.mygolfswing.app.ui.auth.V2ResetPasswordScreen
@@ -94,6 +98,8 @@ private sealed class Destination {
     data object Register : Destination()
     data object ResetPassword : Destination()
     data object EditProfile : Destination()
+    data object AccountSecurity : Destination()
+    data object AccountDeletion : Destination()
     data object ChangePassword : Destination()
     data object StorageManagement : Destination()
     data object AIConfig : Destination()
@@ -115,6 +121,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(Unit) {
         val splashStartedAt = System.currentTimeMillis()
+        V2UserScopedCache.startSessionGuard()
         V2GoalStore.startObserving()
         V2MemoStore.startObserving()
         V2PlazaStore.startObserving()
@@ -133,6 +140,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             } else {
                 V2PlazaStore.refresh()
                 V2GoalStore.syncFromCloud()
+                session.userId?.let { uid -> V2CategoryStore.loadForUser(uid) }
                 ServiceLocator.goalRepo.pushDirty()
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
                 V2MemoStore.pullFromCloud()
@@ -195,7 +203,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenPlazaVideo = { nav.navigateTo(Destination.PlazaPlay(it)) },
             onRequestLogin = { nav.navigateTo(Destination.Login) },
             onOpenEditProfile = { nav.navigateTo(Destination.EditProfile) },
-            onOpenAccountSecurity = { nav.navigateTo(Destination.ChangePassword) },
+            onOpenAccountSecurity = { nav.navigateTo(Destination.AccountSecurity) },
             onOpenStorage = { nav.navigateTo(Destination.StorageManagement) },
             onOpenCloudAudit = { nav.navigateTo(Destination.CloudConsistencyAudit) },
             onOpenFeedback = { nav.navigateTo(Destination.Feedback) },
@@ -303,6 +311,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 V2MemoStore.pullFromCloud()
                 V2GoalStore.syncFromCloud()
                 ServiceLocator.appScope.launch {
+                    ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
                     ServiceLocator.creditsRepo.fetchBalance(force = true)
                     runCatching { V2GolfProfileStore.refreshFromCloud() }
                 }
@@ -321,6 +330,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 V2MemoStore.pullFromCloud()
                 V2GoalStore.syncFromCloud()
                 ServiceLocator.appScope.launch {
+                    ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
                     ServiceLocator.creditsRepo.fetchBalance(force = true)
                     runCatching { V2GolfProfileStore.refreshFromCloud() }
                 }
@@ -337,6 +347,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 V2MemoStore.pullFromCloud()
                 V2GoalStore.syncFromCloud()
                 ServiceLocator.appScope.launch {
+                    ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
                     ServiceLocator.creditsRepo.fetchBalance(force = true)
                     runCatching { V2GolfProfileStore.refreshFromCloud() }
                 }
@@ -347,6 +358,26 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onSaved = {
                 nav.navigateBack()
                 V2ProfileStore.refresh(force = true)
+            },
+        )
+        Destination.AccountSecurity -> V2AccountSecurityScreen(
+            onBack = { nav.navigateBack() },
+            onOpenChangePassword = { nav.navigateTo(Destination.ChangePassword) },
+            onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
+            onOpenPrivacy = { nav.navigateTo(Destination.Legal(V2LegalDocType.PRIVACY)) },
+            onOpenCloudAudit = { nav.navigateTo(Destination.CloudConsistencyAudit) },
+            onOpenAccountDeletion = { nav.navigateTo(Destination.AccountDeletion) },
+            onLogoutComplete = {
+                showQuickAdd = false
+                selectedTab = V2Tab.HOME
+                nav.resetTo(Destination.Login)
+            },
+        )
+        Destination.AccountDeletion -> V2AccountDeletionScreen(
+            onBack = { nav.navigateBack() },
+            onDeletionComplete = {
+                selectedTab = V2Tab.HOME
+                nav.resetTo(Destination.Login)
             },
         )
         Destination.ChangePassword -> V2ChangePasswordScreen(

@@ -50,6 +50,7 @@ class V2SessionStore(context: Context) {
             prefs.writeString(K_GOLF_BRANDS, session.golfBrands.joinToString("|"))
             session.hasPassword?.let { prefs[K_HAS_PASSWORD] = it }
             session.credits?.let { prefs[K_CREDITS] = it }
+            prefs.writeString(K_CREATED_AT, session.createdAt)
         }
     }
 
@@ -186,6 +187,7 @@ class V2SessionStore(context: Context) {
         private val K_GOLF_BRANDS = stringPreferencesKey("golfBrands")
         private val K_HAS_PASSWORD = booleanPreferencesKey("hasPassword")
         private val K_CREDITS = intPreferencesKey("credits")
+        private val K_CREATED_AT = stringPreferencesKey("createdAt")
 
         private val K_AI_PROVIDER_ID = stringPreferencesKey("ai_provider_id")
         private val K_AI_API_KEY = stringPreferencesKey("ai_api_key")
@@ -219,6 +221,7 @@ data class V2Session(
     val golfBrands: List<String> = emptyList(),
     val hasPassword: Boolean? = null,
     val credits: Int? = null,
+    val createdAt: String? = null,
 ) {
     val isLoggedIn: Boolean get() = !userId.isNullOrBlank() && !userSig.isNullOrBlank()
 
@@ -249,6 +252,7 @@ private fun Preferences.toSession(): V2Session = V2Session(
     golfBrands = readString(stringPreferencesKey("golfBrands"))?.split("|")?.filter { it.isNotBlank() } ?: emptyList(),
     hasPassword = this[booleanPreferencesKey("hasPassword")],
     credits = this[intPreferencesKey("credits")],
+    createdAt = readString(stringPreferencesKey("createdAt")),
 )
 
 private fun Preferences.readString(key: Preferences.Key<String>): String? =

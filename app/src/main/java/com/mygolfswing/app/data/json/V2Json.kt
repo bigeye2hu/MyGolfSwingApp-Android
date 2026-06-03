@@ -12,7 +12,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.double
@@ -59,11 +58,11 @@ object V2Json {
         val o = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
         o["id"] = JsonPrimitive(goal.id.toString())
         o["title"] = JsonPrimitive(goal.title)
-        o["iconType"] = JsonPrimitive(goal.iconType.name.lowercase())
-        o["topic"] = JsonPrimitive(goal.topic.name.lowercase())
+        o["iconType"] = JsonPrimitive(goal.iconType.rawValue)
+        o["topic"] = JsonPrimitive(goal.topic.rawValue)
         o["metric"] = JsonObject(
             mapOf(
-                "kind" to JsonPrimitive(goal.metric.kind.name.lowercase()),
+                "kind" to JsonPrimitive(goal.metric.kind.rawValue),
                 "target" to JsonPrimitive(goal.metric.target),
                 "unit" to (goal.metric.unit?.let { JsonPrimitive(it) } ?: JsonPrimitive(null as String?)),
             ),
@@ -71,10 +70,10 @@ object V2Json {
         o["progress"] = encodeProgress(goal.progress)
         goal.targetSessions?.let { o["targetSessions"] = JsonPrimitive(it) }
         goal.sessionUnit?.let { o["sessionUnit"] = JsonPrimitive(it) }
-        goal.clubKind?.let { o["clubKind"] = JsonPrimitive(it.name.lowercase()) }
-        o["pinState"] = JsonPrimitive(goal.pinState.name.lowercase())
-        o["status"] = JsonPrimitive(goal.status.name.lowercase())
-        o["priority"] = JsonPrimitive(goal.priority.name.lowercase())
+        goal.clubKind?.let { o["clubKind"] = JsonPrimitive(it.rawValue) }
+        o["pinState"] = JsonPrimitive(goal.pinState.rawValue)
+        o["status"] = JsonPrimitive(goal.status.rawValue)
+        o["priority"] = JsonPrimitive(goal.priority.rawValue)
         goal.cadence?.let { o["cadence"] = encodeCadence(it) }
         o["derivedFromMemoIds"] = JsonArray(goal.derivedFromMemoIds.map { JsonPrimitive(it.toString()) })
         o["todayFocus"] = JsonPrimitive(goal.todayFocus)
@@ -88,7 +87,7 @@ object V2Json {
     fun decodeGoal(json: JsonObject): V2Goal {
         val metric = json["metric"]!!.jsonObject.let { m ->
             V2Goal.Metric(
-                kind = enumByName(m["kind"]!!.jsonPrimitive.content, V2Goal.Metric.Kind.entries),
+                kind = goalMetricKindFromRaw(m["kind"]!!.jsonPrimitive.content),
                 target = m["target"]!!.jsonPrimitive.double,
                 unit = m["unit"]?.jsonPrimitive?.contentOrNull,
             )
@@ -99,16 +98,16 @@ object V2Json {
         return V2Goal(
             id = UUID.fromString(json["id"]!!.jsonPrimitive.content),
             title = json["title"]!!.jsonPrimitive.content,
-            iconType = enumByName(json["iconType"]!!.jsonPrimitive.content, V2Goal.IconType.entries),
-            topic = enumByName(json["topic"]!!.jsonPrimitive.content, V2Topic.entries),
+            iconType = goalIconTypeFromRaw(json["iconType"]!!.jsonPrimitive.content),
+            topic = topicFromRaw(json["topic"]!!.jsonPrimitive.content),
             metric = metric,
             progress = progress,
             targetSessions = json["targetSessions"]?.jsonPrimitive?.intOrNull,
             sessionUnit = json["sessionUnit"]?.jsonPrimitive?.contentOrNull,
-            clubKind = json["clubKind"]?.jsonPrimitive?.contentOrNull?.let { enumByName(it, V2Goal.ClubKind.entries) },
-            pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { enumByName(it, V2PinState.entries) } ?: V2PinState.NONE,
-            status = enumByName(json["status"]!!.jsonPrimitive.content, V2Goal.Status.entries),
-            priority = enumByName(json["priority"]!!.jsonPrimitive.content, V2Goal.Priority.entries),
+            clubKind = json["clubKind"]?.jsonPrimitive?.contentOrNull?.let { goalClubKindFromRaw(it) },
+            pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { pinStateFromRaw(it) } ?: V2PinState.NONE,
+            status = goalStatusFromRaw(json["status"]!!.jsonPrimitive.content),
+            priority = goalPriorityFromRaw(json["priority"]!!.jsonPrimitive.content),
             cadence = cadence,
             derivedFromMemoIds = json["derivedFromMemoIds"]?.jsonArray?.map { UUID.fromString(it.jsonPrimitive.content) } ?: emptyList(),
             todayFocus = json["todayFocus"]?.jsonPrimitive?.booleanOrNull ?: false,
@@ -166,26 +165,26 @@ object V2Json {
     fun encodeMemo(memo: V2Memo): JsonObject {
         val o = mutableMapOf<String, kotlinx.serialization.json.JsonElement>()
         o["id"] = JsonPrimitive(memo.id.toString())
-        o["kind"] = JsonPrimitive(memo.kind.name.lowercase())
-        o["source"] = JsonPrimitive(memo.source.name.lowercase())
+        o["kind"] = JsonPrimitive(memo.kind.rawValue)
+        o["source"] = JsonPrimitive(memo.source.rawValue)
         memo.videoUrl?.let { o["videoUrl"] = JsonPrimitive(it) }
         memo.thumbnailUrl?.let { o["thumbnailUrl"] = JsonPrimitive(it) }
         memo.durationSec?.let { o["durationSec"] = JsonPrimitive(it) }
         memo.text?.let { o["text"] = JsonPrimitive(it) }
         memo.title?.let { o["title"] = JsonPrimitive(it) }
-        o["topic"] = JsonPrimitive(memo.topic.name.lowercase())
+        o["topic"] = JsonPrimitive(memo.topic.rawValue)
         o["tags"] = JsonArray(memo.tags.map { JsonPrimitive(it) })
         o["tagIds"] = JsonArray(memo.tagIds.map { JsonPrimitive(it) })
-        o["pinState"] = JsonPrimitive(memo.pinState.name.lowercase())
+        o["pinState"] = JsonPrimitive(memo.pinState.rawValue)
         o["linkedGoalIds"] = JsonArray(memo.linkedGoalIds.map { JsonPrimitive(it.toString()) })
         o["createdAt"] = JsonPrimitive(memo.createdAt.toEpochMillis())
         o["updatedAt"] = JsonPrimitive(memo.updatedAt.toEpochMillis())
         o["isNew"] = JsonPrimitive(memo.isNew)
-        memo.accent?.let { o["accent"] = JsonPrimitive(it.name.lowercase()) }
+        memo.accent?.let { o["accent"] = JsonPrimitive(it.rawValue) }
         memo.displayTitle?.let { o["displayTitle"] = JsonPrimitive(it) }
         memo.metaText?.let { o["metaText"] = JsonPrimitive(it) }
         memo.subText?.let { o["subText"] = JsonPrimitive(it) }
-        o["thumbnailKind"] = JsonPrimitive(memo.thumbnailKind.name.lowercase())
+        o["thumbnailKind"] = JsonPrimitive(memo.thumbnailKind.rawValue)
         memo.trainingMethod?.let { o["trainingMethod"] = JsonPrimitive(it) }
         o["isOnlineVideo"] = JsonPrimitive(memo.isOnlineVideo)
         memo.platform?.let { o["platform"] = JsonPrimitive(it) }
@@ -196,26 +195,26 @@ object V2Json {
 
     fun decodeMemo(json: JsonObject): V2Memo = V2Memo(
         id = UUID.fromString(json["id"]!!.jsonPrimitive.content),
-        kind = enumByName(json["kind"]!!.jsonPrimitive.content, V2MemoKind.entries),
-        source = enumByName(json["source"]!!.jsonPrimitive.content, V2MemoSource.entries),
+        kind = memoKindFromRaw(json["kind"]!!.jsonPrimitive.content),
+        source = memoSourceFromRaw(json["source"]!!.jsonPrimitive.content),
         videoUrl = json["videoUrl"]?.jsonPrimitive?.contentOrNull,
         thumbnailUrl = json["thumbnailUrl"]?.jsonPrimitive?.contentOrNull,
         durationSec = json["durationSec"]?.jsonPrimitive?.doubleOrNull,
         text = json["text"]?.jsonPrimitive?.contentOrNull,
         title = json["title"]?.jsonPrimitive?.contentOrNull,
-        topic = enumByName(json["topic"]!!.jsonPrimitive.content, V2Topic.entries),
+        topic = topicFromRaw(json["topic"]!!.jsonPrimitive.content),
         tags = json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
         tagIds = json["tagIds"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-        pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { enumByName(it, V2PinState.entries) } ?: V2PinState.NONE,
+        pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { pinStateFromRaw(it) } ?: V2PinState.NONE,
         linkedGoalIds = json["linkedGoalIds"]?.jsonArray?.map { UUID.fromString(it.jsonPrimitive.content) } ?: emptyList(),
         createdAt = json["createdAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
         updatedAt = json["updatedAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
         isNew = json["isNew"]?.jsonPrimitive?.booleanOrNull ?: false,
-        accent = json["accent"]?.jsonPrimitive?.contentOrNull?.let { enumByName(it, V2MemoAccent.entries) },
+        accent = json["accent"]?.jsonPrimitive?.contentOrNull?.let { memoAccentFromRaw(it) },
         displayTitle = json["displayTitle"]?.jsonPrimitive?.contentOrNull,
         metaText = json["metaText"]?.jsonPrimitive?.contentOrNull,
         subText = json["subText"]?.jsonPrimitive?.contentOrNull,
-        thumbnailKind = json["thumbnailKind"]?.jsonPrimitive?.contentOrNull?.let { enumByName(it, V2MemoThumbnailKind.entries) }
+        thumbnailKind = json["thumbnailKind"]?.jsonPrimitive?.contentOrNull?.let { memoThumbnailKindFromRaw(it) }
             ?: V2MemoThumbnailKind.FAIRWAY,
         trainingMethod = json["trainingMethod"]?.jsonPrimitive?.contentOrNull,
         isOnlineVideo = json["isOnlineVideo"]?.jsonPrimitive?.booleanOrNull ?: false,
@@ -224,11 +223,6 @@ object V2Json {
         priorityRaw = json["priorityRaw"]?.jsonPrimitive?.contentOrNull ?: "medium",
     )
 
-    private inline fun <reified E : Enum<E>> enumByName(name: String, entries: List<E>): E {
-        return entries.firstOrNull { it.name.equals(name, ignoreCase = true) }
-            ?: error("Unknown enum value '$name' in ${E::class.simpleName}")
-    }
-
     /** iOS `JSONEncoder.dateEncodingStrategy = .millisecondsSince1970` 可能编码为 Long 或 Double */
     private fun JsonObject.epochMillis(key: String): Long? = this[key]?.epochMillis()
 
@@ -236,4 +230,206 @@ object V2Json {
         val p = this as? JsonPrimitive ?: return null
         return p.longOrNull ?: p.doubleOrNull?.toLong()
     }
+
+    private val V2PinState.rawValue: String
+        get() = when (this) {
+            V2PinState.NONE -> "none"
+            V2PinState.PINNED -> "pinned"
+            V2PinState.CANCELLING -> "cancelling"
+        }
+
+    private val V2MemoSource.rawValue: String
+        get() = when (this) {
+            V2MemoSource.SELF_RECORD -> "selfRecord"
+            V2MemoSource.PLAZA_SAVE -> "plazaSave"
+            V2MemoSource.TEXT_INPUT -> "textInput"
+            V2MemoSource.SHARE -> "share"
+        }
+
+    private val V2MemoKind.rawValue: String
+        get() = when (this) {
+            V2MemoKind.VIDEO -> "video"
+            V2MemoKind.TEXT -> "text"
+            V2MemoKind.MIXED -> "mixed"
+        }
+
+    private val V2MemoThumbnailKind.rawValue: String
+        get() = when (this) {
+            V2MemoThumbnailKind.FAIRWAY -> "fairway"
+            V2MemoThumbnailKind.SAND -> "sand"
+            V2MemoThumbnailKind.GREEN_GRASS -> "greenGrass"
+            V2MemoThumbnailKind.SUNSET -> "sunset"
+            V2MemoThumbnailKind.MIST -> "mist"
+            V2MemoThumbnailKind.FOREST -> "forest"
+        }
+
+    private val V2MemoAccent.rawValue: String
+        get() = when (this) {
+            V2MemoAccent.BREAKTHROUGH -> "breakthrough"
+            V2MemoAccent.INSIGHT -> "insight"
+            V2MemoAccent.REFLECTION -> "reflection"
+            V2MemoAccent.COACH_NOTE -> "coachNote"
+        }
+
+    private val V2Topic.rawValue: String
+        get() = when (this) {
+            V2Topic.ALL -> "all"
+            V2Topic.SWING -> "swing"
+            V2Topic.PUTTING -> "putting"
+            V2Topic.SHORT_GAME -> "shortGame"
+            V2Topic.SAND -> "sand"
+            V2Topic.MIND -> "mind"
+            V2Topic.FITNESS -> "fitness"
+            V2Topic.GEAR -> "gear"
+        }
+
+    private val V2Goal.IconType.rawValue: String
+        get() = when (this) {
+            V2Goal.IconType.TARGET -> "target"
+            V2Goal.IconType.CLUB -> "club"
+            V2Goal.IconType.PUTT -> "putt"
+            V2Goal.IconType.SAND -> "sand"
+            V2Goal.IconType.TIP -> "tip"
+        }
+
+    private val V2Goal.ClubKind.rawValue: String
+        get() = when (this) {
+            V2Goal.ClubKind.DRIVER -> "driver"
+            V2Goal.ClubKind.FAIRWAY_WOOD -> "fairwayWood"
+            V2Goal.ClubKind.IRON -> "iron"
+            V2Goal.ClubKind.WEDGE -> "wedge"
+            V2Goal.ClubKind.PUTTER -> "putter"
+            V2Goal.ClubKind.SAND -> "sand"
+            V2Goal.ClubKind.CHIP -> "chip"
+            V2Goal.ClubKind.GREEN_READING -> "greenReading"
+            V2Goal.ClubKind.OTHER -> "other"
+        }
+
+    private val V2Goal.Status.rawValue: String
+        get() = when (this) {
+            V2Goal.Status.ACTIVE -> "active"
+            V2Goal.Status.PAUSED -> "paused"
+            V2Goal.Status.COMPLETED -> "completed"
+            V2Goal.Status.ARCHIVED -> "archived"
+        }
+
+    private val V2Goal.Priority.rawValue: String
+        get() = when (this) {
+            V2Goal.Priority.CRITICAL -> "critical"
+            V2Goal.Priority.HIGH -> "high"
+            V2Goal.Priority.NORMAL -> "normal"
+            V2Goal.Priority.LOW -> "low"
+        }
+
+    private val V2Goal.Metric.Kind.rawValue: String
+        get() = when (this) {
+            V2Goal.Metric.Kind.COUNT -> "count"
+            V2Goal.Metric.Kind.DURATION -> "duration"
+            V2Goal.Metric.Kind.DISTANCE -> "distance"
+            V2Goal.Metric.Kind.FREE -> "free"
+        }
+
+    private fun pinStateFromRaw(raw: String): V2PinState = when (raw.normalizedEnumKey()) {
+        "none" -> V2PinState.NONE
+        "pinned" -> V2PinState.PINNED
+        "cancelling" -> V2PinState.CANCELLING
+        else -> unknownRaw("V2PinState", raw)
+    }
+
+    private fun memoSourceFromRaw(raw: String): V2MemoSource = when (raw.normalizedEnumKey()) {
+        "selfrecord" -> V2MemoSource.SELF_RECORD
+        "plazasave" -> V2MemoSource.PLAZA_SAVE
+        "textinput" -> V2MemoSource.TEXT_INPUT
+        "share" -> V2MemoSource.SHARE
+        else -> unknownRaw("V2MemoSource", raw)
+    }
+
+    private fun memoKindFromRaw(raw: String): V2MemoKind = when (raw.normalizedEnumKey()) {
+        "video" -> V2MemoKind.VIDEO
+        "text" -> V2MemoKind.TEXT
+        "mixed" -> V2MemoKind.MIXED
+        else -> unknownRaw("V2MemoKind", raw)
+    }
+
+    private fun memoThumbnailKindFromRaw(raw: String): V2MemoThumbnailKind = when (raw.normalizedEnumKey()) {
+        "fairway" -> V2MemoThumbnailKind.FAIRWAY
+        "sand" -> V2MemoThumbnailKind.SAND
+        "greengrass" -> V2MemoThumbnailKind.GREEN_GRASS
+        "sunset" -> V2MemoThumbnailKind.SUNSET
+        "mist" -> V2MemoThumbnailKind.MIST
+        "forest" -> V2MemoThumbnailKind.FOREST
+        else -> unknownRaw("V2MemoThumbnailKind", raw)
+    }
+
+    private fun memoAccentFromRaw(raw: String): V2MemoAccent = when (raw.normalizedEnumKey()) {
+        "breakthrough" -> V2MemoAccent.BREAKTHROUGH
+        "insight" -> V2MemoAccent.INSIGHT
+        "reflection" -> V2MemoAccent.REFLECTION
+        "coachnote" -> V2MemoAccent.COACH_NOTE
+        else -> unknownRaw("V2MemoAccent", raw)
+    }
+
+    private fun topicFromRaw(raw: String): V2Topic = when (raw.normalizedEnumKey()) {
+        "all" -> V2Topic.ALL
+        "swing" -> V2Topic.SWING
+        "putting" -> V2Topic.PUTTING
+        "shortgame" -> V2Topic.SHORT_GAME
+        "sand" -> V2Topic.SAND
+        "mind" -> V2Topic.MIND
+        "fitness" -> V2Topic.FITNESS
+        "gear" -> V2Topic.GEAR
+        else -> unknownRaw("V2Topic", raw)
+    }
+
+    private fun goalIconTypeFromRaw(raw: String): V2Goal.IconType = when (raw.normalizedEnumKey()) {
+        "target" -> V2Goal.IconType.TARGET
+        "club" -> V2Goal.IconType.CLUB
+        "putt" -> V2Goal.IconType.PUTT
+        "sand" -> V2Goal.IconType.SAND
+        "tip" -> V2Goal.IconType.TIP
+        else -> unknownRaw("V2Goal.IconType", raw)
+    }
+
+    private fun goalClubKindFromRaw(raw: String): V2Goal.ClubKind = when (raw.normalizedEnumKey()) {
+        "driver" -> V2Goal.ClubKind.DRIVER
+        "fairwaywood" -> V2Goal.ClubKind.FAIRWAY_WOOD
+        "iron" -> V2Goal.ClubKind.IRON
+        "wedge" -> V2Goal.ClubKind.WEDGE
+        "putter" -> V2Goal.ClubKind.PUTTER
+        "sand" -> V2Goal.ClubKind.SAND
+        "chip" -> V2Goal.ClubKind.CHIP
+        "greenreading" -> V2Goal.ClubKind.GREEN_READING
+        "other" -> V2Goal.ClubKind.OTHER
+        else -> unknownRaw("V2Goal.ClubKind", raw)
+    }
+
+    private fun goalStatusFromRaw(raw: String): V2Goal.Status = when (raw.normalizedEnumKey()) {
+        "active" -> V2Goal.Status.ACTIVE
+        "paused" -> V2Goal.Status.PAUSED
+        "completed" -> V2Goal.Status.COMPLETED
+        "archived" -> V2Goal.Status.ARCHIVED
+        else -> unknownRaw("V2Goal.Status", raw)
+    }
+
+    private fun goalPriorityFromRaw(raw: String): V2Goal.Priority = when (raw.normalizedEnumKey()) {
+        "critical" -> V2Goal.Priority.CRITICAL
+        "high" -> V2Goal.Priority.HIGH
+        "normal" -> V2Goal.Priority.NORMAL
+        "low" -> V2Goal.Priority.LOW
+        else -> unknownRaw("V2Goal.Priority", raw)
+    }
+
+    private fun goalMetricKindFromRaw(raw: String): V2Goal.Metric.Kind = when (raw.normalizedEnumKey()) {
+        "count" -> V2Goal.Metric.Kind.COUNT
+        "duration" -> V2Goal.Metric.Kind.DURATION
+        "distance" -> V2Goal.Metric.Kind.DISTANCE
+        "free" -> V2Goal.Metric.Kind.FREE
+        else -> unknownRaw("V2Goal.Metric.Kind", raw)
+    }
+
+    private fun String.normalizedEnumKey(): String =
+        filter { it != '_' && it != '-' }.lowercase()
+
+    private fun <T> unknownRaw(typeName: String, raw: String): T =
+        error("Unknown enum value '$raw' in $typeName")
 }

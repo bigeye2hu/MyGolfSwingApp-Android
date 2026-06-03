@@ -24,10 +24,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -45,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -390,16 +396,23 @@ private fun VideoPreviewCard(
                     .align(Alignment.TopCenter)
                     .background(Brush.verticalGradient(listOf(Color.Black.copy(0.55f), Color.Transparent))),
             )
-            Text(
-                platform,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
+            Row(
                 modifier = Modifier
+                    .align(Alignment.TopStart)
                     .padding(8.dp)
                     .background(platformColor(platform).copy(0.9f), CircleShape)
                     .padding(horizontal = 8.dp, vertical = 3.dp),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(platformIcon(platform), null, tint = Color.White, modifier = Modifier.size(11.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    platform,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            }
             durationSec?.takeIf { it > 0 }?.let { d ->
                 Text(
                     formatDuration(d),
@@ -426,7 +439,22 @@ private fun VideoPreviewCard(
         }
         Column(Modifier.padding(16.dp)) {
             Text(title.ifBlank { "正在获取标题…" }, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
-            Text(platform, fontSize = 12.sp, color = DSColors.shadowGray, modifier = Modifier.padding(top = 8.dp))
+            Row(
+                modifier = Modifier.padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(platformColor(platform)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(platformIcon(platform), null, tint = Color.White, modifier = Modifier.size(12.dp))
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(platform, fontSize = 12.sp, color = DSColors.shadowGray)
+            }
         }
     }
 }
@@ -489,18 +517,20 @@ private fun SupportedPlatformsCard() {
         Text("支持平台", fontSize = 11.sp, color = DSColors.shadowGray)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            listOf("B站" to Color(0xFFFB7299), "YouTube" to Color(0xFFFF0000), "小红书" to Color(0xFFFF2442), "抖音" to Color(0xFF1B2A21))
-                .forEach { (name, color) ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(color),
-                        )
-                        Text(name, fontSize = 10.sp, color = DSColors.shadowGray, modifier = Modifier.padding(top = 6.dp))
+            supportedPlatformItems.forEach { item ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(item.color),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(item.icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
                     }
+                    Text(item.name, fontSize = 10.sp, color = DSColors.shadowGray, modifier = Modifier.padding(top = 6.dp))
                 }
+            }
         }
     }
 }
@@ -515,6 +545,8 @@ private fun HelperCard() {
             .background(DSColors.fairway.copy(0.06f))
             .padding(16.dp),
     ) {
+        Icon(Icons.Filled.Info, null, tint = DSColors.fairway, modifier = Modifier.padding(top = 2.dp).size(15.dp))
+        Spacer(Modifier.width(12.dp))
         Column {
             Text("如何获取视频链接？", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway)
             Text(
@@ -547,6 +579,23 @@ private fun platformColor(p: String): Color = when (p) {
     "抖音" -> Color(0xFF1B2A21)
     else -> DSColors.fairway
 }
+
+private data class SupportedPlatformItem(
+    val name: String,
+    val platform: String,
+    val color: Color,
+    val icon: ImageVector,
+)
+
+private val supportedPlatformItems = listOf(
+    SupportedPlatformItem("B站", "哔哩哔哩", Color(0xFFFB7299), Icons.Filled.Tv),
+    SupportedPlatformItem("YouTube", "YouTube", Color(0xFFFF0000), Icons.Filled.PlayCircle),
+    SupportedPlatformItem("小红书", "小红书", Color(0xFFFF2442), Icons.AutoMirrored.Filled.MenuBook),
+    SupportedPlatformItem("抖音", "抖音", Color(0xFF1B2A21), Icons.Filled.MusicNote),
+)
+
+private fun platformIcon(platform: String): ImageVector =
+    supportedPlatformItems.firstOrNull { it.platform == platform }?.icon ?: Icons.Filled.Link
 
 private fun formatDuration(seconds: Double): String {
     val total = seconds.toInt()

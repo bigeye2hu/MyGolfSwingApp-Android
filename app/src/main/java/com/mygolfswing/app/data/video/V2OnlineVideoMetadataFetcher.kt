@@ -39,7 +39,23 @@ object V2OnlineVideoMetadataFetcher {
         val trimmed = input.trim()
         val pattern = Pattern.compile("(https?://[^\\s\\u4e00-\\u9fa5]+)")
         val m = pattern.matcher(trimmed)
-        return if (m.find()) m.group(1) ?: trimmed else trimmed
+        val extracted = if (m.find()) m.group(1) ?: trimmed else trimmed
+        return extracted.trimEnd(
+            ')',
+            '）',
+            ']',
+            '】',
+            '.',
+            ',',
+            '，',
+            '。',
+            '!',
+            '！',
+            '?',
+            '？',
+            ';',
+            '；',
+        )
     }
 
     fun detectPlatform(url: String): String = when {

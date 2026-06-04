@@ -98,7 +98,6 @@ fun V2OnlineVideoSelectorScreen(
         val cleaned = V2OnlineVideoMetadataFetcher.cleanVideoUrl(raw)
         if (cleaned != raw) {
             urlInput = cleaned
-            return
         }
         videoTitle = ""
         thumbnailUrl = null

@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -65,6 +66,9 @@ import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.store.V2SwingSessionStore
+import com.mygolfswing.app.ui.common.V2DrawingOverlay
+import com.mygolfswing.app.ui.common.V2DrawingState
+import com.mygolfswing.app.ui.common.V2DrawingToolsPanel
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
 import com.mygolfswing.app.ui.common.v2FullScreenInsets
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -92,9 +96,11 @@ fun V2SwingClipDetailScreen(
     var currentTimeSec by remember { mutableFloatStateOf(0f) }
     var durationSec by remember { mutableFloatStateOf(0f) }
     var playbackRate by remember { mutableFloatStateOf(1f) }
+    var showDrawingTools by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
+    val drawingState = remember { V2DrawingState() }
 
     if (clip == null) {
         V2MissingEntityScreen(message = "挥杆视频不存在", onBack = onBack, title = "挥杆详情")
@@ -150,22 +156,48 @@ fun V2SwingClipDetailScreen(
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         Column(Modifier.fillMaxSize().v2FullScreenInsets()) {
-            DetailTopBar(onBack = onBack)
-            AndroidView(
+            DetailTopBar(
+                showDrawingTools = showDrawingTools,
+                onBack = onBack,
+                onToggleDrawing = {
+                    showDrawingTools = !showDrawingTools
+                    if (!showDrawingTools) {
+                        drawingState.clearSelection()
+                    } else {
+                        player.pause()
+                    }
+                },
+            )
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
                     .padding(horizontal = 8.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.Black),
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        this.player = player
-                        useController = false
-                    }
-                },
-                update = { it.player = player },
-            )
+            ) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            this.player = player
+                            useController = false
+                        }
+                    },
+                    update = { it.player = player },
+                )
+                if (showDrawingTools) {
+                    V2DrawingOverlay(state = drawingState, modifier = Modifier.fillMaxSize())
+                    V2DrawingToolsPanel(
+                        state = drawingState,
+                        onClose = {
+                            showDrawingTools = false
+                            drawingState.clearSelection()
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp),
+                    )
+                }
+            }
             ControlsPanel(
                 clip = clip,
                 isPlaying = isPlaying,
@@ -186,6 +218,7 @@ fun V2SwingClipDetailScreen(
                 },
                 onRate = { playbackRate = it },
                 onFavorite = {
+                    if (clip.retention == V2SwingClipRetention.PROMOTED) return@ControlsPanel
                     val next = if (clip.retention == V2SwingClipRetention.FAVORITED) {
                         V2SwingClipRetention.TEMPORARY
                     } else {
@@ -242,7 +275,11 @@ fun V2SwingClipDetailScreen(
 }
 
 @Composable
-private fun DetailTopBar(onBack: () -> Unit) {
+private fun DetailTopBar(
+    showDrawingTools: Boolean,
+    onBack: () -> Unit,
+    onToggleDrawing: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -251,6 +288,14 @@ private fun DetailTopBar(onBack: () -> Unit) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = Color.White)
         }
         Text("挥杆详情", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
+        Spacer(Modifier.weight(1f))
+        IconButton(onClick = onToggleDrawing, modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))) {
+            Icon(
+                Icons.Filled.Edit,
+                contentDescription = "画线工具",
+                tint = if (showDrawingTools) DSColors.trophyGold else Color.White,
+            )
+        }
     }
 }
 
@@ -312,17 +357,19 @@ private fun ControlsPanel(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
+            val isPromoted = clip.retention == V2SwingClipRetention.PROMOTED
             BottomAction(
-                icon = if (clip.retention == V2SwingClipRetention.FAVORITED) Icons.Filled.Star else Icons.Filled.StarBorder,
+                icon = if (clip.retention == V2SwingClipRetention.FAVORITED || isPromoted) Icons.Filled.Star else Icons.Filled.StarBorder,
                 label = "收藏",
-                active = clip.retention == V2SwingClipRetention.FAVORITED,
+                active = clip.retention == V2SwingClipRetention.FAVORITED || isPromoted,
+                enabled = !isPromoted,
                 onClick = onFavorite,
             )
-            BottomAction(Icons.Filled.Upgrade, "成长池", clip.retention == V2SwingClipRetention.PROMOTED, onPromote)
+            BottomAction(Icons.Filled.Upgrade, "成长池", clip.retention == V2SwingClipRetention.PROMOTED, onClick = onPromote)
             Spacer(Modifier.weight(1f))
-            BottomAction(Icons.Filled.Download, "保存", false, onSave)
-            BottomAction(Icons.Filled.Info, "详情", showDetails, onInfo)
-            BottomAction(Icons.Filled.DeleteOutline, "删除", false, onDelete, danger = true)
+            BottomAction(Icons.Filled.Download, "保存", false, onClick = onSave)
+            BottomAction(Icons.Filled.Info, "详情", showDetails, onClick = onInfo)
+            BottomAction(Icons.Filled.DeleteOutline, "删除", false, onClick = onDelete, danger = true)
         }
         if (showDetails) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.08f)).padding(12.dp)) {
@@ -356,6 +403,7 @@ private fun BottomAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     active: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit,
     danger: Boolean = false,
 ) {
@@ -373,9 +421,9 @@ private fun BottomAction(
             .clip(shape)
             .background(if (active) color.copy(alpha = 0.15f) else Color.Transparent)
             .border(1.dp, if (active) color.copy(alpha = 0.55f) else Color.Transparent, shape)
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
     ) {
-        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(19.dp))
+        Icon(icon, contentDescription = label, tint = color.copy(alpha = if (enabled) 1f else 0.55f), modifier = Modifier.size(19.dp))
     }
 }
 

@@ -16,9 +16,12 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -30,6 +33,29 @@ import java.util.UUID
 
 internal fun localSwingMediaFile(pathOrUrl: String?): File? =
     V2MemoBridge.localVideoAbsolutePath(pathOrUrl)?.let(::File)
+
+internal fun decodeSwingSessionJson(sessionJson: String, json: Json): V2SwingSession? = runCatching {
+    val root = json.parseToJsonElement(sessionJson).jsonObject
+    val id = UUID.fromString(root["id"]!!.jsonPrimitive.content)
+    val userId = root["userId"]!!.jsonPrimitive.content
+    val date = LocalDate.parse(root["date"]!!.jsonPrimitive.content)
+    val location = root["locationName"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+    val clips = root["clips"]?.jsonArray?.mapNotNull { el ->
+        runCatching {
+            val o = el.jsonObject
+            V2SwingClip(
+                id = UUID.fromString(o["id"]!!.jsonPrimitive.content),
+                sessionId = id,
+                videoPath = o["videoPath"]!!.jsonPrimitive.content,
+                thumbnailPath = o["thumbnailPath"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
+                timestamp = LocalDateTime.parse(o["timestamp"]!!.jsonPrimitive.content),
+                durationSec = o["durationSec"]!!.jsonPrimitive.doubleOrNull ?: return@runCatching null,
+                retention = V2SwingClipRetention.fromWire(o["retention"]?.jsonPrimitive?.contentOrNull),
+            )
+        }.getOrNull()
+    } ?: emptyList()
+    V2SwingSession(id = id, userId = userId, date = date, locationName = location, clips = clips)
+}.getOrNull()
 
 class V2SwingSessionRepository(
     private val dao: SwingSessionDao,
@@ -144,26 +170,8 @@ class V2SwingSessionRepository(
         )
     }
 
-    private fun decode(row: SwingSessionEntity): V2SwingSession? = runCatching {
-        val root = net.json.parseToJsonElement(row.sessionJson).jsonObject
-        val id = UUID.fromString(root["id"]!!.jsonPrimitive.content)
-        val userId = root["userId"]!!.jsonPrimitive.content
-        val date = LocalDate.parse(root["date"]!!.jsonPrimitive.content)
-        val location = root["locationName"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
-        val clips = root["clips"]!!.jsonArray.map { el ->
-            val o = el.jsonObject
-            V2SwingClip(
-                id = UUID.fromString(o["id"]!!.jsonPrimitive.content),
-                sessionId = id,
-                videoPath = o["videoPath"]!!.jsonPrimitive.content,
-                thumbnailPath = o["thumbnailPath"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() },
-                timestamp = LocalDateTime.parse(o["timestamp"]!!.jsonPrimitive.content),
-                durationSec = o["durationSec"]!!.jsonPrimitive.content.toDouble(),
-                retention = V2SwingClipRetention.fromWire(o["retention"]?.jsonPrimitive?.content),
-            )
-        }
-        V2SwingSession(id = id, userId = userId, date = date, locationName = location, clips = clips)
-    }.getOrNull()
+    private fun decode(row: SwingSessionEntity): V2SwingSession? =
+        decodeSwingSessionJson(row.sessionJson, net.json)
 
     private fun V2SwingClip.deleteFiles() {
         runCatching { localSwingMediaFile(videoPath)?.delete() }

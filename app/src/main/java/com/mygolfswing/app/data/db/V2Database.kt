@@ -38,7 +38,6 @@ abstract class V2Database : RoomDatabase() {
                 "v2-mygolfswing.db",
             )
                 .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
-                .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
         }

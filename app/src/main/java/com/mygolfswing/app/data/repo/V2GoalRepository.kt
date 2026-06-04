@@ -383,19 +383,7 @@ class V2GoalRepository(
         val rows = withContext(Dispatchers.IO) { dao.dirty(uid) }
         var ok = 0
         rows.forEach { row ->
-            runCatching {
-                net.cloudApi.dataSync(
-                    JsonObject(
-                        mapOf(
-                            "action" to JsonPrimitive("saveV2Goal"),
-                            "userId" to JsonPrimitive(uid),
-                            "goalId" to JsonPrimitive(row.id),
-                            "goalJson" to JsonPrimitive(row.goalJson),
-                            "status" to JsonPrimitive(row.status),
-                            "updatedAt" to JsonPrimitive(row.updatedAt),
-                        ),
-                    ),
-                )
+            if (saveGoalRowToCloud(uid, row)) {
                 withContext(Dispatchers.IO) { dao.markClean(row.id, uid) }
                 ok += 1
             }
@@ -406,22 +394,38 @@ class V2GoalRepository(
     private suspend fun pushSingle(goal: V2Goal) {
         val uid = session.current().userId ?: return
         val jsonText = net.json.encodeToString(JsonObject.serializer(), V2Json.encodeGoal(goal))
-        runCatching {
-            net.cloudApi.dataSync(
-                JsonObject(
-                    mapOf(
-                        "action" to JsonPrimitive("saveV2Goal"),
-                        "userId" to JsonPrimitive(uid),
-                        "goalId" to JsonPrimitive(goal.id.toString()),
-                        "goalJson" to JsonPrimitive(jsonText),
-                        "status" to JsonPrimitive(goal.status.name.lowercase()),
-                        "updatedAt" to JsonPrimitive(goal.updatedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()),
-                    ),
-                ),
-            )
+        val row = GoalEntity(
+            id = goal.id.toString(),
+            ownerUserId = uid,
+            goalJson = jsonText,
+            status = goal.status.name.lowercase(),
+            priority = goal.priority.name.lowercase(),
+            pinState = goal.pinState.name.lowercase(),
+            todayFocus = goal.todayFocus,
+            updatedAt = goal.updatedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            startedAt = goal.startedAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            dirty = true,
+        )
+        if (saveGoalRowToCloud(uid, row)) {
             withContext(Dispatchers.IO) { dao.markClean(goal.id.toString(), uid) }
         }
     }
+
+    private suspend fun saveGoalRowToCloud(uid: String, row: GoalEntity): Boolean = runCatching {
+        val resp = net.cloudApi.dataSync(
+            JsonObject(
+                mapOf(
+                    "action" to JsonPrimitive("saveV2Goal"),
+                    "userId" to JsonPrimitive(uid),
+                    "goalId" to JsonPrimitive(row.id),
+                    "goalJson" to JsonPrimitive(row.goalJson),
+                    "status" to JsonPrimitive(row.status),
+                    "updatedAt" to JsonPrimitive(row.updatedAt),
+                ),
+            )
+        )
+        resp.success
+    }.getOrDefault(false)
 
     private suspend fun flushPendingDeletes(uid: String) {
         session.pendingDeletes(BUCKET_V2_GOAL, uid).forEach { id ->

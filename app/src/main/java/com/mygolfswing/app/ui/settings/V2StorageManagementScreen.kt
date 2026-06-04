@@ -114,8 +114,8 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                         loading = true
                         val freedVideos = V2VideoFileStore.clearAll(context)
                         val freedCache = clearAppCache(context)
-                        videoBytes = 0L
-                        cacheBytes = 0L
+                        videoBytes = V2VideoFileStore.calculateUsedBytes(context)
+                        cacheBytes = calculateCacheBytes(context)
                         loading = false
                         clearedMsg = "已释放 ${formatBytes(freedVideos + freedCache)}"
                     }

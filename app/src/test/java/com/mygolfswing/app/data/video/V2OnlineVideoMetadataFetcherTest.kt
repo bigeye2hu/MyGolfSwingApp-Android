@@ -37,4 +37,14 @@ class V2OnlineVideoMetadataFetcherTest {
 
         assertEquals("https://example.com/video.mp4", normalized)
     }
+
+    @Test
+    fun youtubeThumbnailUrlHandlesCommonVideoUrlShapes() {
+        val expected = "https://img.youtube.com/vi/abcdefghijk/hqdefault.jpg"
+
+        assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://www.youtube.com/watch?v=abcdefghijk"))
+        assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://www.youtube.com/watch?si=sharecode&v=abcdefghijk"))
+        assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://www.youtube.com/shorts/abcdefghijk?feature=share"))
+        assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://youtu.be/abcdefghijk?si=sharecode"))
+    }
 }

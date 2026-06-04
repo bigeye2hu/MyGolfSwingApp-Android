@@ -62,6 +62,11 @@ object V2OnlineVideoMetadataFetcher {
     fun normalizePlayableUrl(url: String): String =
         url.trim().replaceHttpWithHttps()
 
+    fun youtubeThumbnailUrl(url: String): String? {
+        val id = extractYouTubeId(url) ?: return null
+        return "https://img.youtube.com/vi/$id/hqdefault.jpg"
+    }
+
     fun detectPlatform(url: String): String = when {
         url.contains("bilibili.com", ignoreCase = true) || url.contains("b23.tv", ignoreCase = true) -> "哔哩哔哩"
         url.contains("youtube.com", ignoreCase = true) || url.contains("youtu.be", ignoreCase = true) -> "YouTube"
@@ -88,8 +93,7 @@ object V2OnlineVideoMetadataFetcher {
     }
 
     private fun fetchYouTube(url: String): V2OnlineVideoMetadata {
-        val id = extractYouTubeId(url) ?: return V2OnlineVideoMetadata()
-        val thumb = "https://img.youtube.com/vi/$id/hqdefault.jpg"
+        val thumb = youtubeThumbnailUrl(url) ?: return V2OnlineVideoMetadata()
         val encoded = java.net.URLEncoder.encode(url, Charsets.UTF_8.name())
         val oembed = getString("https://www.youtube.com/oembed?url=$encoded&format=json")
         val title = oembed?.let {
@@ -112,7 +116,8 @@ object V2OnlineVideoMetadataFetcher {
 
     private fun extractYouTubeId(url: String): String? {
         val patterns = listOf(
-            "(?:youtube\\.com/watch\\?v=)([\\w-]{11})",
+            "[?&]v=([\\w-]{11})",
+            "(?:youtube\\.com|m\\.youtube\\.com)/(?:shorts|embed)/([\\w-]{11})",
             "(?:youtu\\.be/)([\\w-]{11})",
         )
         for (p in patterns) {

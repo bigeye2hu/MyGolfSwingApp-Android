@@ -6,6 +6,7 @@ import android.os.Build
 import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,7 +15,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -66,6 +66,7 @@ import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.v2FullScreenInsets
 import com.mygolfswing.app.ui.designsystem.DSColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -148,10 +149,15 @@ fun V2SwingClipDetailScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().v2FullScreenInsets()) {
             DetailTopBar(onBack = onBack)
             AndroidView(
-                modifier = Modifier.fillMaxWidth().weight(1f).background(Color.Black),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black),
                 factory = { ctx ->
                     PlayerView(ctx).apply {
                         this.player = player
@@ -267,8 +273,8 @@ private fun ControlsPanel(
     onDelete: () -> Unit,
 ) {
     Column(
-        Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 18.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("${"%.1f".format(currentTime)}s", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
@@ -279,13 +285,15 @@ private fun ControlsPanel(
             value = if (duration > 0) (currentTime / duration).coerceIn(0f, 1f) else 0f,
             onValueChange = onSeek,
         )
-        Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             StepButton("-10") { onStep(-10_000) }
             StepButton("-3") { onStep(-3_000) }
             StepButton("-1") { onStep(-1_000) }
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = onTogglePlay, modifier = Modifier.size(50.dp).clip(CircleShape).background(Color.White)) {
                 Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(30.dp))
             }
+            Spacer(Modifier.weight(1f))
             StepButton("+1") { onStep(1_000) }
             StepButton("+3") { onStep(3_000) }
             StepButton("+10") { onStep(10_000) }
@@ -332,7 +340,15 @@ private fun ControlsPanel(
 
 @Composable
 private fun StepButton(label: String, onClick: () -> Unit) {
-    Text(label, color = Color.White, fontSize = 12.sp, modifier = Modifier.clickable(onClick = onClick).padding(8.dp))
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
+    }
 }
 
 @Composable
@@ -343,17 +359,23 @@ private fun BottomAction(
     onClick: () -> Unit,
     danger: Boolean = false,
 ) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 5.dp, vertical = 4.dp),
+    val color = when {
+        danger -> DSColors.flagRed
+        active -> DSColors.trophyGold
+        else -> Color.White.copy(alpha = 0.62f)
+    }
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .padding(horizontal = 3.dp)
+            .size(36.dp)
+            .clip(shape)
+            .background(if (active) color.copy(alpha = 0.15f) else Color.Transparent)
+            .border(1.dp, if (active) color.copy(alpha = 0.55f) else Color.Transparent, shape)
+            .clickable(onClick = onClick),
     ) {
-        val color = when {
-            danger -> DSColors.flagRed
-            active -> DSColors.trophyGold
-            else -> Color.White.copy(alpha = 0.82f)
-        }
-        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-        Text(label, color = color, fontSize = 10.sp)
+        Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(19.dp))
     }
 }
 

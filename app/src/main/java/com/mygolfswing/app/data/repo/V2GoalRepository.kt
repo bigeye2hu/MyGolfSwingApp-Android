@@ -113,8 +113,11 @@ class V2GoalRepository(
         )
         if (!resp.success) error(resp.error ?: "拉取目标失败")
 
+        val pendingDeleteIds = session.pendingDeletes(BUCKET_V2_GOAL, uid)
         val cloudRows = goalRowArray(resp.data).mapNotNull { it as? JsonObject }
-        val activeRows = cloudRows.filterNot { isDeletedRow(it) }
+        val activeRows = cloudRows
+            .filterNot { isDeletedRow(it) }
+            .filterNot { isPendingCloudGoalDelete(it, pendingDeleteIds) }
         val rowsForMerge = if (hasDuplicateGoalIds(activeRows)) {
             debugInfo("duplicate goalId detected, running repairV2Goals")
             repairCloudGoals(uid)
@@ -128,7 +131,9 @@ class V2GoalRepository(
                 ),
             )
             if (!repaired.success) error(repaired.error ?: "拉取目标失败")
-            goalRowArray(repaired.data).mapNotNull { it as? JsonObject }.filterNot { isDeletedRow(it) }
+            goalRowArray(repaired.data).mapNotNull { it as? JsonObject }
+                .filterNot { isDeletedRow(it) }
+                .filterNot { isPendingCloudGoalDelete(it, pendingDeleteIds) }
         } else {
             activeRows
         }
@@ -227,6 +232,10 @@ class V2GoalRepository(
 
     private fun isDeletedRow(row: JsonObject): Boolean =
         row["isDeleted"]?.jsonPrimitive?.booleanOrNull == true
+
+    private fun isPendingCloudGoalDelete(row: JsonObject, pendingDeleteIds: Set<String>): Boolean =
+        row["goalId"]?.jsonPrimitive?.contentOrNull.isPendingCloudDelete(pendingDeleteIds) ||
+            row["id"]?.jsonPrimitive?.contentOrNull.isPendingCloudDelete(pendingDeleteIds)
 
     private fun hasDuplicateGoalIds(rows: List<JsonObject>): Boolean {
         val seen = mutableSetOf<String>()

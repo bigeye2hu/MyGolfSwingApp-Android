@@ -174,6 +174,7 @@ class V2MemoRepository(
     }
 
     private suspend fun pullVideoMemos(uid: String): Int {
+        val pendingDeleteIds = session.pendingDeletes(BUCKET_VIDEO_MEMO, uid)
         val resp = net.cloudApi.dataSync(
             JsonObject(
                 mapOf(
@@ -193,6 +194,7 @@ class V2MemoRepository(
                 applyCloudDeletedMemo(memoId, cloud)
                 continue
             }
+            if (memoId.isPendingCloudDelete(pendingDeleteIds)) continue
             val memo = parseCloudVideoMemo(cloud, uid) ?: continue
             if (mergeIfNewer(memo, cloud)) merged++
         }
@@ -200,6 +202,7 @@ class V2MemoRepository(
     }
 
     private suspend fun pullInsightCards(uid: String): Int {
+        val pendingDeleteIds = session.pendingDeletes(BUCKET_INSIGHT_CARD, uid)
         val resp = net.cloudApi.dataSync(
             JsonObject(
                 mapOf(
@@ -219,6 +222,7 @@ class V2MemoRepository(
                 applyCloudDeletedMemo(cardId, cloud)
                 continue
             }
+            if (cardId.isPendingCloudDelete(pendingDeleteIds)) continue
             val memo = parseCloudInsightCard(cloud) ?: continue
             if (mergeIfNewer(memo, cloud)) merged++
         }

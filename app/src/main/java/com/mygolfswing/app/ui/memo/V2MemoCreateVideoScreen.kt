@@ -141,11 +141,18 @@ fun V2MemoCreateVideoScreen(
                     deleteFileCountingFreedBytes(file)
                     importError = "录制失败，请重试"
                 } else {
+                    val previousVideoPath = localAbsolutePath
+                    val previousThumbPath = localThumbPath
                     sourceKind = SourceKind.CAMERA
                     localAbsolutePath = r.absolutePath
                     localThumbPath = r.thumbnailPath
                     localDurationSec = r.durationSec
                     onlineUrl = null
+                    deleteDraftLocalMedia(
+                        videoPath = previousVideoPath,
+                        thumbnailPath = previousThumbPath,
+                        protectedPaths = setOfNotNull(r.absolutePath, r.thumbnailPath),
+                    )
                 }
             }
         } else {
@@ -173,6 +180,8 @@ fun V2MemoCreateVideoScreen(
 
     androidx.compose.runtime.LaunchedEffect(pendingOnline) {
         val pick = pendingOnline ?: return@LaunchedEffect
+        val previousVideoPath = localAbsolutePath
+        val previousThumbPath = localThumbPath
         onlineUrl = pick.url
         onlinePlatform = pick.platform
         onlineThumbUrl = pick.thumbnailUrl
@@ -181,6 +190,7 @@ fun V2MemoCreateVideoScreen(
         sourceKind = SourceKind.ONLINE
         localAbsolutePath = null
         localThumbPath = null
+        deleteDraftLocalMedia(previousVideoPath, previousThumbPath)
         onPendingOnlineConsumed()
     }
 
@@ -196,11 +206,18 @@ fun V2MemoCreateVideoScreen(
                 if (r == null) {
                     importError = "无法读取视频，请检查权限或换一个视频"
                 } else {
+                    val previousVideoPath = localAbsolutePath
+                    val previousThumbPath = localThumbPath
                     sourceKind = SourceKind.ALBUM
                     localAbsolutePath = r.absolutePath
                     localThumbPath = r.thumbnailPath
                     localDurationSec = r.durationSec
                     onlineUrl = null
+                    deleteDraftLocalMedia(
+                        videoPath = previousVideoPath,
+                        thumbnailPath = previousThumbPath,
+                        protectedPaths = setOfNotNull(r.absolutePath, r.thumbnailPath),
+                    )
                 }
             }
         }
@@ -218,6 +235,14 @@ fun V2MemoCreateVideoScreen(
     fun buildAndSave() {
         val isOnline = onlineUrl != null
         val videoStringForStore = onlineUrl ?: localAbsolutePath?.let { "file://$it" }
+        if (!isOnline && !memoVideoPlayable(videoStringForStore)) {
+            importError = "视频文件已不可用，请重新选择或录制"
+            localAbsolutePath = null
+            localThumbPath = null
+            localDurationSec = null
+            sourceKind = null
+            return
+        }
         val thumbStringForStore = localThumbPath?.let { "file://$it" }
         val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
         val tagIds = selectedTagIds.toList()
@@ -299,6 +324,7 @@ fun V2MemoCreateVideoScreen(
                         else showOnlineDialog = true
                     },
                     onClear = {
+                        deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
                         sourceKind = null
                         localAbsolutePath = null
                         localThumbPath = null
@@ -335,6 +361,7 @@ fun V2MemoCreateVideoScreen(
         OnlineUrlDialog(
             onConfirm = { url ->
                 showOnlineDialog = false
+                deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
                 onlineUrl = url
                 onlinePlatform = detectPlatform(url)
                 sourceKind = SourceKind.ONLINE
@@ -365,6 +392,8 @@ fun V2MemoCreateVideoScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showDiscardConfirm = false
+                    deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
+                    deleteFileCountingFreedBytes(pendingCameraFile)
                     onClose()
                 }) { Text("放弃", color = Color(0xFFC0392B)) }
             },
@@ -395,6 +424,25 @@ private fun buildMetaText(isOnline: Boolean, durationSec: Double?): String {
         parts.add(String.format(Locale.ROOT, "%d:%02d", m, s))
     }
     return parts.joinToString(" · ")
+}
+
+internal fun deleteDraftLocalMedia(
+    videoPath: String?,
+    thumbnailPath: String?,
+    protectedPaths: Set<String> = emptySet(),
+): Long {
+    val protectedCanonicalPaths = protectedPaths.mapNotNullTo(mutableSetOf()) { path ->
+        runCatching { File(path).canonicalPath }.getOrNull()
+    }
+    return listOfNotNull(videoPath, thumbnailPath).sumOf { path ->
+        val file = File(path.removePrefix("file://"))
+        val canonicalPath = runCatching { file.canonicalPath }.getOrNull()
+        if (canonicalPath != null && canonicalPath in protectedCanonicalPaths) {
+            0L
+        } else {
+            deleteFileCountingFreedBytes(file)
+        }
+    }
 }
 
 // =================================================================

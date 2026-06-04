@@ -31,4 +31,36 @@ class V2MemoMediaTest {
         assertFalse(memoVideoPlayable(null))
         assertFalse(memoVideoPlayable(" "))
     }
+
+    @Test
+    fun deleteDraftLocalMediaRemovesVideoAndThumbnail() {
+        val root = createTempDirectory("v2-memo-draft-media").toFile()
+        val video = File(root, "draft.mp4").apply { writeBytes(ByteArray(7)) }
+        val thumb = File(root, "draft.jpg").apply { writeBytes(ByteArray(3)) }
+
+        val freed = deleteDraftLocalMedia("file://${video.absolutePath}", thumb.absolutePath)
+
+        assertTrue(freed >= 10L)
+        assertFalse(video.exists())
+        assertFalse(thumb.exists())
+        root.deleteRecursively()
+    }
+
+    @Test
+    fun deleteDraftLocalMediaKeepsProtectedReplacementFiles() {
+        val root = createTempDirectory("v2-memo-draft-protected").toFile()
+        val video = File(root, "draft.mp4").apply { writeBytes(ByteArray(7)) }
+        val thumb = File(root, "draft.jpg").apply { writeBytes(ByteArray(3)) }
+
+        val freed = deleteDraftLocalMedia(
+            videoPath = video.absolutePath,
+            thumbnailPath = thumb.absolutePath,
+            protectedPaths = setOf(video.absolutePath),
+        )
+
+        assertTrue(freed >= 3L)
+        assertTrue(video.exists())
+        assertFalse(thumb.exists())
+        root.deleteRecursively()
+    }
 }

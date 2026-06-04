@@ -82,10 +82,16 @@ fun V2SwingDayDetailScreen(
         return
     }
 
+    val uri = remember(selected.videoPath) { mediaUriFor(selected.videoPath) }
+    if (uri == null) {
+        V2MissingEntityScreen(message = "本地挥杆视频文件不存在", onBack = onBack, title = "挥杆记录")
+        return
+    }
+
     val context = LocalContext.current
-    val player = remember(selected.id) {
+    val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(mediaUriFor(selected.videoPath)))
+            setMediaItem(MediaItem.fromUri(uri))
             playWhenReady = true
             prepare()
         }
@@ -199,10 +205,11 @@ private fun ClipThumb(
     }
 }
 
-private fun mediaUriFor(pathOrUrl: String): Uri {
+private fun mediaUriFor(pathOrUrl: String): Uri? {
     if (V2MemoBridge.isRemoteUrl(pathOrUrl)) return pathOrUrl.trim().toUri()
-    val path = V2MemoBridge.localVideoAbsolutePath(pathOrUrl) ?: return Uri.EMPTY
-    return Uri.fromFile(File(path))
+    val path = V2MemoBridge.localVideoAbsolutePath(pathOrUrl) ?: return null
+    val file = File(path)
+    return if (file.exists() && file.isFile) Uri.fromFile(file) else null
 }
 
 private fun durationLabel(sec: Double): String =

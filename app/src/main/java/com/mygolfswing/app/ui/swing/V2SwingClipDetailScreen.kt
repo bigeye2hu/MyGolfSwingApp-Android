@@ -101,6 +101,10 @@ fun V2SwingClipDetailScreen(
     }
 
     val uri = remember(clip.videoPath) { mediaUriFor(clip.videoPath) }
+    if (uri == null) {
+        V2MissingEntityScreen(message = "本地挥杆视频文件不存在", onBack = onBack, title = "挥杆详情")
+        return
+    }
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
@@ -388,10 +392,11 @@ private suspend fun saveClipToGallery(context: android.content.Context, clip: V2
     }.getOrDefault(false)
 }
 
-private fun mediaUriFor(pathOrUrl: String): Uri {
+private fun mediaUriFor(pathOrUrl: String): Uri? {
     if (V2MemoBridge.isRemoteUrl(pathOrUrl)) return pathOrUrl.trim().toUri()
-    val path = V2MemoBridge.localVideoAbsolutePath(pathOrUrl) ?: return Uri.EMPTY
-    return Uri.fromFile(File(path))
+    val path = V2MemoBridge.localVideoAbsolutePath(pathOrUrl) ?: return null
+    val file = File(path)
+    return if (file.exists() && file.isFile) Uri.fromFile(file) else null
 }
 
 private fun durationShort(sec: Double): String {

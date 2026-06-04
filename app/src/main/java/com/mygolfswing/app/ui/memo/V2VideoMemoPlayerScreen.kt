@@ -62,6 +62,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.ui.common.V2DrawingOverlay
 import com.mygolfswing.app.ui.common.V2DrawingState
 import com.mygolfswing.app.ui.common.V2DrawingToolsPanel
@@ -559,7 +560,9 @@ private fun Float.speedText(): String = when {
 private fun resolvePlaybackUrl(videoUrl: String?): String? {
     if (videoUrl.isNullOrBlank()) return null
     val trimmed = videoUrl.trim()
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        return V2OnlineVideoMetadataFetcher.normalizePlayableUrl(trimmed)
+    }
     val localPath = V2MemoBridge.localVideoAbsolutePath(trimmed) ?: return null
     return if (File(localPath).exists()) "file://$localPath" else null
 }

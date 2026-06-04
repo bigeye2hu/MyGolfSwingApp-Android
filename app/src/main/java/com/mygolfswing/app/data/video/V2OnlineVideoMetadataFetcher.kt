@@ -40,7 +40,7 @@ object V2OnlineVideoMetadataFetcher {
         val pattern = Pattern.compile("(https?://[^\\s\\u4e00-\\u9fa5]+)")
         val m = pattern.matcher(trimmed)
         val extracted = if (m.find()) m.group(1) ?: trimmed else trimmed
-        return extracted.trimEnd(
+        val withoutTrailingPunctuation = extracted.trimEnd(
             ')',
             '）',
             ']',
@@ -56,7 +56,11 @@ object V2OnlineVideoMetadataFetcher {
             ';',
             '；',
         )
+        return withoutTrailingPunctuation.replaceHttpWithHttps()
     }
+
+    fun normalizePlayableUrl(url: String): String =
+        url.trim().replaceHttpWithHttps()
 
     fun detectPlatform(url: String): String = when {
         url.contains("bilibili.com", ignoreCase = true) || url.contains("b23.tv", ignoreCase = true) -> "哔哩哔哩"
@@ -158,3 +162,10 @@ object V2OnlineVideoMetadataFetcher {
     private fun mobileUa() =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 }
+
+private fun String.replaceHttpWithHttps(): String =
+    if (startsWith("http://", ignoreCase = true)) {
+        "https://" + drop("http://".length)
+    } else {
+        this
+    }

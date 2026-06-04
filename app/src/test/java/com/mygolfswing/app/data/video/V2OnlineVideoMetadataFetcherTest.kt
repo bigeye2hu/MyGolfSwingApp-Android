@@ -22,4 +22,19 @@ class V2OnlineVideoMetadataFetcherTest {
         assertEquals("https://youtu.be/abcdefghijk", cleaned)
         assertEquals("YouTube", V2OnlineVideoMetadataFetcher.detectPlatform(cleaned))
     }
+
+    @Test
+    fun cleanVideoUrlUpgradesHttpToHttps() {
+        val cleaned = V2OnlineVideoMetadataFetcher.cleanVideoUrl("看这个 http://www.xiaohongshu.com/explore/abc123，")
+
+        assertEquals("https://www.xiaohongshu.com/explore/abc123", cleaned)
+        assertEquals("小红书", V2OnlineVideoMetadataFetcher.detectPlatform(cleaned))
+    }
+
+    @Test
+    fun normalizePlayableUrlUpgradesLegacyHttp() {
+        val normalized = V2OnlineVideoMetadataFetcher.normalizePlayableUrl("http://example.com/video.mp4")
+
+        assertEquals("https://example.com/video.mp4", normalized)
+    }
 }

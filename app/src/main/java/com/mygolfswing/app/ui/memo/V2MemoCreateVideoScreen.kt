@@ -78,6 +78,7 @@ import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import kotlinx.coroutines.launch
@@ -873,7 +874,7 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
         text = {
             Column {
                 Text(
-                    text = "粘贴可以直接播放的视频地址（http/https 开头，支持 mp4 / m3u8）。",
+                    text = "粘贴可以直接播放的视频地址（https 开头，支持 mp4 / m3u8）。",
                     fontSize = 12.sp,
                     color = Color(0xFF7B8A82),
                 )
@@ -893,9 +894,9 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
         },
         confirmButton = {
             TextButton(onClick = {
-                val trimmed = input.trim()
-                if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                    error = "URL 必须以 http 或 https 开头"
+                val trimmed = V2OnlineVideoMetadataFetcher.cleanVideoUrl(input)
+                if (!trimmed.startsWith("https://", ignoreCase = true)) {
+                    error = "URL 必须以 https 开头"
                 } else {
                     onConfirm(trimmed)
                 }

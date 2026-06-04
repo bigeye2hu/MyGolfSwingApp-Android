@@ -109,7 +109,7 @@ object V2Json {
             status = goalStatusFromRaw(json["status"]!!.jsonPrimitive.content),
             priority = goalPriorityFromRaw(json["priority"]!!.jsonPrimitive.content),
             cadence = cadence,
-            derivedFromMemoIds = json["derivedFromMemoIds"]?.jsonArray?.map { UUID.fromString(it.jsonPrimitive.content) } ?: emptyList(),
+            derivedFromMemoIds = json.uuidArray("derivedFromMemoIds"),
             todayFocus = json["todayFocus"]?.jsonPrimitive?.booleanOrNull ?: false,
             completionCelebrated = json["completionCelebrated"]?.jsonPrimitive?.booleanOrNull ?: false,
             startedAt = json.epochMillis("startedAt")?.toLocalDateTime() ?: LocalDateTime.now(),
@@ -206,7 +206,7 @@ object V2Json {
         tags = json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
         tagIds = json["tagIds"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
         pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { pinStateFromRaw(it) } ?: V2PinState.NONE,
-        linkedGoalIds = json["linkedGoalIds"]?.jsonArray?.map { UUID.fromString(it.jsonPrimitive.content) } ?: emptyList(),
+        linkedGoalIds = json.uuidArray("linkedGoalIds"),
         createdAt = json["createdAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
         updatedAt = json["updatedAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
         isNew = json["isNew"]?.jsonPrimitive?.booleanOrNull ?: false,
@@ -230,6 +230,12 @@ object V2Json {
         val p = this as? JsonPrimitive ?: return null
         return p.longOrNull ?: p.doubleOrNull?.toLong()
     }
+
+    private fun JsonObject.uuidArray(key: String): List<UUID> =
+        this[key]?.jsonArray?.mapNotNull { element ->
+            val raw = runCatching { element.jsonPrimitive.contentOrNull }.getOrNull() ?: return@mapNotNull null
+            runCatching { UUID.fromString(raw) }.getOrNull()
+        } ?: emptyList()
 
     private val V2PinState.rawValue: String
         get() = when (this) {

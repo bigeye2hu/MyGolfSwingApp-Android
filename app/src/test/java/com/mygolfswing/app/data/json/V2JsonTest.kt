@@ -75,6 +75,35 @@ class V2JsonTest {
     }
 
     @Test
+    fun decodeMemoSkipsInvalidLinkedGoalIds() {
+        val json = JsonObject(
+            mapOf(
+                "id" to JsonPrimitive("00000000-0000-0000-0000-000000000012"),
+                "kind" to JsonPrimitive("text"),
+                "source" to JsonPrimitive("textInput"),
+                "text" to JsonPrimitive("保留合法目标关联"),
+                "topic" to JsonPrimitive("swing"),
+                "tags" to JsonArray(emptyList()),
+                "tagIds" to JsonArray(emptyList()),
+                "pinState" to JsonPrimitive("none"),
+                "linkedGoalIds" to JsonArray(
+                    listOf(
+                        JsonPrimitive("00000000-0000-0000-0000-000000000013"),
+                        JsonPrimitive("bad-goal-id"),
+                    ),
+                ),
+                "createdAt" to JsonPrimitive(fixedMillis),
+                "updatedAt" to JsonPrimitive(fixedMillis),
+                "thumbnailKind" to JsonPrimitive("fairway"),
+            ),
+        )
+
+        val memo = V2Json.decodeMemo(json)
+
+        assertEquals(listOf(UUID.fromString("00000000-0000-0000-0000-000000000013")), memo.linkedGoalIds)
+    }
+
+    @Test
     fun encodeGoalUsesIosRawValues() {
         val goal = V2Goal(
             id = UUID.fromString("00000000-0000-0000-0000-000000000003"),
@@ -146,6 +175,49 @@ class V2JsonTest {
         assertEquals(V2Topic.SHORT_GAME, goal.topic)
         assertEquals(V2Goal.ClubKind.GREEN_READING, goal.clubKind)
         assertEquals(V2Goal.Metric.Kind.DISTANCE, goal.metric.kind)
+    }
+
+    @Test
+    fun decodeGoalSkipsInvalidDerivedMemoIds() {
+        val json = JsonObject(
+            mapOf(
+                "id" to JsonPrimitive("00000000-0000-0000-0000-000000000014"),
+                "title" to JsonPrimitive("稳定上杆节奏"),
+                "iconType" to JsonPrimitive("target"),
+                "topic" to JsonPrimitive("swing"),
+                "metric" to JsonObject(
+                    mapOf(
+                        "kind" to JsonPrimitive("count"),
+                        "target" to JsonPrimitive(30.0),
+                        "unit" to JsonPrimitive("次"),
+                    ),
+                ),
+                "progress" to JsonObject(
+                    mapOf(
+                        "current" to JsonPrimitive(0.0),
+                        "lastIncrementAt" to JsonPrimitive(null as Long?),
+                        "checkInDates" to JsonArray(emptyList()),
+                    ),
+                ),
+                "pinState" to JsonPrimitive("none"),
+                "status" to JsonPrimitive("active"),
+                "priority" to JsonPrimitive("normal"),
+                "derivedFromMemoIds" to JsonArray(
+                    listOf(
+                        JsonPrimitive("00000000-0000-0000-0000-000000000015"),
+                        JsonPrimitive("bad-memo-id"),
+                    ),
+                ),
+                "todayFocus" to JsonPrimitive(false),
+                "completionCelebrated" to JsonPrimitive(false),
+                "startedAt" to JsonPrimitive(fixedMillis),
+                "updatedAt" to JsonPrimitive(fixedMillis),
+            ),
+        )
+
+        val goal = V2Json.decodeGoal(json)
+
+        assertEquals(listOf(UUID.fromString("00000000-0000-0000-0000-000000000015")), goal.derivedFromMemoIds)
     }
 
     private fun JsonObject.string(key: String): String? =

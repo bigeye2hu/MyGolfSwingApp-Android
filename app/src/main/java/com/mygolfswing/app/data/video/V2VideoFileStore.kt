@@ -132,11 +132,7 @@ object V2VideoFileStore {
     /** 计算所有已导入视频 / 缩略图占用的字节数，用于「存储管理」页。 */
     suspend fun calculateUsedBytes(context: Context): Long = withContext(Dispatchers.IO) {
         val userId = ServiceLocator.session.current().userId ?: return@withContext 0L
-        fun sumDir(dir: File): Long {
-            if (!dir.exists()) return 0L
-            return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        }
-        sumDir(videoDir(context, userId)) + sumDir(thumbDir(context, userId))
+        calculateMediaBytes(userRootPath(context, userId))
     }
 
     /** 清空所有视频 + 缩略图缓存。返回回收字节数。 */
@@ -152,8 +148,16 @@ object V2VideoFileStore {
 
     // ============ 私有 ============
 
+    internal fun calculateMediaBytes(userRoot: File): Long =
+        listOf(File(userRoot, VIDEO_DIR), File(userRoot, THUMB_DIR)).sumOf { dir ->
+            if (!dir.exists()) 0L else dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+
+    private fun userRootPath(context: Context, userId: String): File =
+        File(context.filesDir, "users/$userId")
+
     private fun userRoot(context: Context, userId: String): File =
-        File(context.filesDir, "users/$userId").apply { mkdirs() }
+        userRootPath(context, userId).apply { mkdirs() }
 
     private fun videoDir(context: Context, userId: String): File =
         File(userRoot(context, userId), VIDEO_DIR).apply { mkdirs() }

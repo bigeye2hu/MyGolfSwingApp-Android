@@ -9,6 +9,28 @@ import kotlin.io.path.createTempDirectory
 class V2VideoFileStoreTest {
 
     @Test
+    fun calculateMediaBytesCountsVideosAndThumbsWithoutCreatingMissingDirs() {
+        val root = createTempDirectory("v2-video-size").toFile()
+        val videos = File(root, "videos").apply { mkdirs() }
+        val thumbs = File(root, "thumbs").apply { mkdirs() }
+        File(videos, "a.mp4").writeBytes(ByteArray(10))
+        File(thumbs, "a.jpg").writeBytes(ByteArray(7))
+
+        assertEquals(17L, V2VideoFileStore.calculateMediaBytes(root))
+
+        root.deleteRecursively()
+    }
+
+    @Test
+    fun calculateMediaBytesDoesNotCreateMissingDirs() {
+        val root = createTempDirectory("v2-video-size-missing").toFile()
+        root.deleteRecursively()
+
+        assertEquals(0L, V2VideoFileStore.calculateMediaBytes(root))
+        assertFalse(root.exists())
+    }
+
+    @Test
     fun deleteRecursivelyCountingFreedBytesReturnsActualDeletedBytes() {
         val root = createTempDirectory("v2-video-clear").toFile()
         val videos = File(root, "videos").apply { mkdirs() }

@@ -22,6 +22,15 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URI
+
+internal fun normalizedAIBaseUrl(raw: String?): String? {
+    val trimmed = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val uri = runCatching { URI(trimmed) }.getOrNull() ?: return null
+    if (!uri.scheme.equals("https", ignoreCase = true)) return null
+    if (uri.host.isNullOrBlank()) return null
+    return trimmed.trimEnd('/') + "/"
+}
 
 /**
  * 真实 AI 接入（对齐 iOS `AIService`）。
@@ -163,7 +172,8 @@ class V2AIService(
     fun streamChat(history: List<Pair<String, String>>): Flow<String> = flow {
         val providerId = ProviderId.from(session.aiProviderId.first())
         val apiKey = session.aiApiKey.first()
-        val baseUrl = session.aiBaseUrl.first()?.takeIf { it.isNotBlank() } ?: providerId.defaultBase
+        val baseUrl = normalizedAIBaseUrl(session.aiBaseUrl.first()?.takeIf { it.isNotBlank() } ?: providerId.defaultBase)
+            ?: error("AI Base URL 必须是有效的 HTTPS 地址")
         val model = currentRequestModel(providerId)
 
         val messages = JsonArray(
@@ -190,8 +200,8 @@ class V2AIService(
         )
 
         val url = when (providerId) {
-            ProviderId.BUILTIN -> "${baseUrl?.trimEnd('/')}/chat"
-            else -> "${baseUrl?.trimEnd('/')}/chat/completions"
+            ProviderId.BUILTIN -> "${baseUrl.trimEnd('/')}/chat"
+            else -> "${baseUrl.trimEnd('/')}/chat/completions"
         }
 
         val s = session.current()
@@ -270,7 +280,8 @@ class V2AIService(
         if (providerId != ProviderId.BUILTIN && apiKey.isNullOrBlank()) {
             error("请先配置 AI API Key")
         }
-        val baseUrl = session.aiBaseUrl.first()?.takeIf { it.isNotBlank() } ?: providerId.defaultBase
+        val baseUrl = normalizedAIBaseUrl(session.aiBaseUrl.first()?.takeIf { it.isNotBlank() } ?: providerId.defaultBase)
+            ?: error("AI Base URL 必须是有效的 HTTPS 地址")
         val model = currentRequestModel(providerId)
 
         val messages = JsonArray(
@@ -298,8 +309,8 @@ class V2AIService(
             },
         )
         val url = when (providerId) {
-            ProviderId.BUILTIN -> "${baseUrl?.trimEnd('/')}/chat"
-            else -> "${baseUrl?.trimEnd('/')}/chat/completions"
+            ProviderId.BUILTIN -> "${baseUrl.trimEnd('/')}/chat"
+            else -> "${baseUrl.trimEnd('/')}/chat/completions"
         }
         val s = session.current()
         val builder = Request.Builder()

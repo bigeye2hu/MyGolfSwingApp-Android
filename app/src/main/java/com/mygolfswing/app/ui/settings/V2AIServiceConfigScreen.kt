@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.ai.V2AIService
+import com.mygolfswing.app.data.ai.normalizedAIBaseUrl
 import com.mygolfswing.app.data.store.V2AIChatStore
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -80,7 +81,12 @@ fun V2AIServiceConfigScreen(onBack: () -> Unit) {
     }
     var saved by remember { mutableStateOf(false) }
     val isActive = provider.id == activeProviderId && model == activeModel
-    val canSave = provider == V2AIService.ProviderId.BUILTIN || apiKey.isNotBlank()
+    val normalizedBaseUrl = normalizedAIBaseUrl(baseUrl)
+    val hasInvalidBaseUrl = provider != V2AIService.ProviderId.BUILTIN &&
+        baseUrl.isNotBlank() &&
+        normalizedBaseUrl == null
+    val canSave = provider == V2AIService.ProviderId.BUILTIN ||
+        (apiKey.isNotBlank() && !hasInvalidBaseUrl)
 
     Column(
         modifier = Modifier
@@ -163,11 +169,14 @@ fun V2AIServiceConfigScreen(onBack: () -> Unit) {
 
             if (saved) {
                 StatusBanner("已应用到 AI 对话", success = true)
+            } else if (hasInvalidBaseUrl) {
+                StatusBanner("API Base URL 需要填写有效的 HTTPS 地址", success = false)
             } else if (!canSave) {
                 StatusBanner("请填写 API Key 后再保存", success = false)
             }
 
             val buttonTitle = when {
+                hasInvalidBaseUrl -> "请使用 HTTPS 地址"
                 !canSave -> "请填写 API Key"
                 isActive -> "当前模型"
                 provider == V2AIService.ProviderId.BUILTIN -> "切换到挥呗 AI →"
@@ -179,7 +188,7 @@ fun V2AIServiceConfigScreen(onBack: () -> Unit) {
                     scope.launch {
                         session.setAIProvider(
                             id = provider.id,
-                            baseUrl = baseUrl.takeIf { it.isNotBlank() },
+                            baseUrl = normalizedBaseUrl,
                             apiKey = apiKey.takeIf { it.isNotBlank() },
                             model = model.takeIf { it.isNotBlank() },
                             verified = true,

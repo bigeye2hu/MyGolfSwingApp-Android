@@ -30,16 +30,31 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import java.time.ZoneId
 import java.util.UUID
 
 internal fun remoteThumbnailUrlForUpload(thumbnailUrl: String?): String? {
     val trimmed = thumbnailUrl?.trim() ?: return null
     return trimmed.takeIf { V2MemoBridge.isRemoteUrl(it) }
+}
+
+internal fun parseCloudMemoMillis(element: kotlinx.serialization.json.JsonElement?): Long? {
+    if (element == null) return null
+    return when (element) {
+        is JsonObject -> parseCloudMemoMillis(element["\$date"])
+        else -> runCatching {
+            val primitive = element.jsonPrimitive
+            primitive.longOrNull
+                ?: primitive.doubleOrNull?.toLong()
+                ?: primitive.contentOrNull?.trim()?.takeIf { it.isNotBlank() }?.let { raw ->
+                    raw.toLongOrNull() ?: java.time.Instant.parse(raw).toEpochMilli()
+                }
+        }.getOrNull()
+    }
 }
 
 /**
@@ -214,8 +229,8 @@ class V2MemoRepository(
         val normalizedId = id?.takeIf { it.isNotBlank() } ?: return
         val uid = session.current().userId ?: return
         val localRow = dao.get(normalizedId, uid) ?: return
-        val deletedAt = parseCloudMillis(cloud["deletedAt"])
-            ?: parseCloudMillis(cloud["updatedAt"])
+        val deletedAt = parseCloudMemoMillis(cloud["deletedAt"])
+            ?: parseCloudMemoMillis(cloud["updatedAt"])
             ?: System.currentTimeMillis()
         if (deletedAt >= localRow.updatedAt) {
             dao.delete(normalizedId, uid)
@@ -243,8 +258,8 @@ class V2MemoRepository(
     }
 
     private fun hasMeaningfullyDifferentCloudCreatedAt(localRow: MemoEntity, cloud: JsonObject): Boolean {
-        val cloudCreated = parseCloudMillis(cloud["cardCreatedAt"])
-            ?: parseCloudMillis(cloud["createdAt"])
+        val cloudCreated = parseCloudMemoMillis(cloud["cardCreatedAt"])
+            ?: parseCloudMemoMillis(cloud["createdAt"])
             ?: return false
         return kotlin.math.abs(localRow.createdAt - cloudCreated) > 60_000L
     }
@@ -271,7 +286,7 @@ class V2MemoRepository(
         val duration = o["duration"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
         val tagIds = parseTagsJson(o["tagIds"]?.jsonPrimitive?.contentOrNull)
         val tags = parseTagsJson(o["tags"]?.jsonPrimitive?.contentOrNull)
-        val createdMs = parseCloudMillis(o["memoCreatedDate"]) ?: System.currentTimeMillis()
+        val createdMs = parseCloudMemoMillis(o["memoCreatedDate"]) ?: System.currentTimeMillis()
         val updatedMs = cloudUpdatedMillis(o)
         val createdAt = java.time.Instant.ofEpochMilli(createdMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val updatedAt = java.time.Instant.ofEpochMilli(updatedMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
@@ -322,17 +337,17 @@ class V2MemoRepository(
         val summary = o["summary"]?.jsonPrimitive?.contentOrNull ?: ""
         val source = o["source"]?.jsonPrimitive?.contentOrNull ?: "manual"
         if (source == "welcome" || source == "tutorial") return null
-        val updatedMs = parseCloudMillis(o["cardUpdatedAt"])
-            ?: parseCloudMillis(o["updatedAt"])
+        val updatedMs = parseCloudMemoMillis(o["cardUpdatedAt"])
+            ?: parseCloudMemoMillis(o["updatedAt"])
             ?: System.currentTimeMillis()
-        val createdMs = parseCloudMillis(o["cardCreatedAt"])
-            ?: parseCloudMillis(o["createdAt"])
+        val createdMs = parseCloudMemoMillis(o["cardCreatedAt"])
+            ?: parseCloudMemoMillis(o["createdAt"])
             ?: updatedMs
         val createdAt = java.time.Instant.ofEpochMilli(createdMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val updatedAt = java.time.Instant.ofEpochMilli(updatedMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val tags = parseTagsJson(o["tagNames"]?.jsonPrimitive?.contentOrNull)
         val priority = o["priority"]?.jsonPrimitive?.contentOrNull ?: "medium"
-        val pinnedAt = parseCloudMillis(o["pinnedAt"])
+        val pinnedAt = parseCloudMemoMillis(o["pinnedAt"])
         return V2Memo.textMemo(title = title, body = summary, tags = tags).copy(
             id = id,
             createdAt = createdAt,
@@ -362,24 +377,10 @@ class V2MemoRepository(
     }.getOrDefault(emptyList())
 
     private fun cloudUpdatedMillis(o: JsonObject): Long =
-        parseCloudMillis(o["lastModifiedDate"])
-            ?: parseCloudMillis(o["cardUpdatedAt"])
-            ?: parseCloudMillis(o["updatedAt"])
+        parseCloudMemoMillis(o["lastModifiedDate"])
+            ?: parseCloudMemoMillis(o["cardUpdatedAt"])
+            ?: parseCloudMemoMillis(o["updatedAt"])
             ?: System.currentTimeMillis()
-
-    private fun parseCloudMillis(element: kotlinx.serialization.json.JsonElement?): Long? {
-        if (element == null) return null
-        return runCatching {
-            when (element) {
-                is JsonObject -> element["\$date"]?.jsonPrimitive?.contentOrNull
-                    ?.let { java.time.Instant.parse(it).toEpochMilli() }
-                else -> element.jsonPrimitive.longOrNull
-                    ?: element.jsonPrimitive.doubleOrNull?.toLong()
-                    ?: element.jsonPrimitive.contentOrNull?.toLongOrNull()
-                    ?: java.time.Instant.parse(element.jsonPrimitive.contentOrNull).toEpochMilli()
-            }
-        }.getOrNull()
-    }
 
     private suspend fun pushSingle(memo: V2Memo) {
         val uid = session.current().userId ?: return

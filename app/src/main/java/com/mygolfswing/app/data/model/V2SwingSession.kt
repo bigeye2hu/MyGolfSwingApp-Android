@@ -38,8 +38,10 @@ enum class V2SwingClipRetention(val wire: String) {
     val isPermanent: Boolean get() = this == FAVORITED || this == PROMOTED
 
     companion object {
-        fun fromWire(value: String?): V2SwingClipRetention =
-            entries.firstOrNull { it.wire == value } ?: TEMPORARY
+        fun fromWire(value: String?): V2SwingClipRetention {
+            val normalized = value?.trim()?.takeIf { it.isNotBlank() } ?: return TEMPORARY
+            return entries.firstOrNull { it.wire.equals(normalized, ignoreCase = true) } ?: TEMPORARY
+        }
     }
 }
 

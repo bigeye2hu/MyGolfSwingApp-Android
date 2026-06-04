@@ -1,5 +1,6 @@
 package com.mygolfswing.app.data.repo
 
+import com.mygolfswing.app.data.model.V2SwingClipRetention
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -18,6 +19,14 @@ class V2SwingSessionRepositoryTest {
         assertNull(localSwingMediaFile("https://example.com/swing.mp4"))
         assertNull(localSwingMediaFile(" HTTPS://example.com/swing.mp4 "))
         assertNull(localSwingMediaFile(null))
+    }
+
+    @Test
+    fun swingClipRetentionWireParsingToleratesCaseAndWhitespace() {
+        assertEquals(V2SwingClipRetention.FAVORITED, V2SwingClipRetention.fromWire(" FAVORITED "))
+        assertEquals(V2SwingClipRetention.PROMOTED, V2SwingClipRetention.fromWire("Promoted"))
+        assertEquals(V2SwingClipRetention.TEMPORARY, V2SwingClipRetention.fromWire(" "))
+        assertEquals(V2SwingClipRetention.TEMPORARY, V2SwingClipRetention.fromWire("unknown"))
     }
 
     @Test

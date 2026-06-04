@@ -40,12 +40,14 @@ import java.util.UUID
  * Memo 仓库（对齐 iOS `VideoMemoCloudSyncService` + `InsightCardCloudSyncService`）。
  */
 class V2MemoRepository(
-    private val context: Context,
+    context: Context,
     private val dao: MemoDao,
     private val net: V2NetClient,
     private val session: V2SessionStore,
     private val scope: CoroutineScope,
 ) {
+    private val appContext: Context = context.applicationContext
+
     @OptIn(ExperimentalCoroutinesApi::class)
     fun observeAll(): Flow<List<V2Memo>> =
         session.state.flatMapLatest { current ->
@@ -145,7 +147,7 @@ class V2MemoRepository(
         val uid = session.current().userId ?: return@withContext
         dao.getAll(uid).forEach { row ->
             val memo = runCatching { decode(row) }.getOrNull() ?: return@forEach
-            val updated = V2MemoThumbnailStore.recoverThumbnail(context, memo, uid) ?: return@forEach
+            val updated = V2MemoThumbnailStore.recoverThumbnail(appContext, memo, uid) ?: return@forEach
             dao.upsert(encode(updated, ownerUserId = uid, dirty = false))
         }
     }
@@ -284,7 +286,7 @@ class V2MemoRepository(
         )
         val cloudThumbBase64Url = o["thumbnailBase64"]?.jsonPrimitive?.contentOrNull
             ?.takeIf { it.isNotBlank() }
-            ?.let { V2MemoThumbnailStore.saveFromBase64(context, id, it, ownerUserId) }
+            ?.let { V2MemoThumbnailStore.saveFromBase64(appContext, id, it, ownerUserId) }
         val base = if (body.isNotBlank()) {
             V2Memo.mixedMemo(displayTitle = title, body = body, videoUrl = videoUrl, durationSec = duration, tags = tags)
         } else {

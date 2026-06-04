@@ -1,6 +1,7 @@
 package com.mygolfswing.app.data.store
 
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.model.V2SwingDayItem
@@ -33,6 +34,14 @@ object V2SwingSessionStore {
     val allDayItems: StateFlow<List<V2SwingDayItem>> = _allDayItems.asStateFlow()
 
     val totalClipCount: Int get() = _sessions.value.sumOf { it.clips.size }
+
+    fun permanentMediaPaths(): Set<String> =
+        _sessions.value
+            .flatMap { it.clips }
+            .filter { it.retention.isPermanent }
+            .flatMap { clip -> listOfNotNull(clip.videoPath, clip.thumbnailPath) }
+            .mapNotNull { V2MemoBridge.localVideoAbsolutePath(it) }
+            .toSet()
 
     fun resetInMemory() {
         _sessions.value = emptyList()

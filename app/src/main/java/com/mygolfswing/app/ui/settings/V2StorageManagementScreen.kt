@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.data.video.V2VideoFileStore
+import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -85,7 +86,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
 
             Spacer(Modifier.height(8.dp))
             Text(
-                "清理缓存不会删除已保存的 Memo 记录；清理视频文件会删除本地录制的视频，云端记录仍保留。",
+                "清理缓存不会删除已保存的 Memo 记录；收藏和成长池中的挥杆视频会保留。",
                 style = DSTypography.caption,
                 color = DSColors.shadowGray,
             )
@@ -106,13 +107,14 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             title = { Text("确认清理？") },
-            text = { Text("将删除本地视频文件与应用缓存，此操作不可恢复。") },
+            text = { Text("将删除普通本地视频文件与应用缓存；收藏和成长池中的挥杆视频会保留。") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmClear = false
                     scope.launch {
                         loading = true
-                        val freedVideos = V2VideoFileStore.clearAll(context)
+                        val protectedMedia = V2SwingSessionStore.permanentMediaPaths()
+                        val freedVideos = V2VideoFileStore.clearAll(context, protectedAbsolutePaths = protectedMedia)
                         val freedCache = clearAppCache(context)
                         videoBytes = V2VideoFileStore.calculateUsedBytes(context)
                         cacheBytes = calculateCacheBytes(context)

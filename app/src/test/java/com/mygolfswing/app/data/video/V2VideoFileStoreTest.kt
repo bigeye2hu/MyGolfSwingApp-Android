@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.video
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -53,6 +54,29 @@ class V2VideoFileStoreTest {
 
         assertEquals(0L, deleteRecursivelyCountingFreedBytes(missing))
 
+        root.deleteRecursively()
+    }
+
+    @Test
+    fun deleteMediaFilesCountingFreedBytesPreservesProtectedFiles() {
+        val root = createTempDirectory("v2-video-clear-protected").toFile()
+        val videos = File(root, "videos").apply { mkdirs() }
+        val thumbs = File(root, "thumbs").apply { mkdirs() }
+        val protectedVideo = File(videos, "keep.mp4").apply { writeBytes(ByteArray(10)) }
+        val protectedThumb = File(thumbs, "keep.jpg").apply { writeBytes(ByteArray(7)) }
+        val ordinaryVideo = File(videos, "delete.mp4").apply { writeBytes(ByteArray(13)) }
+        val ordinaryThumb = File(thumbs, "delete.jpg").apply { writeBytes(ByteArray(5)) }
+
+        val freed = deleteMediaFilesCountingFreedBytes(
+            root,
+            protectedAbsolutePaths = setOf(protectedVideo.absolutePath, protectedThumb.absolutePath),
+        )
+
+        assertEquals(18L, freed)
+        assertTrue(protectedVideo.exists())
+        assertTrue(protectedThumb.exists())
+        assertFalse(ordinaryVideo.exists())
+        assertFalse(ordinaryThumb.exists())
         root.deleteRecursively()
     }
 

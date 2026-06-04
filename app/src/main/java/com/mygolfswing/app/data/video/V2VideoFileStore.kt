@@ -30,6 +30,32 @@ internal fun deleteFileCountingFreedBytes(file: File?): Long {
     return if (runCatching { file.delete() }.getOrDefault(false)) bytes else 0L
 }
 
+internal fun deleteMediaFilesCountingFreedBytes(userRoot: File, protectedAbsolutePaths: Set<String> = emptySet()): Long {
+    val protectedCanonicalPaths = protectedAbsolutePaths.mapNotNullTo(mutableSetOf()) { path ->
+        runCatching { File(path).canonicalPath }.getOrNull()
+    }
+    return listOf(File(userRoot, "videos"), File(userRoot, "thumbs")).sumOf { dir ->
+        deleteDirContentsCountingFreedBytes(dir, protectedCanonicalPaths)
+    }
+}
+
+private fun deleteDirContentsCountingFreedBytes(dir: File, protectedCanonicalPaths: Set<String>): Long {
+    if (!dir.exists()) return 0L
+    var freed = 0L
+    dir.walkBottomUp().forEach { file ->
+        if (file == dir) return@forEach
+        if (file.isFile) {
+            val canonical = runCatching { file.canonicalPath }.getOrNull()
+            if (canonical == null || canonical !in protectedCanonicalPaths) {
+                freed += deleteFileCountingFreedBytes(file)
+            }
+        } else if (file.isDirectory && file.list()?.isEmpty() == true) {
+            runCatching { file.delete() }
+        }
+    }
+    return freed
+}
+
 /**
  * 视频文件导入器（对齐 iOS `V2MemoCreateBridge.extractFirstFrameJPEG` + V1 VideoMemoManager 落盘逻辑）。
  *
@@ -142,9 +168,9 @@ object V2VideoFileStore {
     }
 
     /** 清空所有视频 + 缩略图缓存。返回回收字节数。 */
-    suspend fun clearAll(context: Context): Long = withContext(Dispatchers.IO) {
+    suspend fun clearAll(context: Context, protectedAbsolutePaths: Set<String> = emptySet()): Long = withContext(Dispatchers.IO) {
         val userId = ServiceLocator.session.current().userId ?: return@withContext 0L
-        deleteRecursivelyCountingFreedBytes(videoDir(context, userId), thumbDir(context, userId))
+        deleteMediaFilesCountingFreedBytes(userRootPath(context, userId), protectedAbsolutePaths)
     }
 
     /** 删除指定用户的本地媒体目录（账号删除时调用）。 */

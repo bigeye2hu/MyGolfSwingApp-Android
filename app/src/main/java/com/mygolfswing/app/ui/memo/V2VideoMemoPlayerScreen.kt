@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -109,7 +110,18 @@ fun V2VideoMemoPlayerScreen(
             state = V2PlaybackState.UnavailableNoSource,
             onBack = onBack,
             onRetry = null,
+            onDelete = { showDeleteConfirm = true },
         )
+        if (showDeleteConfirm) {
+            VideoMemoDeleteConfirmDialog(
+                onDismiss = { showDeleteConfirm = false },
+                onConfirm = {
+                    showDeleteConfirm = false
+                    V2MemoStore.delete(memo.id)
+                    onBack()
+                },
+            )
+        }
         return
     }
 
@@ -185,6 +197,7 @@ fun V2VideoMemoPlayerScreen(
                     player.play()
                     isPlaying = true
                 },
+                onDelete = null,
             )
         }
 
@@ -289,23 +302,12 @@ fun V2VideoMemoPlayerScreen(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除备忘录") },
-            text = { Text("确定删除这个视频备忘录吗？此操作不可撤销。") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        V2MemoStore.delete(memo.id)
-                        onBack()
-                    },
-                ) {
-                    Text("删除", color = DSColors.flagRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+        VideoMemoDeleteConfirmDialog(
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                V2MemoStore.delete(memo.id)
+                onBack()
             },
         )
     }
@@ -321,6 +323,7 @@ private fun VideoPlaybackUnavailableOverlay(
     state: V2PlaybackState,
     onBack: () -> Unit,
     onRetry: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
 ) {
     Box(
         modifier = Modifier
@@ -366,6 +369,20 @@ private fun VideoPlaybackUnavailableOverlay(
                     Text("重试", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
             }
+            if (onDelete != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(DSColors.flagRed.copy(alpha = 0.18f))
+                        .border(1.dp, DSColors.flagRed.copy(alpha = 0.45f), RoundedCornerShape(50))
+                        .clickable(onClick = onDelete),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("删除记录", color = DSColors.flagRed, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -379,6 +396,26 @@ private fun VideoPlaybackUnavailableOverlay(
             }
         }
     }
+}
+
+@Composable
+private fun VideoMemoDeleteConfirmDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除备忘录") },
+        text = { Text("确定删除这个视频备忘录吗？此操作不可撤销。") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("删除", color = DSColors.flagRed)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 @Composable

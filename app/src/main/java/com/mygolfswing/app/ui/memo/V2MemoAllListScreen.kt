@@ -35,12 +35,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.model.V2Topic
@@ -174,6 +172,7 @@ private fun AllListChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun AllListRowCard(memo: V2Memo, onTap: () -> Unit) {
+    val playable = remember(memo.videoUrl) { memoVideoPlayable(memo.videoUrl) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -193,10 +192,21 @@ private fun AllListRowCard(memo: V2Memo, onTap: () -> Unit) {
                     .background(DSColors.deepGreen),
                 contentAlignment = Alignment.Center,
             ) {
-                memo.thumbnailUrl?.let {
-                    AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                V2MemoThumbnail(memo = memo, modifier = Modifier.fillMaxSize())
+                if (playable) {
+                    Icon(Icons.Filled.PlayCircle, null, tint = Color.White.copy(0.85f), modifier = Modifier.size(24.dp))
+                } else {
+                    Text(
+                        "文件缺失",
+                        color = Color.White.copy(alpha = 0.80f),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.Black.copy(0.54f))
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    )
                 }
-                Icon(Icons.Filled.PlayCircle, null, tint = Color.White.copy(0.85f), modifier = Modifier.size(24.dp))
             }
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

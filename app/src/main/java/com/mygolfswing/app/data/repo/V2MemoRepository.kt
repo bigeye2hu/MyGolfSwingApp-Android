@@ -42,6 +42,12 @@ internal fun remoteThumbnailUrlForUpload(thumbnailUrl: String?): String? {
     return trimmed.takeIf { V2MemoBridge.isRemoteUrl(it) }
 }
 
+internal fun localThumbnailPathForUpload(thumbnailUrl: String?): String? {
+    val trimmed = thumbnailUrl?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (V2MemoBridge.isRemoteUrl(trimmed)) return null
+    return V2MemoBridge.localVideoAbsolutePath(trimmed)
+}
+
 internal fun parseCloudMemoMillis(element: kotlinx.serialization.json.JsonElement?): Long? {
     if (element == null) return null
     return when (element) {
@@ -429,8 +435,10 @@ class V2MemoRepository(
         val parentCategoryId = memo.tagIds.firstOrNull()?.let { V2CategoryStore.groupForItemId(it)?.id } ?: "technical_details"
         val subcategoryId = memo.tagIds.firstOrNull() ?: "default"
         val isOnline = memo.isOnlineVideo
-        val thumbPath = if (isOnline) null else memo.videoUrl?.removePrefix("file://")
-        val thumbnailBase64 = V2VideoThumbnailUtil.jpegBase64ForUpload(thumbPath)
+        val videoPath = if (isOnline) null else memo.videoUrl?.removePrefix("file://")
+        val thumbnailPath = if (isOnline) null else localThumbnailPathForUpload(memo.thumbnailUrl)
+        val thumbnailBase64 = V2VideoThumbnailUtil.jpegBase64ForUpload(videoPath)
+            .ifBlank { V2VideoThumbnailUtil.jpegBase64ImageForUpload(thumbnailPath) }
         val remoteThumbnailUrl = remoteThumbnailUrlForUpload(memo.thumbnailUrl)
         return JsonObject(
             buildMap {

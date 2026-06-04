@@ -1,6 +1,7 @@
 package com.mygolfswing.app.data.video
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -23,6 +24,15 @@ object V2VideoThumbnailUtil {
         } finally {
             runCatching { retriever.release() }
         }
+    }
+
+    fun jpegBase64ImageForUpload(path: String?, maxBytes: Int = 100_000): String {
+        if (path.isNullOrBlank()) return ""
+        val filePath = path.removePrefix("file://")
+        val file = File(filePath)
+        if (!file.exists()) return ""
+        val bitmap = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull() ?: return ""
+        return compressToBase64(bitmap, maxBytes)
     }
 
     private fun compressToBase64(bitmap: Bitmap, maxBytes: Int): String {

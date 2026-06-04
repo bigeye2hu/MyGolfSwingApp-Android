@@ -29,6 +29,15 @@ class V2MemoRepositoryTest {
     }
 
     @Test
+    fun localThumbnailPathForUploadAcceptsOnlyLocalPaths() {
+        assertEquals("/tmp/thumb.jpg", localThumbnailPathForUpload(" file:///tmp/thumb.jpg "))
+        assertEquals("/tmp/thumb.jpg", localThumbnailPathForUpload("/tmp/thumb.jpg"))
+        assertNull(localThumbnailPathForUpload("https://example.com/thumb.jpg"))
+        assertNull(localThumbnailPathForUpload(" "))
+        assertNull(localThumbnailPathForUpload(null))
+    }
+
+    @Test
     fun parseCloudMemoMillisAcceptsPrimitiveAndMongoDateShapes() {
         assertEquals(1_717_488_000_000L, parseCloudMemoMillis(JsonPrimitive(1_717_488_000_000L)))
         assertEquals(

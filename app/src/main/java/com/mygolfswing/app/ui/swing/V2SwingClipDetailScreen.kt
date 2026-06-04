@@ -61,6 +61,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.store.V2SwingSessionStore
@@ -363,7 +364,7 @@ private fun DetailRow(label: String, value: String) {
 
 private suspend fun saveClipToGallery(context: android.content.Context, clip: V2SwingClip): Boolean = withContext(Dispatchers.IO) {
     runCatching {
-        val src = File(clip.videoPath.removePrefix("file://"))
+        val src = V2MemoBridge.localVideoAbsolutePath(clip.videoPath)?.let(::File) ?: return@withContext false
         if (!src.exists()) return@withContext false
         val resolver = context.contentResolver
         val values = ContentValues().apply {
@@ -388,8 +389,9 @@ private suspend fun saveClipToGallery(context: android.content.Context, clip: V2
 }
 
 private fun mediaUriFor(pathOrUrl: String): Uri {
-    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return pathOrUrl.toUri()
-    return Uri.fromFile(File(pathOrUrl.removePrefix("file://")))
+    if (V2MemoBridge.isRemoteUrl(pathOrUrl)) return pathOrUrl.trim().toUri()
+    val path = V2MemoBridge.localVideoAbsolutePath(pathOrUrl) ?: return Uri.EMPTY
+    return Uri.fromFile(File(path))
 }
 
 private fun durationShort(sec: Double): String {

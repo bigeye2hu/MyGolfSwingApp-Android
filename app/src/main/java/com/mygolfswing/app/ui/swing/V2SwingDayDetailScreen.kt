@@ -46,6 +46,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
@@ -199,8 +200,8 @@ private fun ClipThumb(
 }
 
 private fun mediaUriFor(pathOrUrl: String): Uri {
-    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return pathOrUrl.toUri()
-    val path = pathOrUrl.removePrefix("file://")
+    if (V2MemoBridge.isRemoteUrl(pathOrUrl)) return pathOrUrl.trim().toUri()
+    val path = V2MemoBridge.localVideoAbsolutePath(pathOrUrl) ?: return Uri.EMPTY
     return Uri.fromFile(File(path))
 }
 

@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.repo
 
 import com.mygolfswing.app.data.db.SwingSessionDao
 import com.mygolfswing.app.data.db.SwingSessionEntity
+import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.model.V2SwingSession
@@ -26,6 +27,9 @@ import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 import java.io.File
 import java.util.UUID
+
+internal fun localSwingMediaFile(pathOrUrl: String?): File? =
+    V2MemoBridge.localVideoAbsolutePath(pathOrUrl)?.let(::File)
 
 class V2SwingSessionRepository(
     private val dao: SwingSessionDao,
@@ -162,7 +166,7 @@ class V2SwingSessionRepository(
     }.getOrNull()
 
     private fun V2SwingClip.deleteFiles() {
-        runCatching { File(videoPath.removePrefix("file://")).delete() }
-        thumbnailPath?.let { runCatching { File(it.removePrefix("file://")).delete() } }
+        runCatching { localSwingMediaFile(videoPath)?.delete() }
+        runCatching { localSwingMediaFile(thumbnailPath)?.delete() }
     }
 }

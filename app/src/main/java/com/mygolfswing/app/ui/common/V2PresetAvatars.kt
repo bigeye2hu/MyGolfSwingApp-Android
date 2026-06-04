@@ -7,7 +7,7 @@ import com.mygolfswing.app.R
 data class V2PresetAvatar(
     /** 云端存储 key，如 `Avatar_XiaoQie` */
     val assetKey: String,
-    @DrawableRes val drawableRes: Int,
+    @param:DrawableRes val drawableRes: Int,
     val displayName: String,
 )
 

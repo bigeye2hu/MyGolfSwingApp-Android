@@ -171,10 +171,10 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("删除后，以下数据将被永久清除：", color = Muted, fontSize = 15.sp)
-            deletionItem("账号信息及登录凭证")
-            deletionItem("AI 对话记录")
-            deletionItem("训练目标与视频备忘录")
-            deletionItem("挥杆记录及视频文件")
+            DeletionItem("账号信息及登录凭证")
+            DeletionItem("AI 对话记录")
+            DeletionItem("训练目标与视频备忘录")
+            DeletionItem("挥杆记录及视频文件")
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
@@ -213,7 +213,7 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun deletionItem(text: String) {
+private fun DeletionItem(text: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
         Icon(Icons.Filled.Close, contentDescription = null, tint = Danger, modifier = Modifier.size(14.dp))
         Text(text, color = Color.White, fontSize = 15.sp)

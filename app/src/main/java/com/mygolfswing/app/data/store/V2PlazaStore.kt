@@ -1,5 +1,6 @@
 package com.mygolfswing.app.data.store
 
+import android.content.pm.ApplicationInfo
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2PlazaCategoryChip
 import com.mygolfswing.app.data.model.V2PlazaCoach
@@ -22,12 +23,15 @@ import java.util.UUID
  * 已切换为：
  * - 列表数据由 [com.mygolfswing.app.data.repo.V2PlazaRepository.fetchVideos] 拉取
  * - 收藏状态从 Room `v2_plaza_saved` 表合并
- * - 若网络请求失败（未登录 / 无网络），回退到 mock 数据，保证 UI 不空
+ * - Debug 包网络请求失败时回退 mock 数据，方便开发调试
+ * - Release 包不展示 mock，避免上线用户误把示例内容当成真实广场资源
  */
 object V2PlazaStore {
 
     private val repo get() = ServiceLocator.plazaRepo
     private val scope get() = ServiceLocator.appScope
+    private val allowMockFallback: Boolean
+        get() = ServiceLocator.appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     private val _videos = MutableStateFlow<List<V2PlazaVideo>>(emptyList())
     val videos: StateFlow<List<V2PlazaVideo>> = _videos.asStateFlow()
@@ -176,7 +180,7 @@ object V2PlazaStore {
                 _videos.value = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
             }.onFailure { e ->
                 _lastError.value = e.message
-                if (_videos.value.isEmpty()) {
+                if (_videos.value.isEmpty() && allowMockFallback) {
                     resetWithMockData()
                     _isUsingMock.value = true
                 }

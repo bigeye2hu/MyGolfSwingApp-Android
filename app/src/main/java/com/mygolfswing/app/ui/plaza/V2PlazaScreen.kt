@@ -65,6 +65,7 @@ fun V2PlazaScreen(
     val selectedCat by V2PlazaStore.selectedCategoryId.collectAsState()
     val isLoading by V2PlazaStore.isLoading.collectAsState()
     val isUsingMock by V2PlazaStore.isUsingMock.collectAsState()
+    val lastError by V2PlazaStore.lastError.collectAsState()
     val searchKeyword by V2PlazaStore.searchKeyword.collectAsState()
     val hero by V2PlazaStore.heroVideo.collectAsState()
     val filtered = videos
@@ -93,7 +94,11 @@ fun V2PlazaScreen(
             if (isLoading && videos.isEmpty()) {
                 LoadingState()
             } else if (filtered.isEmpty()) {
-                EmptyState(isLoading = isLoading)
+                EmptyState(
+                    isLoading = isLoading,
+                    hasError = lastError != null,
+                    onRetry = { V2PlazaStore.refresh() },
+                )
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
@@ -292,18 +297,41 @@ private fun MockDataBanner() {
 }
 
 @Composable
-private fun EmptyState(isLoading: Boolean) {
-    Box(
+private fun EmptyState(
+    isLoading: Boolean,
+    hasError: Boolean,
+    onRetry: () -> Unit,
+) {
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(40.dp),
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = if (isLoading) "加载中…" else "该分类暂无视频，换一个试试",
+            text = when {
+                isLoading -> "加载中…"
+                hasError -> "视频加载失败，请检查网络后重试"
+                else -> "该分类暂无视频，换一个试试"
+            },
             color = DSColors.shadowGray,
             fontSize = 13.sp,
         )
+        if (hasError && !isLoading) {
+            Text(
+                text = "重试",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(top = 14.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(DSColors.fairway)
+                    .clickable(onClick = onRetry)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
     }
 }
 

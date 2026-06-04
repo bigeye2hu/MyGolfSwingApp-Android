@@ -372,15 +372,22 @@ private fun DateCell(
 
 @Composable
 private fun SwingClipGridCell(clip: V2SwingClip, selected: Boolean, selectionMode: Boolean, onTap: () -> Unit) {
+    val previewModel = remember(clip.thumbnailPath, clip.videoPath) {
+        swingClipPreviewModel(clip.thumbnailPath, clip.videoPath)
+    }
     Box(
         modifier = Modifier.aspectRatio(9f / 16f).clip(RoundedCornerShape(4.dp)).background(DSColors.deepGreen).clickable(onClick = onTap),
     ) {
-        AsyncImage(
-            model = clip.thumbnailPath ?: clip.videoPath,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
+        if (previewModel != null) {
+            AsyncImage(
+                model = previewModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            MissingSwingMediaPlaceholder(Modifier.matchParentSize())
+        }
         if (clip.retention.isPermanent) {
             Box(
                 modifier = Modifier.matchParentSize().border(
@@ -410,6 +417,22 @@ private fun SwingClipGridCell(clip: V2SwingClip, selected: Boolean, selectionMod
             Spacer(Modifier.weight(1f))
             Text(durationShort(clip.durationSec), color = Color.White.copy(alpha = 0.9f), fontSize = 9.sp)
         }
+    }
+}
+
+@Composable
+private fun MissingSwingMediaPlaceholder(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.background(DSColors.deepGreen),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            "文件缺失",
+            color = Color.White.copy(alpha = 0.72f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

@@ -161,6 +161,9 @@ private fun ClipThumb(
     onTap: () -> Unit,
 ) {
     val borderColor = if (selected) DSColors.fairway else DSColors.borderLine
+    val previewModel = remember(clip.thumbnailPath, clip.videoPath) {
+        swingClipPreviewModel(clip.thumbnailPath, clip.videoPath)
+    }
     Box(
         modifier = Modifier
             .size(width = 110.dp, height = 76.dp)
@@ -169,21 +172,25 @@ private fun ClipThumb(
             .border(2.dp, borderColor, RoundedCornerShape(12.dp))
             .clickable(onClick = onTap),
     ) {
-        AsyncImage(
-            model = clip.thumbnailPath ?: clip.videoPath,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(26.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.Black.copy(alpha = 0.55f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(15.dp))
+        if (previewModel != null) {
+            AsyncImage(
+                model = previewModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(26.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.55f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(15.dp))
+            }
+        } else {
+            MissingSwingMediaPlaceholder(Modifier.matchParentSize())
         }
         Row(
             modifier = Modifier
@@ -202,6 +209,16 @@ private fun ClipThumb(
             Spacer(Modifier.weight(1f))
             Text(durationShort(clip.durationSec), fontSize = 10.sp, color = Color.White.copy(alpha = 0.9f))
         }
+    }
+}
+
+@Composable
+private fun MissingSwingMediaPlaceholder(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.background(DSColors.deepGreen),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("文件缺失", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.72f))
     }
 }
 

@@ -22,6 +22,21 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.time.Instant
 
+internal fun parseAuditMillis(element: JsonElement?): Long? {
+    if (element == null) return null
+    return when (element) {
+        is JsonObject -> parseAuditMillis(element["\$date"])
+        else -> runCatching {
+            val primitive = element.jsonPrimitive
+            primitive.longOrNull
+                ?: primitive.doubleOrNull?.toLong()
+                ?: primitive.contentOrNull?.trim()?.takeIf { it.isNotBlank() }?.let { raw ->
+                    raw.toLongOrNull() ?: Instant.parse(raw).toEpochMilli()
+                }
+        }.getOrNull()
+    }
+}
+
 class V2ProfileCloudConsistencyAuditRepository(
     private val goalDao: GoalDao,
     private val memoDao: MemoDao,
@@ -113,7 +128,7 @@ class V2ProfileCloudConsistencyAuditRepository(
             RecordSnapshot(
                 rawId = id,
                 title = firstString(row, "title", "displayTitle") ?: "(无标题视频 memo)",
-                updatedAt = parseMillis(row["lastModifiedDate"]) ?: parseMillis(row["updatedAt"]),
+                updatedAt = parseAuditMillis(row["lastModifiedDate"]) ?: parseAuditMillis(row["updatedAt"]),
                 isDeleted = row["isDeleted"]?.jsonPrimitive?.booleanOrNull == true,
             )
         }
@@ -138,7 +153,7 @@ class V2ProfileCloudConsistencyAuditRepository(
             RecordSnapshot(
                 rawId = id,
                 title = firstString(row, "title") ?: "(无标题心得)",
-                updatedAt = parseMillis(row["cardUpdatedAt"]) ?: parseMillis(row["updatedAt"]),
+                updatedAt = parseAuditMillis(row["cardUpdatedAt"]) ?: parseAuditMillis(row["updatedAt"]),
                 isDeleted = row["isDeleted"]?.jsonPrimitive?.booleanOrNull == true,
             )
         }
@@ -161,7 +176,7 @@ class V2ProfileCloudConsistencyAuditRepository(
             RecordSnapshot(
                 rawId = id,
                 title = cloudGoalTitle(row),
-                updatedAt = parseMillis(row["updatedAt"]),
+                updatedAt = parseAuditMillis(row["updatedAt"]),
                 isDeleted = row["isDeleted"]?.jsonPrimitive?.booleanOrNull == true,
             )
         }
@@ -188,7 +203,7 @@ class V2ProfileCloudConsistencyAuditRepository(
                 cloudById[id.lowercase()] = RecordSnapshot(
                     rawId = id,
                     title = "(已删除对话)",
-                    updatedAt = parseMillis(row["deletedAt"]) ?: parseMillis(row["updatedAt"]),
+                    updatedAt = parseAuditMillis(row["deletedAt"]) ?: parseAuditMillis(row["updatedAt"]),
                     isDeleted = true,
                 )
                 return@forEach
@@ -197,7 +212,7 @@ class V2ProfileCloudConsistencyAuditRepository(
             val snapshot = RecordSnapshot(
                 rawId = id,
                 title = firstString(row, "title") ?: "(对话分片)",
-                updatedAt = parseMillis(row["conversationUpdatedAt"]) ?: parseMillis(row["updatedAt"]),
+                updatedAt = parseAuditMillis(row["conversationUpdatedAt"]) ?: parseAuditMillis(row["updatedAt"]),
                 isDeleted = false,
             )
             val existing = cloudById[snapshot.id]
@@ -400,23 +415,6 @@ class V2ProfileCloudConsistencyAuditRepository(
 
     private fun normalize(value: String?): String =
         value?.trim().orEmpty()
-
-    private fun parseMillis(element: JsonElement?): Long? {
-        if (element == null) return null
-        return runCatching {
-            when (element) {
-                is JsonObject -> element["\$date"]?.jsonPrimitive?.contentOrNull
-                    ?.let { Instant.parse(it).toEpochMilli() }
-                else -> {
-                    val primitive = element.jsonPrimitive
-                    primitive.longOrNull
-                        ?: primitive.doubleOrNull?.toLong()
-                        ?: primitive.contentOrNull?.toLongOrNull()
-                        ?: primitive.contentOrNull?.let { Instant.parse(it).toEpochMilli() }
-                }
-            }
-        }.getOrNull()
-    }
 
     private data class RecordSnapshot(
         val rawId: String,

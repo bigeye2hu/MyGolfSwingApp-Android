@@ -44,6 +44,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -106,7 +107,7 @@ fun V2VideoMemoPlayerScreen(
     var playbackError by remember { mutableStateOf(false) }
     var currentTime by remember { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(0f) }
-    var currentRateIndex by remember { mutableStateOf(0) }
+    var currentRateIndex by remember { mutableIntStateOf(0) }
     val playbackRates = remember { listOf(1f, 0.5f, 0.25f) }
     val drawingState = remember { DrawingState() }
 

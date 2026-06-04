@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.ui.designsystem.DSColors
+import java.util.Locale
 
 /** 视频笔记横滑卡（对齐 iOS `V2MemoMixedCard`，210×161） */
 @Composable
@@ -67,7 +68,7 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                 memo.durationSec?.takeIf { it > 0 }?.let { sec ->
                     val t = sec.toInt()
                     Text(
-                        text = String.format("%d:%02d", t / 60, t % 60),
+                        text = String.format(Locale.ROOT, "%d:%02d", t / 60, t % 60),
                         color = Color.White,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.SemiBold,

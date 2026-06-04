@@ -22,8 +22,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -44,6 +44,7 @@ import com.mygolfswing.app.data.model.V2PlazaVideo
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import java.util.Locale
 
 /**
  * 主页「广场推荐」横滑段（对齐 iOS `V2HomePlazaSection`）。
@@ -80,7 +81,7 @@ fun V2HomePlazaSection(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text("全部", style = DSTypography.cardTitle, color = DSColors.fairway)
-                Icon(Icons.Filled.ArrowForward, null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
             }
         }
 
@@ -218,11 +219,11 @@ private fun formatDuration(sec: Double): String {
     val total = sec.toInt().coerceAtLeast(0)
     val m = total / 60
     val s = total % 60
-    return "%d:%02d".format(m, s)
+    return String.format(Locale.ROOT, "%d:%02d", m, s)
 }
 
 private fun formatViewCount(count: Int): String = when {
-    count >= 10_000 -> String.format("%.1fw", count / 10_000f)
-    count >= 1_000 -> String.format("%.1fk", count / 1_000f)
+    count >= 10_000 -> String.format(Locale.ROOT, "%.1fw", count / 10_000f)
+    count >= 1_000 -> String.format(Locale.ROOT, "%.1fk", count / 1_000f)
     else -> count.toString()
 }

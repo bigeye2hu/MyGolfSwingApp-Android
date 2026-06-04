@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.ui.designsystem.DSColors
+import java.util.Locale
 
 enum class V2VideoSourceChipStyle { MUTED, GOLD, LEAF }
 
@@ -63,7 +64,7 @@ fun V2VideoMemoLargeCard(
             memo.durationSec?.takeIf { it > 0 }?.let { sec ->
                 val t = sec.toInt()
                 Text(
-                    String.format("%d:%02d", t / 60, t % 60),
+                    String.format(Locale.ROOT, "%d:%02d", t / 60, t % 60),
                     color = Color.White,
                     fontSize = 9.sp,
                     modifier = Modifier

@@ -10,7 +10,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -83,6 +82,7 @@ import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 
 /**
  * 视频 Memo 创建页（对齐 iOS `V2MemoCreateVideoView`，3 个视频源）。
@@ -387,7 +387,7 @@ private fun buildMetaText(isOnline: Boolean, durationSec: Double?): String {
         val total = durationSec.toInt()
         val m = total / 60
         val s = total % 60
-        parts.add(String.format("%d:%02d", m, s))
+        parts.add(String.format(Locale.ROOT, "%d:%02d", m, s))
     }
     return parts.joinToString(" · ")
 }
@@ -758,7 +758,7 @@ private fun PreviewArea(
             val m = total / 60
             val s = total % 60
             Text(
-                text = String.format("%d:%02d", m, s),
+                text = String.format(Locale.ROOT, "%d:%02d", m, s),
                 color = Color.White,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -820,7 +820,7 @@ private fun OnlinePreview(url: String, thumbnailUrl: String?) {
             contentScale = androidx.compose.ui.layout.ContentScale.Crop,
         )
     } else {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.Center,

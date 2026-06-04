@@ -38,6 +38,7 @@ import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 
 /** 存储管理（对齐 iOS `StorageManagementView` 精简版） */
 @Composable
@@ -197,8 +198,8 @@ private fun clearAppCache(context: android.content.Context): Long {
 }
 
 private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024 * 1024 * 1024 -> String.format("%.1f GB", bytes / 1024.0 / 1024 / 1024)
-    bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / 1024.0 / 1024)
-    bytes >= 1024 -> String.format("%.1f KB", bytes / 1024.0)
+    bytes >= 1024 * 1024 * 1024 -> String.format(Locale.ROOT, "%.1f GB", bytes / 1024.0 / 1024 / 1024)
+    bytes >= 1024 * 1024 -> String.format(Locale.ROOT, "%.1f MB", bytes / 1024.0 / 1024)
+    bytes >= 1024 -> String.format(Locale.ROOT, "%.1f KB", bytes / 1024.0)
     else -> "$bytes B"
 }

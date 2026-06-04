@@ -21,7 +21,23 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
+
+internal fun parseCategoryMillis(element: JsonElement?): Long? {
+    if (element == null) return null
+    return when (element) {
+        is JsonObject -> parseCategoryMillis(element["\$date"])
+        else -> runCatching {
+            val primitive = element.jsonPrimitive
+            primitive.longOrNull
+                ?: primitive.doubleOrNull?.toLong()
+                ?: primitive.contentOrNull?.trim()?.takeIf { it.isNotBlank() }?.let { raw ->
+                    raw.toLongOrNull() ?: java.time.Instant.parse(raw).toEpochMilli()
+                }
+        }.getOrNull()
+    }
+}
 
 /**
  * 用户分类仓库（对齐 iOS `UserCategoryService` + `UnifiedCategoryBridge`）。
@@ -270,7 +286,7 @@ class V2CategoryRepository(
         return V2UserCategoryData(
             userId = userId,
             schemaVersion = o.string("schemaVersion") ?: "4.1",
-            lastSyncedAt = parseMillis(o["lastSyncedAt"]) ?: System.currentTimeMillis(),
+            lastSyncedAt = parseCategoryMillis(o["lastSyncedAt"]) ?: System.currentTimeMillis(),
             nodeGroups = parseNodeGroups(o["nodeGroups"]),
             trees = parseTrees(o["trees"]),
             customNodeGroups = parseNodeGroups(o["customNodeGroups"]),
@@ -290,8 +306,8 @@ class V2CategoryRepository(
                 source = g.string("source") ?: "system",
                 isActive = g["isActive"]?.jsonPrimitive?.booleanOrNull ?: true,
                 isDeprecated = g["isDeprecated"]?.jsonPrimitive?.booleanOrNull ?: false,
-                createdAt = parseMillis(g["createdAt"]) ?: System.currentTimeMillis(),
-                updatedAt = parseMillis(g["updatedAt"]) ?: System.currentTimeMillis(),
+                createdAt = parseCategoryMillis(g["createdAt"]) ?: System.currentTimeMillis(),
+                updatedAt = parseCategoryMillis(g["updatedAt"]) ?: System.currentTimeMillis(),
                 nodes = g["nodes"]?.jsonArray.orEmpty().mapNotNull { nodeEl ->
                     val n = nodeEl.jsonObject
                     V2UserNode(
@@ -302,8 +318,8 @@ class V2CategoryRepository(
                         source = n.string("source") ?: "system",
                         isActive = n["isActive"]?.jsonPrimitive?.booleanOrNull ?: true,
                         usageCount = n["usageCount"]?.jsonPrimitive?.intOrNull ?: 0,
-                        createdAt = parseMillis(n["createdAt"]) ?: System.currentTimeMillis(),
-                        updatedAt = parseMillis(n["updatedAt"]) ?: System.currentTimeMillis(),
+                        createdAt = parseCategoryMillis(n["createdAt"]) ?: System.currentTimeMillis(),
+                        updatedAt = parseCategoryMillis(n["updatedAt"]) ?: System.currentTimeMillis(),
                     )
                 },
             )
@@ -324,8 +340,8 @@ class V2CategoryRepository(
                 bindToPages = t["bindToPages"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty(),
                 source = t.string("source") ?: "system",
                 isActive = t["isActive"]?.jsonPrimitive?.booleanOrNull ?: true,
-                createdAt = parseMillis(t["createdAt"]) ?: System.currentTimeMillis(),
-                updatedAt = parseMillis(t["updatedAt"]) ?: System.currentTimeMillis(),
+                createdAt = parseCategoryMillis(t["createdAt"]) ?: System.currentTimeMillis(),
+                updatedAt = parseCategoryMillis(t["updatedAt"]) ?: System.currentTimeMillis(),
             )
         }
 
@@ -405,18 +421,6 @@ class V2CategoryRepository(
                 )
             },
         )
-
-    private fun parseMillis(el: JsonElement?): Long? {
-        if (el == null) return null
-        return runCatching {
-            when (el) {
-                is JsonObject -> el["\$date"]?.jsonPrimitive?.contentOrNull
-                    ?.let { java.time.Instant.parse(it).toEpochMilli() }
-                else -> el.jsonPrimitive.longOrNull
-                    ?: el.jsonPrimitive.contentOrNull?.toLongOrNull()
-            }
-        }.getOrNull()
-    }
 
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
 }

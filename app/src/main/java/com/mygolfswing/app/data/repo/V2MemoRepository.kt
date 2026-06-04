@@ -4,6 +4,7 @@ import android.content.Context
 import com.mygolfswing.app.data.db.MemoDao
 import com.mygolfswing.app.data.db.MemoEntity
 import com.mygolfswing.app.data.json.V2Json
+import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.memo.V2MemoThumbnailStore
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoAccent
@@ -35,6 +36,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.time.ZoneId
 import java.util.UUID
+
+internal fun remoteThumbnailUrlForUpload(thumbnailUrl: String?): String? {
+    val trimmed = thumbnailUrl?.trim() ?: return null
+    return trimmed.takeIf { V2MemoBridge.isRemoteUrl(it) }
+}
 
 /**
  * Memo 仓库（对齐 iOS `VideoMemoCloudSyncService` + `InsightCardCloudSyncService`）。
@@ -420,7 +426,7 @@ class V2MemoRepository(
         val isOnline = memo.isOnlineVideo
         val thumbPath = if (isOnline) null else memo.videoUrl?.removePrefix("file://")
         val thumbnailBase64 = V2VideoThumbnailUtil.jpegBase64ForUpload(thumbPath)
-        val remoteThumbnailUrl = memo.thumbnailUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        val remoteThumbnailUrl = remoteThumbnailUrlForUpload(memo.thumbnailUrl)
         return JsonObject(
             buildMap {
                 put("title", JsonPrimitive(memo.displayTitle ?: memo.title ?: ""))

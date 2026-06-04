@@ -31,7 +31,7 @@ class V2SessionStore(context: Context) {
         dataStore.edit { prefs ->
             prefs.writeString(K_USER_ID, session.userId)
             prefs.writeString(K_USER_SIG, session.userSig)
-            session.sdkAppId?.takeIf { it != 0 }?.let { prefs[K_SDK_APP_ID] = it }
+            prefs.writeOptionalInt(K_SDK_APP_ID, session.sdkAppId?.takeIf { it != 0 })
             prefs.writeString(K_NICKNAME, session.nickname)
             prefs.writeString(K_AVATAR, session.avatar)
             prefs.writeString(K_EMAIL, session.email)
@@ -45,11 +45,11 @@ class V2SessionStore(context: Context) {
             prefs.writeString(K_HOME_COURSE, session.homeCourse)
             prefs.writeString(K_DOMINANT_HAND, session.dominantHand)
             prefs.writeString(K_MEMBERSHIP_TIER, session.membershipTier)
-            session.golfAge?.let { prefs[K_GOLF_AGE] = it } ?: prefs.remove(K_GOLF_AGE)
-            session.golfStartYear?.let { prefs[K_GOLF_START_YEAR] = it }
+            prefs.writeOptionalInt(K_GOLF_AGE, session.golfAge)
+            prefs.writeOptionalInt(K_GOLF_START_YEAR, session.golfStartYear)
             prefs.writeString(K_GOLF_BRANDS, session.golfBrands.joinToString("|"))
-            session.hasPassword?.let { prefs[K_HAS_PASSWORD] = it }
-            session.credits?.let { prefs[K_CREDITS] = it }
+            prefs.writeOptionalBoolean(K_HAS_PASSWORD, session.hasPassword)
+            prefs.writeOptionalInt(K_CREDITS, session.credits)
             prefs.writeString(K_CREATED_AT, session.createdAt)
         }
     }
@@ -292,6 +292,20 @@ private fun androidx.datastore.preferences.core.MutablePreferences.writeString(
     value: String?,
 ) {
     if (value.isNullOrBlank()) remove(key) else this[key] = value
+}
+
+private fun androidx.datastore.preferences.core.MutablePreferences.writeOptionalInt(
+    key: Preferences.Key<Int>,
+    value: Int?,
+) {
+    if (value == null) remove(key) else this[key] = value
+}
+
+private fun androidx.datastore.preferences.core.MutablePreferences.writeOptionalBoolean(
+    key: Preferences.Key<Boolean>,
+    value: Boolean?,
+) {
+    if (value == null) remove(key) else this[key] = value
 }
 
 private fun androidx.datastore.preferences.core.MutablePreferences.writeAIString(

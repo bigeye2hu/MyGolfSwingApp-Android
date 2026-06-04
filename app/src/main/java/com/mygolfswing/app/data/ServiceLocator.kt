@@ -1,6 +1,7 @@
 package com.mygolfswing.app.data
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import com.mygolfswing.app.data.ai.V2AIService
 import com.mygolfswing.app.data.db.V2Database
 import com.mygolfswing.app.data.net.V2NetClient
@@ -75,7 +76,8 @@ object ServiceLocator {
         appContext = context.applicationContext
         db = V2Database.get(context)
         session = V2SessionStore(context)
-        net = V2NetClient(session)
+        val enableHttpLogging = appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        net = V2NetClient(session, enableHttpLogging)
 
         authRepo = V2AuthRepository(net, session)
         creditsRepo = V2CreditsRepository(net, session)

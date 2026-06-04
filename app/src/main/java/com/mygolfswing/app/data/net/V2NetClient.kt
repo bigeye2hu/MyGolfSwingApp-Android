@@ -20,17 +20,16 @@ import java.util.concurrent.TimeUnit
  * - **Download 服务器**走 [downloadApi]：自动注入 `X-TC-UID / X-TC-UserSig` 头
  * - **AI 流式**单独用 [streamingClient]（无读超时，便于 SSE 长连接）
  */
-class V2NetClient(private val session: V2SessionStore) {
+class V2NetClient(
+    private val session: V2SessionStore,
+    private val enableHttpLogging: Boolean,
+) {
 
     val json: Json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
         encodeDefaults = true
         isLenient = true
-    }
-
-    private val logging = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BASIC
     }
 
     private val tcAuthInterceptor = Interceptor { chain ->
@@ -45,7 +44,15 @@ class V2NetClient(private val session: V2SessionStore) {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .addInterceptor(logging)
+        .apply {
+            if (enableHttpLogging) {
+                addInterceptor(
+                    HttpLoggingInterceptor().apply {
+                        level = HttpLoggingInterceptor.Level.BASIC
+                    },
+                )
+            }
+        }
         .build()
 
     private val authedClient: OkHttpClient = baseClient.newBuilder()

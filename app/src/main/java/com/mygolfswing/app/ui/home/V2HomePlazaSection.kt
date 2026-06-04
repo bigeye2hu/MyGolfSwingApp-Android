@@ -55,10 +55,10 @@ import java.util.Locale
 @Composable
 fun V2HomePlazaSection(
     videos: List<V2PlazaVideo>,
+    modifier: Modifier = Modifier,
     isLoading: Boolean = false,
     onSeeAll: () -> Unit = {},
     onVideoTap: (V2PlazaVideo) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),

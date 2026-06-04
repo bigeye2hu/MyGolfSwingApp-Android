@@ -42,9 +42,9 @@ import com.mygolfswing.app.ui.designsystem.DSColors
 fun V2HomeHeader(
     goalCount: Int,
     displayName: String,
+    modifier: Modifier = Modifier,
     avatarUrl: String? = null,
     onAddTap: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val ringYellow = Color(0xFFE0A82E)
     val titleInk = Color(0xFF1B2A21)

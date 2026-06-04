@@ -36,6 +36,7 @@ import com.mygolfswing.app.ui.designsystem.DSSpacing
 
 @Composable
 fun V2ProfileMoreList(
+    modifier: Modifier = Modifier,
     onStorageTap: () -> Unit = {},
     onAIConfigTap: () -> Unit = {},
     onFeedbackTap: () -> Unit = {},
@@ -46,7 +47,6 @@ fun V2ProfileMoreList(
     onCloudAuditTap: () -> Unit = {},
     isLoggedIn: Boolean = true,
     isTestUser: Boolean = false,
-    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),

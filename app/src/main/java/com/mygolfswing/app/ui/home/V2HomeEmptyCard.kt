@@ -35,9 +35,9 @@ import com.mygolfswing.app.ui.designsystem.DSTypography
  */
 @Composable
 fun V2HomeEmptyCard(
+    modifier: Modifier = Modifier,
     onCreateGoal: () -> Unit = {},
     onBrowsePlaza: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier

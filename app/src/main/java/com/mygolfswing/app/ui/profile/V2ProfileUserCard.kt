@@ -40,9 +40,9 @@ import com.mygolfswing.app.ui.designsystem.DSSpacing
 @Composable
 fun V2ProfileUserCard(
     profile: V2UserProfile,
+    modifier: Modifier = Modifier,
     onAvatarTap: () -> Unit = {},
     onEditTap: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier

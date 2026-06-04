@@ -50,9 +50,9 @@ import com.mygolfswing.app.ui.designsystem.DSColors
 @Composable
 fun V2GoalRow(
     goal: V2Goal,
+    modifier: Modifier = Modifier,
     onTap: () -> Unit = {},
     onComplete: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier

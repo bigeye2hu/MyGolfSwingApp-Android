@@ -34,11 +34,11 @@ fun V2ProfileStatsCard(
     completedGoals: Int,
     videoMemoCount: Int,
     swingCount: Int,
+    modifier: Modifier = Modifier,
     onTapActive: () -> Unit = {},
     onTapCompleted: () -> Unit = {},
     onTapVideoMemo: () -> Unit = {},
     onTapSwing: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier

@@ -59,10 +59,10 @@ fun V2GoalHeroCard(
     goal: V2Goal,
     linkedMemoCount: Int,
     linkedVideoCount: Int,
+    modifier: Modifier = Modifier,
     onEdit: () -> Unit = {},
     onComplete: () -> Unit = {},
     onTap: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier

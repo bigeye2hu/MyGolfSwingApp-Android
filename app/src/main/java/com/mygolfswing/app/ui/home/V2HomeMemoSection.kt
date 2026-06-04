@@ -56,9 +56,9 @@ import com.mygolfswing.app.ui.memo.V2MemoThumbnail
 @Composable
 fun V2HomeMemoSection(
     memos: List<V2Memo>,
+    modifier: Modifier = Modifier,
     onSeeAll: () -> Unit = {},
     onMemoTap: (V2Memo) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),

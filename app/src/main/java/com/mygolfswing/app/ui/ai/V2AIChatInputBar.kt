@@ -34,9 +34,9 @@ fun V2AIChatInputBar(
     draft: String,
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
+    modifier: Modifier = Modifier,
     isReplying: Boolean = false,
     onStop: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val canSend = draft.trim().isNotEmpty() && !isReplying
 

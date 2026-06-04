@@ -188,13 +188,24 @@ private fun calculateCacheBytes(context: android.content.Context): Long {
 private fun clearAppCache(context: android.content.Context): Long {
     fun clearDir(dir: File?): Long {
         if (dir == null || !dir.exists()) return 0L
-        val before = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        var freed = 0L
         dir.listFiles()?.forEach { child ->
-            if (child.name != "videos") child.deleteRecursively() // 保留相机临时目录结构
+            if (child.name == "videos" && child.isDirectory) {
+                child.listFiles()?.forEach { nested ->
+                    freed += nested.deleteRecursivelyCountingBytes()
+                }
+            } else {
+                freed += child.deleteRecursivelyCountingBytes()
+            }
         }
-        return before
+        return freed
     }
     return clearDir(context.cacheDir) + clearDir(context.externalCacheDir)
+}
+
+private fun File.deleteRecursivelyCountingBytes(): Long {
+    val bytes = walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    return if (runCatching { deleteRecursively() }.getOrDefault(false)) bytes else 0L
 }
 
 private fun formatBytes(bytes: Long): String = when {

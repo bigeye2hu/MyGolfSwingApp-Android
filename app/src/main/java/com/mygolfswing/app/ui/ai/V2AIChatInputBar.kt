@@ -13,7 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -85,7 +85,7 @@ fun V2AIChatInputBar(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = if (isReplying) Icons.Filled.Stop else Icons.Filled.Send,
+                imageVector = if (isReplying) Icons.Filled.Stop else Icons.AutoMirrored.Filled.Send,
                 contentDescription = if (isReplying) "停止" else "发送",
                 tint = Color.White,
                 modifier = Modifier.size(18.dp),

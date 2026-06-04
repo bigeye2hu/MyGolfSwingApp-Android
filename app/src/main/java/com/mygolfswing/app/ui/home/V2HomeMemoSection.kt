@@ -19,9 +19,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Videocam
@@ -167,7 +167,7 @@ private fun VideoMemoMiniCard(memo: V2Memo, chipText: String, onTap: () -> Unit)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 MemoTypeChip(
                     text = chipText,
-                    icon = if (memo.kind == V2MemoKind.MIXED) Icons.Filled.Notes else Icons.Filled.Videocam,
+                    icon = if (memo.kind == V2MemoKind.MIXED) Icons.AutoMirrored.Filled.Notes else Icons.Filled.Videocam,
                     dark = true,
                 )
                 Spacer(modifier = Modifier.weight(1f))

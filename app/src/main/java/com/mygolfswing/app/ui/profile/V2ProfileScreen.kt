@@ -18,7 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Snackbar
@@ -250,7 +250,7 @@ private fun LoginPromptBanner(onClick: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = Icons.Filled.Login,
+                imageVector = Icons.AutoMirrored.Filled.Login,
                 contentDescription = null,
                 tint = DSColors.warmWhite,
             )
@@ -323,4 +323,3 @@ private fun AIArchiveCard(onTap: () -> Unit) {
         )
     }
 }
-

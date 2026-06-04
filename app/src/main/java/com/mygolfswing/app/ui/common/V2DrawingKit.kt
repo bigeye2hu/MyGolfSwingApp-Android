@@ -324,7 +324,7 @@ fun V2DrawingOverlay(
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(state.currentTool, state.selectedStrokeId, revision) {
+            .pointerInput(state.currentTool, state.selectedStrokeId) {
                 detectTapGestures { point ->
                     when (state.currentTool) {
                         V2DrawingTool.Select -> {
@@ -338,7 +338,7 @@ fun V2DrawingOverlay(
                     }
                 }
             }
-            .pointerInput(state.currentTool, state.selectedStrokeId, revision) {
+            .pointerInput(state.currentTool, state.selectedStrokeId) {
                 var gestureStart: Offset? = null
                 var lastPosition = Offset.Zero
                 detectDragGestures(
@@ -480,11 +480,11 @@ fun V2DrawingOverlay(
             val start = selected.start
             val end = selected.end
             if (start != null && end != null) {
-                val handleRadius = 7f
+                val handleRadius = 13f
                 drawCircle(Color.White, handleRadius, start)
-                drawCircle(selected.color, handleRadius - 2f, start, style = Stroke(width = 2f))
+                drawCircle(selected.color, handleRadius - 4f, start, style = Stroke(width = 3f))
                 drawCircle(Color.White, handleRadius, end)
-                drawCircle(selected.color, handleRadius - 2f, end, style = Stroke(width = 2f))
+                drawCircle(selected.color, handleRadius - 4f, end, style = Stroke(width = 3f))
             }
         }
     }
@@ -545,8 +545,8 @@ private fun V2DrawingColorButton(color: Color, selected: Boolean, onClick: () ->
 }
 
 private object V2DrawingHitTest {
-    private const val ENDPOINT_RADIUS = 22f
-    private const val LINE_RADIUS = 12f
+    private const val ENDPOINT_RADIUS = 42f
+    private const val LINE_RADIUS = 22f
 
     fun hitTestLines(point: Offset, strokes: List<V2DrawingStroke>): LineHitResult? {
         var best: LineHitResult? = null

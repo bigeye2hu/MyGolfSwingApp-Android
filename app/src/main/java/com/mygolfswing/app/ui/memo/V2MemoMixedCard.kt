@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +41,7 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
     val cardW = 210.dp
     val cardH = 161.dp
     val thumbW = 80.dp
+    val playable = remember(memo.videoUrl) { memoVideoPlayable(memo.videoUrl) }
 
     Box(modifier = modifier.width(cardW).height(cardH)) {
         Row(
@@ -65,7 +67,7 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                             ),
                         ),
                 )
-                memo.durationSec?.takeIf { it > 0 }?.let { sec ->
+                memo.durationSec?.takeIf { playable && it > 0 }?.let { sec ->
                     val t = sec.toInt()
                     Text(
                         text = String.format(Locale.ROOT, "%d:%02d", t / 60, t % 60),
@@ -79,16 +81,31 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                             .padding(horizontal = 5.dp, vertical = 2.dp),
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp)
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(0.8f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.PlayArrow, null, tint = DSColors.inkGreen, modifier = Modifier.size(14.dp))
+                if (playable) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp)
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(0.8f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.PlayArrow, null, tint = DSColors.inkGreen, modifier = Modifier.size(14.dp))
+                    }
+                } else {
+                    Text(
+                        "文件缺失",
+                        color = Color.White.copy(alpha = 0.82f),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.Black.copy(0.54f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp),
+                    )
                 }
             }
             Column(

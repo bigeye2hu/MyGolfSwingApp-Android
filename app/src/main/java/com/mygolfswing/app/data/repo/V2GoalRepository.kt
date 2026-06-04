@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.util.Log
+import com.mygolfswing.app.data.ServiceLocator
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -115,7 +116,7 @@ class V2GoalRepository(
         val cloudRows = goalRowArray(resp.data).mapNotNull { it as? JsonObject }
         val activeRows = cloudRows.filterNot { isDeletedRow(it) }
         val rowsForMerge = if (hasDuplicateGoalIds(activeRows)) {
-            Log.i(TAG, "duplicate goalId detected, running repairV2Goals")
+            debugInfo("duplicate goalId detected, running repairV2Goals")
             repairCloudGoals(uid)
             val repaired = net.cloudApi.dataSync(
                 JsonObject(
@@ -133,7 +134,7 @@ class V2GoalRepository(
         }
         val deletedCloudById = deletedGoalMap(cloudRows)
         val cloudEntities = dedupeGoalEntities(parseCloudGoalEntities(rowsForMerge, ownerUserId = uid))
-        Log.i(TAG, "getV2Goals: parsed ${cloudEntities.size} active goals, ${deletedCloudById.size} deleted for userId=${uid.take(8)}…")
+        debugInfo("getV2Goals: parsed ${cloudEntities.size} active goals, ${deletedCloudById.size} deleted for userId=${uid.take(8)}…")
 
         withContext(Dispatchers.IO) {
             mergeCloudGoals(uid, cloudEntities, deletedCloudById)
@@ -211,7 +212,7 @@ class V2GoalRepository(
         rows.mapNotNull { row ->
             runCatching { cloudRowToEntity(row, ownerUserId) }
                 .onFailure { e ->
-                    Log.w(TAG, "decode cloud goal row failed: ${e.message}")
+                    debugWarn("decode cloud goal row failed: ${e.message}")
                 }
                 .getOrNull()
         }
@@ -246,9 +247,9 @@ class V2GoalRepository(
             ),
         )
         if (resp.success) {
-            Log.i(TAG, "repairV2Goals completed for userId=${uid.take(8)}…")
+            debugInfo("repairV2Goals completed for userId=${uid.take(8)}…")
         } else {
-            Log.w(TAG, "repairV2Goals failed: ${resp.error}")
+            debugWarn("repairV2Goals failed: ${resp.error}")
         }
         resp.success
     }.getOrDefault(false)
@@ -269,9 +270,17 @@ class V2GoalRepository(
             }
         }
         if (duplicateCount > 0) {
-            Log.w(TAG, "cloud goals had $duplicateCount duplicate goalId rows, kept latest updatedAt")
+            debugWarn("cloud goals had $duplicateCount duplicate goalId rows, kept latest updatedAt")
         }
         return byId.values.toList()
+    }
+
+    private fun debugInfo(message: String) {
+        if (ServiceLocator.isDebuggable) Log.i(TAG, message)
+    }
+
+    private fun debugWarn(message: String) {
+        if (ServiceLocator.isDebuggable) Log.w(TAG, message)
     }
 
     private fun deletedGoalMap(rows: List<JsonObject>): Map<String, Long> = buildMap {

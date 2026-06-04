@@ -263,10 +263,14 @@ object V2GoalStore {
         scope.launch {
             ServiceLocator.goalRepo.syncFromCloud()
                 .onSuccess { count ->
-                    android.util.Log.i("V2GoalStore", "云端目标同步完成：合并 $count 条")
+                    if (ServiceLocator.isDebuggable) {
+                        android.util.Log.i("V2GoalStore", "云端目标同步完成：合并 $count 条")
+                    }
                 }
                 .onFailure { e ->
-                    android.util.Log.w("V2GoalStore", "云端目标同步失败: ${e.message}")
+                    if (ServiceLocator.isDebuggable) {
+                        android.util.Log.w("V2GoalStore", "云端目标同步失败: ${e.message}")
+                    }
                 }
         }
     }

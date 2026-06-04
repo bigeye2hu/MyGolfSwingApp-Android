@@ -65,6 +65,9 @@ object ServiceLocator {
     lateinit var appContext: Context
         private set
 
+    var isDebuggable: Boolean = false
+        private set
+
     lateinit var aiService: V2AIService
         private set
 
@@ -76,8 +79,8 @@ object ServiceLocator {
         appContext = context.applicationContext
         db = V2Database.get(context)
         session = V2SessionStore(context)
-        val enableHttpLogging = appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        net = V2NetClient(session, enableHttpLogging)
+        isDebuggable = appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        net = V2NetClient(session, isDebuggable)
 
         authRepo = V2AuthRepository(net, session)
         creditsRepo = V2CreditsRepository(net, session)

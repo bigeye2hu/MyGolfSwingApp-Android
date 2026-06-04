@@ -14,6 +14,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+internal fun deleteRecursivelyCountingFreedBytes(vararg dirs: File): Long =
+    dirs.sumOf { dir ->
+        if (!dir.exists()) {
+            0L
+        } else {
+            val bytes = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            if (runCatching { dir.deleteRecursively() }.getOrDefault(false)) bytes else 0L
+        }
+    }
+
 /**
  * 视频文件导入器（对齐 iOS `V2MemoCreateBridge.extractFirstFrameJPEG` + V1 VideoMemoManager 落盘逻辑）。
  *
@@ -132,10 +142,7 @@ object V2VideoFileStore {
     /** 清空所有视频 + 缩略图缓存。返回回收字节数。 */
     suspend fun clearAll(context: Context): Long = withContext(Dispatchers.IO) {
         val userId = ServiceLocator.session.current().userId ?: return@withContext 0L
-        val before = calculateUsedBytes(context)
-        videoDir(context, userId).deleteRecursively()
-        thumbDir(context, userId).deleteRecursively()
-        before
+        deleteRecursivelyCountingFreedBytes(videoDir(context, userId), thumbDir(context, userId))
     }
 
     /** 删除指定用户的本地媒体目录（账号删除时调用）。 */

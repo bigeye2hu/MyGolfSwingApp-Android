@@ -123,7 +123,7 @@ fun V2OnlineVideoSelectorScreen(
     }
 
     LaunchedEffect(initialUrl) {
-        if (initialUrl.isNotBlank() && urlInput.isBlank()) {
+        if (initialUrl.isNotBlank()) {
             urlInput = initialUrl
             detectAndFetch(initialUrl)
         }

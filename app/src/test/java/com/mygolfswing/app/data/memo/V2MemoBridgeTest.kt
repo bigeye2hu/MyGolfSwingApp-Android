@@ -26,6 +26,7 @@ class V2MemoBridgeTest {
         assertEquals("file:///tmp/thumb.jpg", V2MemoBridge.coilImageModel(" FILE:///tmp/thumb.jpg "))
         assertEquals("https://example.com/thumb.jpg", V2MemoBridge.coilImageModel("https://example.com/thumb.jpg"))
         assertEquals("HTTPS://example.com/thumb.jpg", V2MemoBridge.coilImageModel(" HTTPS://example.com/thumb.jpg "))
+        assertEquals("https://example.com/thumb.jpg", V2MemoBridge.coilImageModel("http://example.com/thumb.jpg"))
     }
 
     @Test

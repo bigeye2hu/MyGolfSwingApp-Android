@@ -62,7 +62,7 @@ object V2MemoThumbnailStore {
 
     fun resolveThumbnailUrl(context: Context, memo: V2Memo, userId: String? = null): String? {
         memo.thumbnailUrl?.takeIf { it.isNotBlank() }?.let { url ->
-            if (V2MemoBridge.isRemoteUrl(url)) return url.trim()
+            if (V2MemoBridge.isRemoteUrl(url)) return V2MemoBridge.coilImageModel(url)
             val path = V2MemoBridge.localVideoAbsolutePath(url) ?: return@let
             if (File(path).exists()) return V2MemoBridge.coilImageModel(url)
         }

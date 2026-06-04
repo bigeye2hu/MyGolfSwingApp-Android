@@ -86,7 +86,7 @@ object V2MemoBridge {
     fun coilImageModel(pathOrUrl: String?): String? {
         if (pathOrUrl.isNullOrBlank()) return null
         val t = pathOrUrl.trim()
-        if (isRemoteUrl(t)) return t
+        if (isRemoteUrl(t)) return t.replaceHttpWithHttps()
         if (t.startsWith(FILE_SCHEME, ignoreCase = true)) return "$FILE_SCHEME${t.drop(FILE_SCHEME.length)}"
         return "file://$t"
     }
@@ -99,6 +99,9 @@ object V2MemoBridge {
 
     private fun String.removeFileScheme(): String =
         if (startsWith(FILE_SCHEME, ignoreCase = true)) drop(FILE_SCHEME.length) else this
+
+    private fun String.replaceHttpWithHttps(): String =
+        if (startsWith("http://", ignoreCase = true)) "https://" + drop("http://".length) else this
 
     private const val FILE_SCHEME = "file://"
 }

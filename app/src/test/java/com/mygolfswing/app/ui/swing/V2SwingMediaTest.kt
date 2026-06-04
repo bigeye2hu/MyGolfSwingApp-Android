@@ -22,7 +22,7 @@ class V2SwingMediaTest {
     @Test
     fun swingMediaImageModelKeepsRemoteUrls() {
         assertEquals("https://example.com/thumb.jpg", swingMediaImageModel(" https://example.com/thumb.jpg "))
-        assertEquals("http://example.com/thumb.jpg", swingMediaImageModel("http://example.com/thumb.jpg"))
+        assertEquals("https://example.com/thumb.jpg", swingMediaImageModel("http://example.com/thumb.jpg"))
     }
 
     @Test

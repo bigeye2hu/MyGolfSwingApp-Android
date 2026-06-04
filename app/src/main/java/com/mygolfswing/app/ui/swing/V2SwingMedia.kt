@@ -5,7 +5,7 @@ import java.io.File
 
 internal fun swingMediaImageModel(pathOrUrl: String?): String? {
     val trimmed = pathOrUrl?.trim()?.takeIf { it.isNotBlank() } ?: return null
-    if (V2MemoBridge.isRemoteUrl(trimmed)) return trimmed
+    if (V2MemoBridge.isRemoteUrl(trimmed)) return V2MemoBridge.coilImageModel(trimmed)
     val localPath = V2MemoBridge.localVideoAbsolutePath(trimmed) ?: return null
     val file = File(localPath)
     return if (file.exists() && file.isFile) "file://${file.absolutePath}" else null

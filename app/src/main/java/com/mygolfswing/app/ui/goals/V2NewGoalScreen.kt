@@ -33,6 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -76,20 +78,20 @@ fun V2NewGoalScreen(
     var clubKind by remember { mutableStateOf(existing?.clubKind ?: V2Goal.ClubKind.IRON) }
     var metricKind by remember { mutableStateOf(existing?.metric?.kind ?: V2Goal.Metric.Kind.COUNT) }
     var targetAmount by rememberSaveable {
-        mutableStateOf(
+        mutableDoubleStateOf(
             existing?.metric?.target ?: defaultTargetFor(V2Goal.Metric.Kind.COUNT),
         )
     }
     var cadenceCategory by remember { mutableStateOf(cadenceCategoryOf(existing?.cadence) ?: CadenceCategory.PER_WEEK) }
     var perCountValue by rememberSaveable {
-        mutableStateOf((existing?.cadence as? V2Goal.Cadence.PerWeek)?.times ?: 3)
+        mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.PerWeek)?.times ?: 3)
     }
     var rangeMonths by rememberSaveable {
-        mutableStateOf((existing?.cadence as? V2Goal.Cadence.WithinMonths)?.months ?: 1)
+        mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.WithinMonths)?.months ?: 1)
     }
     var priority by remember { mutableStateOf(existing?.priority ?: V2Goal.Priority.NORMAL) }
     var targetSessions by rememberSaveable {
-        mutableStateOf(existing?.targetSessions ?: 5)
+        mutableIntStateOf(existing?.targetSessions ?: 5)
     }
     var linkedMemoIds by remember {
         mutableStateOf(existing?.derivedFromMemoIds?.toSet() ?: emptySet())
@@ -149,7 +151,7 @@ fun V2NewGoalScreen(
                     DividerLine()
                     ClubChipsField(selection = clubKind, onSelect = { clubKind = it })
                     DividerLine()
-                    if (isEditMode && existing != null) {
+                    if (existing != null) {
                         LockedMetricRow(goal = existing)
                         DividerLine()
                         TargetStepperField(
@@ -209,7 +211,7 @@ fun V2NewGoalScreen(
                     },
                 )
 
-                if (isEditMode && existing != null) {
+                if (existing != null) {
                     DeleteButton(
                         onDelete = {
                             V2GoalStore.delete(existing.id)

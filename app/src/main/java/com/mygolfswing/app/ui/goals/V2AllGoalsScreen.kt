@@ -21,7 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
@@ -182,7 +182,7 @@ private fun AllGoalsNavBar(onBack: () -> Unit, onCreate: () -> Unit) {
             .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleIconButton(icon = Icons.Filled.ArrowBack, onClick = onBack)
+        CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, onClick = onBack)
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text = "全部目标",

@@ -21,7 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.Visibility
@@ -219,7 +219,7 @@ private fun Hero(onBack: () -> Unit) {
                 .background(DSColors.warmWhite.copy(alpha = 0.18f), CircleShape)
                 .border(1.dp, DSColors.warmWhite.copy(alpha = 0.3f), CircleShape),
         ) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = DSColors.warmWhite)
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = DSColors.warmWhite)
         }
         Column(
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 96.dp),

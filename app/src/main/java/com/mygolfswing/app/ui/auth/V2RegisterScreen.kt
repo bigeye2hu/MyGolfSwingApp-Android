@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -238,7 +238,7 @@ private fun Hero(onBack: () -> Unit) {
                 .background(DSColors.warmWhite.copy(alpha = 0.18f), CircleShape)
                 .border(1.dp, DSColors.warmWhite.copy(alpha = 0.3f), CircleShape),
         ) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = DSColors.warmWhite)
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = DSColors.warmWhite)
         }
         Text(
             "创建账户",
@@ -339,4 +339,3 @@ private fun validate(
     if (password != confirmPassword) return "两次密码不一致"
     return null
 }
-

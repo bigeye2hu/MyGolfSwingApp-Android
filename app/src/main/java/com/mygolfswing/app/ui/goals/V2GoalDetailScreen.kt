@@ -19,7 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -131,7 +131,7 @@ private fun DetailNavBar(onBack: () -> Unit, onEdit: () -> Unit) {
             .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleIcon(icon = Icons.Filled.ArrowBack, onClick = onBack)
+        CircleIcon(icon = Icons.AutoMirrored.Filled.ArrowBack, onClick = onBack)
         Spacer(modifier = Modifier.weight(1f))
         Text(text = "目标详情", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen)
         Spacer(modifier = Modifier.weight(1f))

@@ -24,15 +24,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -50,9 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -400,11 +396,11 @@ private fun VideoPreviewCard(
                     .align(Alignment.TopStart)
                     .padding(8.dp)
                     .background(platformColor(platform).copy(0.9f), CircleShape)
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(platformIcon(platform), null, tint = Color.White, modifier = Modifier.size(11.dp))
-                Spacer(Modifier.width(4.dp))
+                PlatformBadgeText(platform = platform, compact = true)
+                Spacer(Modifier.width(5.dp))
                 Text(
                     platform,
                     fontSize = 9.sp,
@@ -449,7 +445,7 @@ private fun VideoPreviewCard(
                         .background(platformColor(platform)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(platformIcon(platform), null, tint = Color.White, modifier = Modifier.size(12.dp))
+                    PlatformBadgeText(platform = platform, compact = true)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(platform, fontSize = 12.sp, color = DSColors.shadowGray)
@@ -525,7 +521,14 @@ private fun SupportedPlatformsCard() {
                             .background(item.color),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(item.icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Text(
+                            item.badge,
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                        )
                     }
                     Text(item.name, fontSize = 10.sp, color = DSColors.shadowGray, modifier = Modifier.padding(top = 6.dp))
                 }
@@ -583,18 +586,27 @@ private data class SupportedPlatformItem(
     val name: String,
     val platform: String,
     val color: Color,
-    val icon: ImageVector,
+    val badge: String,
 )
 
 private val supportedPlatformItems = listOf(
-    SupportedPlatformItem("B站", "哔哩哔哩", Color(0xFFFB7299), Icons.Filled.Tv),
-    SupportedPlatformItem("YouTube", "YouTube", Color(0xFFFF0000), Icons.Filled.PlayCircle),
-    SupportedPlatformItem("小红书", "小红书", Color(0xFFFF2442), Icons.AutoMirrored.Filled.MenuBook),
-    SupportedPlatformItem("抖音", "抖音", Color(0xFF1B2A21), Icons.Filled.MusicNote),
+    SupportedPlatformItem("B站", "哔哩哔哩", Color(0xFFFB7299), "TV"),
+    SupportedPlatformItem("YouTube", "YouTube", Color(0xFFFF0000), "YT"),
+    SupportedPlatformItem("小红书", "小红书", Color(0xFFFF2442), "RED"),
+    SupportedPlatformItem("抖音", "抖音", Color(0xFF1B2A21), "DY"),
 )
 
-private fun platformIcon(platform: String): ImageVector =
-    supportedPlatformItems.firstOrNull { it.platform == platform }?.icon ?: Icons.Filled.Link
+@Composable
+private fun PlatformBadgeText(platform: String, compact: Boolean = false) {
+    Text(
+        supportedPlatformItems.firstOrNull { it.platform == platform }?.badge ?: "URL",
+        color = Color.White,
+        fontSize = if (compact) 7.sp else 10.sp,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+    )
+}
 
 private fun formatDuration(seconds: Double): String {
     val total = seconds.toInt()

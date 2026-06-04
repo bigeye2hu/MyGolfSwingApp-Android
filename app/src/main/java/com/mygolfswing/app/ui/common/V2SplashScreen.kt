@@ -39,6 +39,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.R
@@ -161,7 +162,7 @@ fun V2SplashScreen(message: String = "正在初始化...") {
                 fontWeight = FontWeight.Medium,
                 color = Color.White.copy(alpha = 0.90f),
                 modifier = Modifier
-                    .offset(y = textOffset.dp)
+                    .offset { IntOffset(x = 0, y = textOffset.dp.roundToPx()) }
                     .graphicsLayerAlpha(textOpacity),
             )
         }
@@ -294,10 +295,12 @@ private fun SplashParticles(alpha: Float) {
             }
             Box(
                 modifier = Modifier
-                    .offset(
-                        x = maxWidth * spec.x + ((idx % 3) - 1).dp * drift,
-                        y = maxHeight * spec.y - (18.dp * drift),
-                    )
+                    .offset {
+                        IntOffset(
+                            x = (maxWidth * spec.x + ((idx % 3) - 1).dp * drift).roundToPx(),
+                            y = (maxHeight * spec.y - (18.dp * drift)).roundToPx(),
+                        )
+                    }
                     .size(spec.size.dp)
                     .blur((idx % 3).dp)
                     .background(

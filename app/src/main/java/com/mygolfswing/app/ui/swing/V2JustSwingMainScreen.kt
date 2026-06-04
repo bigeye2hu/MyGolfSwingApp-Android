@@ -158,6 +158,7 @@ fun V2JustSwingMainScreen(onBack: () -> Unit) {
             saving = true
             val result = V2VideoFileStore.adoptLocalFile(context, file)
             if (result == null) {
+                deleteFileCountingFreedBytes(file)
                 error = "录制失败，请重试"
             } else {
                 V2SwingSessionStore.addClipFromVideoImport(result.absolutePath, result.thumbnailPath, result.durationSec)
@@ -410,20 +411,26 @@ private fun startSwingRecording(
 ) {
     val file = V2VideoFileStore.createCameraOutputFile(context)
     val outputOptions = FileOutputOptions.Builder(file).build()
-    val recording = videoCapture.output
-        .prepareRecording(context, outputOptions)
-        .start(ContextCompat.getMainExecutor(context)) { event ->
-            when (event) {
-                is VideoRecordEvent.Start -> Unit
-                is VideoRecordEvent.Finalize -> {
-                    if (event.hasError()) {
-                        deleteFileCountingFreedBytes(file)
-                        onError("录制失败，请重试")
-                    } else {
-                        onFinished(file)
+    val recording = runCatching {
+        videoCapture.output
+            .prepareRecording(context, outputOptions)
+            .start(ContextCompat.getMainExecutor(context)) { event ->
+                when (event) {
+                    is VideoRecordEvent.Start -> Unit
+                    is VideoRecordEvent.Finalize -> {
+                        if (event.hasError()) {
+                            deleteFileCountingFreedBytes(file)
+                            onError("录制失败，请重试")
+                        } else {
+                            onFinished(file)
+                        }
                     }
                 }
             }
-        }
+    }.getOrElse {
+        deleteFileCountingFreedBytes(file)
+        onError("录制启动失败，请重试")
+        return
+    }
     onStarted(recording)
 }

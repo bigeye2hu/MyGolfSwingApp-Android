@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,6 +43,7 @@ fun V2VideoMemoLargeCard(
     metaText: String,
     modifier: Modifier = Modifier,
 ) {
+    val playable = remember(memo.videoUrl) { memoVideoPlayable(memo.videoUrl) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -60,8 +62,21 @@ fun V2VideoMemoLargeCard(
             contentAlignment = Alignment.Center,
         ) {
             V2MemoThumbnail(memo = memo, modifier = Modifier.fillMaxSize())
-            Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
-            memo.durationSec?.takeIf { it > 0 }?.let { sec ->
+            if (playable) {
+                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            } else {
+                Text(
+                    "文件缺失",
+                    color = Color.White.copy(alpha = 0.78f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Black.copy(0.52f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp),
+                )
+            }
+            memo.durationSec?.takeIf { playable && it > 0 }?.let { sec ->
                 val t = sec.toInt()
                 Text(
                     String.format(Locale.ROOT, "%d:%02d", t / 60, t % 60),

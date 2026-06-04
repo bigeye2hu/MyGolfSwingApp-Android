@@ -55,4 +55,26 @@ class V2VideoFileStoreTest {
 
         root.deleteRecursively()
     }
+
+    @Test
+    fun deleteFileCountingFreedBytesReturnsActualDeletedBytes() {
+        val root = createTempDirectory("v2-video-temp-file").toFile()
+        val file = File(root, "capture.mp4")
+        file.writeBytes(ByteArray(11))
+
+        assertEquals(11L, deleteFileCountingFreedBytes(file))
+        assertFalse(file.exists())
+
+        root.deleteRecursively()
+    }
+
+    @Test
+    fun deleteFileCountingFreedBytesIgnoresMissingFiles() {
+        val root = createTempDirectory("v2-video-temp-file-missing").toFile()
+        val missing = File(root, "missing.mp4")
+
+        assertEquals(0L, deleteFileCountingFreedBytes(missing))
+
+        root.deleteRecursively()
+    }
 }

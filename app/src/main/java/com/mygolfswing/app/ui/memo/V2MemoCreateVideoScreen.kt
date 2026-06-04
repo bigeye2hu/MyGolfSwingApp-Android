@@ -80,6 +80,7 @@ import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.data.video.V2VideoFileStore
+import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import kotlinx.coroutines.launch
 import java.io.File
@@ -137,6 +138,7 @@ fun V2MemoCreateVideoScreen(
                 val r = V2VideoFileStore.adoptLocalFile(context, file)
                 importing = false
                 if (r == null) {
+                    deleteFileCountingFreedBytes(file)
                     importError = "录制失败，请重试"
                 } else {
                     sourceKind = SourceKind.CAMERA
@@ -146,6 +148,8 @@ fun V2MemoCreateVideoScreen(
                     onlineUrl = null
                 }
             }
+        } else {
+            deleteFileCountingFreedBytes(file)
         }
     }
 

@@ -61,6 +61,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.data.video.V2VideoFileStore
+import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
 import com.mygolfswing.app.ui.designsystem.DSColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -416,7 +417,7 @@ private fun startSwingRecording(
                 is VideoRecordEvent.Start -> Unit
                 is VideoRecordEvent.Finalize -> {
                     if (event.hasError()) {
-                        file.delete()
+                        deleteFileCountingFreedBytes(file)
                         onError("录制失败，请重试")
                     } else {
                         onFinished(file)

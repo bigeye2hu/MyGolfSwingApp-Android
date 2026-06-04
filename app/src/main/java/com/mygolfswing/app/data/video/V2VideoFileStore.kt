@@ -24,6 +24,12 @@ internal fun deleteRecursivelyCountingFreedBytes(vararg dirs: File): Long =
         }
     }
 
+internal fun deleteFileCountingFreedBytes(file: File?): Long {
+    if (file == null || !file.exists() || !file.isFile) return 0L
+    val bytes = file.length()
+    return if (runCatching { file.delete() }.getOrDefault(false)) bytes else 0L
+}
+
 /**
  * 视频文件导入器（对齐 iOS `V2MemoCreateBridge.extractFirstFrameJPEG` + V1 VideoMemoManager 落盘逻辑）。
  *

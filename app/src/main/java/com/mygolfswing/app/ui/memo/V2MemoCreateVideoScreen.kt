@@ -1,7 +1,13 @@
 package com.mygolfswing.app.ui.memo
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
@@ -68,6 +74,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -125,6 +132,7 @@ fun V2MemoCreateVideoScreen(
     var importing by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
+    var cameraPermissionDeniedPermanently by remember { mutableStateOf(false) }
 
     // 系统相机
     val captureLauncher = rememberLauncherForActivityResult(
@@ -169,8 +177,17 @@ fun V2MemoCreateVideoScreen(
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) launchCameraCapture()
-        else importError = "需要相机权限才能录制视频"
+        if (granted) {
+            cameraPermissionDeniedPermanently = false
+            launchCameraCapture()
+        } else {
+            cameraPermissionDeniedPermanently = context.isCameraPermissionPermanentlyDenied()
+            importError = if (cameraPermissionDeniedPermanently) {
+                "请在系统设置中开启相机权限后再录制视频"
+            } else {
+                "需要相机权限才能录制视频"
+            }
+        }
     }
 
     // 表单状态
@@ -307,7 +324,10 @@ fun V2MemoCreateVideoScreen(
                         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
                             == PackageManager.PERMISSION_GRANTED
                         ) {
+                            cameraPermissionDeniedPermanently = false
                             launchCameraCapture()
+                        } else if (cameraPermissionDeniedPermanently) {
+                            importError = "请在系统设置中开启相机权限后再录制视频"
                         } else {
                             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                         }
@@ -379,7 +399,22 @@ fun V2MemoCreateVideoScreen(
             title = { Text("出错了") },
             text = { Text(importError ?: "") },
             confirmButton = {
-                TextButton(onClick = { importError = null }) { Text("好") }
+                TextButton(
+                    onClick = {
+                        val openSettings = cameraPermissionDeniedPermanently
+                        importError = null
+                        if (openSettings) context.openAppSettings()
+                    },
+                ) {
+                    Text(if (cameraPermissionDeniedPermanently) "打开设置" else "好")
+                }
+            },
+            dismissButton = if (cameraPermissionDeniedPermanently) {
+                {
+                    TextButton(onClick = { importError = null }) { Text("取消") }
+                }
+            } else {
+                null
             },
         )
     }
@@ -958,4 +993,24 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
+}
+
+private fun Context.isCameraPermissionPermanentlyDenied(): Boolean {
+    val activity = findActivity() ?: return false
+    return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED &&
+        !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private fun Context.openAppSettings() {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", packageName, null),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    startActivity(intent)
 }

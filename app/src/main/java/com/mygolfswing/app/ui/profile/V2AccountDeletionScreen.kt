@@ -180,8 +180,8 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                Icon(Icons.Filled.PushPin, contentDescription = null, tint = Success, modifier = Modifier.size(12.dp))
-                Text("已下载的本地视频将保留在设备上", color = Success, fontSize = 14.sp)
+                Icon(Icons.Filled.PushPin, contentDescription = null, tint = Danger, modifier = Modifier.size(12.dp))
+                Text("App 私有本地视频缓存也会清理；已导出到系统相册或外部位置的文件不受影响", color = Muted, fontSize = 14.sp)
             }
         }
 

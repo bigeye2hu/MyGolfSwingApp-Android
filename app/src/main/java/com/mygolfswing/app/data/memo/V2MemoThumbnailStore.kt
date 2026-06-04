@@ -57,8 +57,7 @@ object V2MemoThumbnailStore {
     /** 在线视频封面猜测（YouTube 等） */
     fun onlineThumbnailGuess(playUrl: String?): String? {
         if (playUrl.isNullOrBlank()) return null
-        val id = extractYoutubeId(playUrl) ?: return null
-        return "https://img.youtube.com/vi/$id/hqdefault.jpg"
+        return V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl(playUrl)
     }
 
     fun resolveThumbnailUrl(context: Context, memo: V2Memo, userId: String? = null): String? {
@@ -117,14 +116,4 @@ object V2MemoThumbnailStore {
         return File(root, THUMB_DIR).apply { mkdirs() }
     }
 
-    private fun extractYoutubeId(url: String): String? {
-        val patterns = listOf(
-            Regex("""(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([A-Za-z0-9_-]{11})"""),
-            Regex("""youtube\.com/shorts/([A-Za-z0-9_-]{11})"""),
-        )
-        for (p in patterns) {
-            p.find(url)?.groupValues?.getOrNull(1)?.let { return it }
-        }
-        return null
-    }
 }

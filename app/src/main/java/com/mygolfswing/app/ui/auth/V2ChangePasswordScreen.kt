@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,7 +70,7 @@ fun V2ChangePasswordScreen(
     var confirmPw by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var countdown by remember { mutableStateOf(0) }
+    var countdown by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(countdown) {

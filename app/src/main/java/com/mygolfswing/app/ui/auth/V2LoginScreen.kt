@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,7 +90,7 @@ fun V2LoginScreen(
     var agreed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    var countdown by remember { mutableStateOf(0) }
+    var countdown by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(countdown) {
@@ -477,4 +478,3 @@ private fun textFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = AuthPalette.inputBg,
     cursorColor = DSColors.fairway,
 )
-

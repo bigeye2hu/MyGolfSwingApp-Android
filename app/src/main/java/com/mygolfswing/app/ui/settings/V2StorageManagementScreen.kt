@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.data.video.V2VideoFileStore
+import com.mygolfswing.app.data.video.V2VideoThumbnailLoader
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -116,6 +117,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                         val protectedMedia = V2SwingSessionStore.permanentMediaPaths()
                         val freedVideos = V2VideoFileStore.clearAll(context, protectedAbsolutePaths = protectedMedia)
                         val freedCache = clearAppCache(context)
+                        V2VideoThumbnailLoader.clearMemoryCache()
                         videoBytes = V2VideoFileStore.calculateUsedBytes(context)
                         cacheBytes = calculateCacheBytes(context)
                         loading = false

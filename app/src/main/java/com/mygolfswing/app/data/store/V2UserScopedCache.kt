@@ -1,6 +1,7 @@
 package com.mygolfswing.app.data.store
 
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.data.video.V2VideoThumbnailLoader
 import kotlinx.coroutines.launch
 
 /**
@@ -41,6 +42,7 @@ object V2UserScopedCache {
         V2PlazaStore.resetUserState()
         V2CategoryStore.clearUserData()
         ServiceLocator.creditsRepo.reset()
+        V2VideoThumbnailLoader.clearMemoryCache()
     }
 
     /** 登出流程：清内存 + 解除当前绑定（本地分区缓存保留）。 */

@@ -18,11 +18,15 @@ object V2VideoThumbnailLoader {
 
     fun cached(path: String): Bitmap? = cache.get(path)
 
+    fun clearMemoryCache() {
+        cache.evictAll()
+    }
+
     suspend fun loadFirstFrame(videoUrlOrPath: String?): Bitmap? = withContext(Dispatchers.IO) {
         val path = V2MemoBridge.localVideoAbsolutePath(videoUrlOrPath) ?: return@withContext null
-        cache.get(path)?.let { return@withContext it }
         val file = File(path)
         if (!file.exists()) return@withContext null
+        cache.get(path)?.let { return@withContext it }
         val retriever = MediaMetadataRetriever()
         val bitmap = try {
             retriever.setDataSource(file.absolutePath)

@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.repo
 
 import android.graphics.Bitmap
 import android.util.Base64
+import androidx.core.graphics.scale
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2Session
 import com.mygolfswing.app.data.session.V2SessionStore
@@ -367,5 +368,5 @@ internal fun resizeBitmap(src: Bitmap, maxSide: Int): Bitmap {
     val longest = maxOf(w, h)
     if (longest <= maxSide) return src
     val scale = maxSide.toFloat() / longest
-    return Bitmap.createScaledBitmap(src, (w * scale).toInt(), (h * scale).toInt(), true)
+    return src.scale((w * scale).toInt(), (h * scale).toInt())
 }

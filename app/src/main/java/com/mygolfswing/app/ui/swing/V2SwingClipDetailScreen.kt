@@ -54,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -387,7 +388,7 @@ private suspend fun saveClipToGallery(context: android.content.Context, clip: V2
 }
 
 private fun mediaUriFor(pathOrUrl: String): Uri {
-    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return Uri.parse(pathOrUrl)
+    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return pathOrUrl.toUri()
     return Uri.fromFile(File(pathOrUrl.removePrefix("file://")))
 }
 

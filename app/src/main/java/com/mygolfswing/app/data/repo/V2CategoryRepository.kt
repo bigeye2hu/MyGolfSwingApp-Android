@@ -1,6 +1,7 @@
 package com.mygolfswing.app.data.repo
 
 import android.content.Context
+import androidx.core.content.edit
 import com.mygolfswing.app.data.model.V2CategoryGroup
 import com.mygolfswing.app.data.model.V2CategoryItem
 import com.mygolfswing.app.data.model.V2UserCategoryData
@@ -118,7 +119,9 @@ class V2CategoryRepository(
     }
 
     private fun saveLocalCache(data: V2UserCategoryData) {
-        prefs.edit().putString(cacheKey(data.userId), encodeUserCategoryDataJson(data)).apply()
+        prefs.edit {
+            putString(cacheKey(data.userId), encodeUserCategoryDataJson(data))
+        }
     }
 
     private fun loadLocalCache(userId: String): V2UserCategoryData? {

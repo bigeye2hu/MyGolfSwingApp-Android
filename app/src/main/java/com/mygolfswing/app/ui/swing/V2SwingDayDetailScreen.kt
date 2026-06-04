@@ -40,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -198,7 +199,7 @@ private fun ClipThumb(
 }
 
 private fun mediaUriFor(pathOrUrl: String): Uri {
-    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return Uri.parse(pathOrUrl)
+    if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) return pathOrUrl.toUri()
     val path = pathOrUrl.removePrefix("file://")
     return Uri.fromFile(File(path))
 }

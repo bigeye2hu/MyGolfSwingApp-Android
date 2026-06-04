@@ -2,13 +2,8 @@ package com.mygolfswing.app.ui.swing
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -61,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -70,6 +64,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
+import com.mygolfswing.app.ui.common.isPermissionPermanentlyDenied
+import com.mygolfswing.app.ui.common.openAppSettings
 import com.mygolfswing.app.ui.designsystem.DSColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -105,9 +101,7 @@ fun V2JustSwingMainScreen(onBack: () -> Unit) {
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         hasCameraPermission = granted
-        cameraPermissionDeniedPermanently = !granted && context.findActivity()?.let { activity ->
-            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
-        } == true
+        cameraPermissionDeniedPermanently = !granted && context.isPermissionPermanentlyDenied(Manifest.permission.CAMERA)
         if (!granted) error = "需要相机权限才能录制挥杆"
     }
 
@@ -292,20 +286,6 @@ private fun PermissionState(
             modifier = Modifier.padding(top = 8.dp),
         )
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
-
-private fun Context.openAppSettings() {
-    val intent = Intent(
-        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        Uri.fromParts("package", packageName, null),
-    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(intent)
 }
 
 @Composable

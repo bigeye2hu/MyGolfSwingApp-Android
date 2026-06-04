@@ -1,13 +1,7 @@
 package com.mygolfswing.app.ui.memo
 
 import android.Manifest
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
@@ -74,7 +68,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -88,6 +81,8 @@ import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
+import com.mygolfswing.app.ui.common.isPermissionPermanentlyDenied
+import com.mygolfswing.app.ui.common.openAppSettings
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import kotlinx.coroutines.launch
 import java.io.File
@@ -181,7 +176,7 @@ fun V2MemoCreateVideoScreen(
             cameraPermissionDeniedPermanently = false
             launchCameraCapture()
         } else {
-            cameraPermissionDeniedPermanently = context.isCameraPermissionPermanentlyDenied()
+            cameraPermissionDeniedPermanently = context.isPermissionPermanentlyDenied(Manifest.permission.CAMERA)
             importError = if (cameraPermissionDeniedPermanently) {
                 "请在系统设置中开启相机权限后再录制视频"
             } else {
@@ -993,24 +988,4 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
-}
-
-private fun Context.isCameraPermissionPermanentlyDenied(): Boolean {
-    val activity = findActivity() ?: return false
-    return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED &&
-        !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
-
-private fun Context.openAppSettings() {
-    val intent = Intent(
-        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        Uri.fromParts("package", packageName, null),
-    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(intent)
 }

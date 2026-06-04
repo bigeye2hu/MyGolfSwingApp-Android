@@ -2,8 +2,13 @@ package com.mygolfswing.app.ui.swing
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -56,7 +61,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mygolfswing.app.data.store.V2SwingSessionStore
@@ -90,17 +98,38 @@ fun V2JustSwingMainScreen(onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var savedToast by remember { mutableStateOf(false) }
     var pendingClose by remember { mutableStateOf(false) }
+    var cameraPermissionDeniedPermanently by remember { mutableStateOf(false) }
     var sessionClipCount by remember { mutableIntStateOf(0) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
         hasCameraPermission = granted
+        cameraPermissionDeniedPermanently = !granted && context.findActivity()?.let { activity ->
+            !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+        } == true
         if (!granted) error = "需要相机权限才能录制挥杆"
     }
 
     LaunchedEffect(Unit) {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                hasCameraPermission = granted
+                if (granted) {
+                    cameraPermissionDeniedPermanently = false
+                    error = null
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     LaunchedEffect(hasCameraPermission, lensFacing) {
@@ -208,7 +237,11 @@ fun V2JustSwingMainScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            PermissionState(onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) })
+            PermissionState(
+                showSettingsAction = cameraPermissionDeniedPermanently,
+                onRequest = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                onOpenSettings = { context.openAppSettings() },
+            )
         }
 
         TopOverlay(
@@ -229,7 +262,11 @@ fun V2JustSwingMainScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun PermissionState(onRequest: () -> Unit) {
+private fun PermissionState(
+    showSettingsAction: Boolean,
+    onRequest: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -237,18 +274,38 @@ private fun PermissionState(onRequest: () -> Unit) {
     ) {
         Text("需要相机权限才能录制挥杆", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            "授权后会直接进入拍摄模式。",
+            if (showSettingsAction) "请在系统设置中开启相机权限。" else "授权后会直接进入拍摄模式。",
             color = Color.White.copy(alpha = 0.65f),
             fontSize = 13.sp,
             modifier = Modifier.padding(top = 8.dp, bottom = 18.dp),
         )
         IconButton(
-            onClick = onRequest,
+            onClick = if (showSettingsAction) onOpenSettings else onRequest,
             modifier = Modifier.size(64.dp).clip(CircleShape).background(DSColors.fairway),
         ) {
             Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = Color.White)
         }
+        Text(
+            if (showSettingsAction) "打开设置" else "授权相机",
+            color = Color.White.copy(alpha = 0.78f),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private fun Context.openAppSettings() {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", packageName, null),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    startActivity(intent)
 }
 
 @Composable

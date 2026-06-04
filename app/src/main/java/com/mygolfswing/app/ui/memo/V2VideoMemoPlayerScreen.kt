@@ -560,7 +560,7 @@ private fun Float.speedText(): String = when {
 private fun resolvePlaybackUrl(videoUrl: String?): String? {
     if (videoUrl.isNullOrBlank()) return null
     val trimmed = videoUrl.trim()
-    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    if (V2MemoBridge.isRemoteUrl(trimmed)) {
         return V2OnlineVideoMetadataFetcher.normalizePlayableUrl(trimmed)
     }
     val localPath = V2MemoBridge.localVideoAbsolutePath(trimmed) ?: return null

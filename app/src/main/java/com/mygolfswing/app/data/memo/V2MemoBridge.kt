@@ -78,15 +78,27 @@ object V2MemoBridge {
     /** 规范化本地视频路径为绝对路径（无 file:// 前缀） */
     fun localVideoAbsolutePath(videoUrl: String?): String? {
         if (videoUrl.isNullOrBlank()) return null
-        val raw = videoUrl.removePrefix("file://")
-        if (raw.startsWith("http://") || raw.startsWith("https://")) return null
-        return raw
+        val trimmed = videoUrl.trim()
+        if (isRemoteUrl(trimmed)) return null
+        return trimmed.removeFileScheme()
     }
 
     fun coilImageModel(pathOrUrl: String?): String? {
         if (pathOrUrl.isNullOrBlank()) return null
         val t = pathOrUrl.trim()
-        if (t.startsWith("http://") || t.startsWith("https://") || t.startsWith("file://")) return t
+        if (isRemoteUrl(t)) return t
+        if (t.startsWith(FILE_SCHEME, ignoreCase = true)) return "$FILE_SCHEME${t.drop(FILE_SCHEME.length)}"
         return "file://$t"
     }
+
+    fun isRemoteUrl(value: String?): Boolean {
+        val t = value?.trim() ?: return false
+        return t.startsWith("http://", ignoreCase = true) ||
+            t.startsWith("https://", ignoreCase = true)
+    }
+
+    private fun String.removeFileScheme(): String =
+        if (startsWith(FILE_SCHEME, ignoreCase = true)) drop(FILE_SCHEME.length) else this
+
+    private const val FILE_SCHEME = "file://"
 }

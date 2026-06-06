@@ -141,10 +141,12 @@ fun V2VideoMemoPlayerScreen(
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
+                    player.pause()
                     player.seekTo(0)
                     player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
-                    player.play()
                     currentTime = 0f
+                    isPlaying = false
+                    showPlayPauseIcon = true
                 }
             }
         }

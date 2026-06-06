@@ -204,9 +204,14 @@ fun V2ResetPasswordScreen(
                             if (r.isSuccess) {
                                 // 重置后自动用新密码登录
                                 val login = ServiceLocator.authRepo.loginWithUsername(phone, newPw)
-                                loading = false
-                                login.onSuccess { showSuccess = true }
-                                    .onFailure { error = "重置成功，请回到登录页用新密码登录" }
+                                login.onSuccess {
+                                    loading = false
+                                    showSuccess = true
+                                }
+                                    .onFailure {
+                                        loading = false
+                                        error = "重置成功，请回到登录页用新密码登录"
+                                    }
                             } else {
                                 loading = false
                                 error = r.exceptionOrNull()?.message ?: "重置失败"

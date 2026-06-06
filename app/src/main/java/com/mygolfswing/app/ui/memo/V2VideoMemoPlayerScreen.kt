@@ -399,6 +399,8 @@ private fun VideoMemoComparisonScreen(
     var secondaryDuration by remember { mutableFloatStateOf(0f) }
     var syncSeek by remember { mutableStateOf(false) }
     var comparisonEnded by remember { mutableStateOf(false) }
+    var showDrawingTools by remember { mutableStateOf(false) }
+    val comparisonDrawingState = remember { V2DrawingState() }
 
     val primaryPlayer = remember(primaryUrl) {
         ExoPlayer.Builder(context).build().apply {
@@ -477,7 +479,15 @@ private fun VideoMemoComparisonScreen(
                 Spacer(Modifier.weight(1f))
                 Text("视频对比", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                SyncSeekToggle(enabled = syncSeek, onToggle = { syncSeek = !syncSeek })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SyncSeekToggle(enabled = syncSeek, onToggle = { syncSeek = !syncSeek })
+                    CircleIconButton(
+                        icon = Icons.Filled.Edit,
+                        contentDescription = "画线工具",
+                        tint = if (showDrawingTools) DSColors.goldBright else Color.White,
+                        onClick = { showDrawingTools = !showDrawingTools },
+                    )
+                }
             }
 
             ComparisonVideoPane(
@@ -568,6 +578,20 @@ private fun VideoMemoComparisonScreen(
                     fontSize = 12.sp,
                 )
             }
+        }
+
+        if (showDrawingTools) {
+            V2DrawingOverlay(
+                state = comparisonDrawingState,
+                modifier = Modifier.fillMaxSize(),
+            )
+            V2DrawingToolsPanel(
+                state = comparisonDrawingState,
+                onClose = { showDrawingTools = false },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 12.dp, bottom = 82.dp),
+            )
         }
     }
 }

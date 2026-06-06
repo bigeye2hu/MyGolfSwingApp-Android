@@ -188,13 +188,13 @@ fun V2RegisterScreen(
                 text = "创建账户",
                 loading = loading,
                 onClick = {
-                    if (!agreed) {
-                        error = "请先阅读并同意服务条款和隐私政策"
-                        return@AuthPrimaryButton
-                    }
                     val v = validate(avatarKey, username, nickname, password, confirmPassword)
                     if (v != null) {
                         error = v
+                        return@AuthPrimaryButton
+                    }
+                    if (!agreed) {
+                        error = "请先阅读并同意服务条款和隐私政策"
                         return@AuthPrimaryButton
                     }
                     scope.launch {

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
@@ -95,6 +96,7 @@ fun V2VideoMemoPlayerScreen(
     var showToolsPanel by remember { mutableStateOf(false) }
     var showMoreTools by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showComparisonNotice by remember { mutableStateOf(false) }
     var playbackError by remember { mutableStateOf(false) }
     var currentTime by remember { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(0f) }
@@ -261,6 +263,12 @@ fun V2VideoMemoPlayerScreen(
                     isPlaying = false
                     onEdit(memo.id)
                 },
+                onCompare = {
+                    player.pause()
+                    isPlaying = false
+                    showMoreTools = false
+                    showComparisonNotice = true
+                },
                 onDelete = { showDeleteConfirm = true },
             )
         } else {
@@ -327,6 +335,10 @@ fun V2VideoMemoPlayerScreen(
                 onBack()
             },
         )
+    }
+
+    if (showComparisonNotice) {
+        VideoComparisonNoticeDialog(onDismiss = { showComparisonNotice = false })
     }
 }
 
@@ -447,6 +459,20 @@ private fun VideoMemoDeleteConfirmDialog(
 }
 
 @Composable
+private fun VideoComparisonNoticeDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("视频对比") },
+        text = { Text("iOS 的双视频对比入口已经在这里对齐。Android 版对比选择器和双播放器会在后续小目标中接入。") },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了", color = DSColors.fairway)
+            }
+        },
+    )
+}
+
+@Composable
 private fun TopBar(showToolsPanel: Boolean, onBack: () -> Unit, onToggleDrawing: () -> Unit) {
     Row(
         modifier = Modifier
@@ -486,6 +512,7 @@ private fun RightFloatingTools(
     onSpeed: () -> Unit,
     onToggleMore: () -> Unit,
     onEdit: () -> Unit,
+    onCompare: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Column(
@@ -502,6 +529,7 @@ private fun RightFloatingTools(
             exit = fadeOut() + slideOutHorizontally { it / 2 },
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.End) {
+                FloatingIconButton(icon = Icons.AutoMirrored.Filled.CompareArrows, label = "对比", onClick = onCompare)
                 FloatingIconButton(icon = Icons.Filled.Folder, label = "分类", onClick = onEdit)
                 FloatingIconButton(icon = Icons.Filled.DeleteOutline, label = "删除", onClick = onDelete)
             }

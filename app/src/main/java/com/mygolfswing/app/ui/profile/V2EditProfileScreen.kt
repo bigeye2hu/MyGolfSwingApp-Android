@@ -322,16 +322,26 @@ fun V2EditProfileScreen(
                     error = "昵称不能为空"
                     return@Button
                 }
+                val handicapValue = handicap.ifBlank { null }?.toDoubleOrNull()
+                if (handicap.isNotBlank() && (handicapValue == null || handicapValue !in 0.0..54.9)) {
+                    error = "差点需在 0.0-54.9 之间"
+                    return@Button
+                }
+                val currentYear = LocalDate.now().year
+                val startYear = golfStartYear.toIntOrNull()
+                if (golfStartYear.isNotBlank() && (startYear == null || startYear !in 1970..currentYear)) {
+                    error = "开始学球年份需在 1970-$currentYear 之间"
+                    return@Button
+                }
                 scope.launch {
                     saving = true
-                    val startYear = golfStartYear.toIntOrNull()
                     val r = ServiceLocator.authRepo.updateUserInfo(
                         nickname = nickname.trim(),
                         gender = gender,
                         birthday = if (hasBirthday) birthday.ifBlank { null } else null,
                         location = location.ifBlank { null },
                         bio = bio.ifBlank { null },
-                        handicap = handicap.ifBlank { null },
+                        handicap = handicapValue?.toString(),
                         golfAge = startYear?.let { (LocalDate.now().year - it).coerceAtLeast(0) },
                         golfStartYear = startYear,
                         dominantHand = dominantHand.takeIf { it != "未设置" },

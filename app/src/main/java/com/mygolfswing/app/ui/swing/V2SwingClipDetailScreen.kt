@@ -1,6 +1,8 @@
 package com.mygolfswing.app.ui.swing
 
 import android.content.ContentValues
+import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -34,6 +36,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -98,8 +101,12 @@ fun V2SwingClipDetailScreen(
     var playbackRate by remember { mutableFloatStateOf(1f) }
     var showDrawingTools by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
+    var showPromoteConfirm by remember { mutableStateOf(false) }
+    var showDemoteConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
+    var metadata by remember(clipId) { mutableStateOf(SwingVideoMetadata()) }
     val drawingState = remember { V2DrawingState() }
 
     if (clip == null) {
@@ -144,6 +151,9 @@ fun V2SwingClipDetailScreen(
             delay(80)
         }
     }
+    LaunchedEffect(uri) {
+        metadata = loadSwingVideoMetadata(context, uri)
+    }
     LaunchedEffect(playbackRate) {
         player.playbackParameters = PlaybackParameters(playbackRate)
     }
@@ -159,6 +169,7 @@ fun V2SwingClipDetailScreen(
             DetailTopBar(
                 showDrawingTools = showDrawingTools,
                 onBack = onBack,
+                onHelp = { showHelp = true },
                 onToggleDrawing = {
                     showDrawingTools = !showDrawingTools
                     if (!showDrawingTools) {
@@ -203,13 +214,15 @@ fun V2SwingClipDetailScreen(
                 isPlaying = isPlaying,
                 currentTime = currentTimeSec,
                 duration = durationSec,
+                metadata = metadata,
                 playbackRate = playbackRate,
                 showDetails = showDetails,
                 onTogglePlay = {
                     if (player.isPlaying) player.pause() else player.play()
                 },
-                onStep = { deltaMs ->
+                onStepFrames = { deltaFrames ->
                     player.pause()
+                    val deltaMs = (deltaFrames * metadata.frameDurationMs).roundToInt().toLong()
                     player.seekTo((player.currentPosition + deltaMs).coerceIn(0L, player.duration.coerceAtLeast(0L)))
                 },
                 onSeek = { progress ->
@@ -227,12 +240,11 @@ fun V2SwingClipDetailScreen(
                     V2SwingSessionStore.updateClipRetention(clip.id, next)
                 },
                 onPromote = {
-                    val next = if (clip.retention == V2SwingClipRetention.PROMOTED) {
-                        V2SwingClipRetention.FAVORITED
+                    if (clip.retention == V2SwingClipRetention.PROMOTED) {
+                        showDemoteConfirm = true
                     } else {
-                        V2SwingClipRetention.PROMOTED
+                        showPromoteConfirm = true
                     }
-                    V2SwingSessionStore.updateClipRetention(clip.id, next)
                 },
                 onSave = {
                     scope.launch {
@@ -272,12 +284,53 @@ fun V2SwingClipDetailScreen(
             },
         )
     }
+
+    if (showHelp) {
+        HelpDialog(onDismiss = { showHelp = false })
+    }
+
+    if (showPromoteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showPromoteConfirm = false },
+            title = { Text("存入成长池") },
+            text = { Text("将此挥杆设为成长池内容，后续会永久保留，并在相关列表中以成长池状态展示。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    V2SwingSessionStore.updateClipRetention(clip.id, V2SwingClipRetention.PROMOTED)
+                    showPromoteConfirm = false
+                    toast = "已存入成长池"
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPromoteConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+
+    if (showDemoteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDemoteConfirm = false },
+            title = { Text("移出成长池") },
+            text = { Text("移出后视频仍会保留为收藏，不会回到临时清理状态。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    V2SwingSessionStore.updateClipRetention(clip.id, V2SwingClipRetention.FAVORITED)
+                    showDemoteConfirm = false
+                    toast = "已移出成长池，保留为收藏"
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDemoteConfirm = false }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
 private fun DetailTopBar(
     showDrawingTools: Boolean,
     onBack: () -> Unit,
+    onHelp: () -> Unit,
     onToggleDrawing: () -> Unit,
 ) {
     Row(
@@ -289,6 +342,9 @@ private fun DetailTopBar(
         }
         Text("挥杆详情", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp))
         Spacer(Modifier.weight(1f))
+        IconButton(onClick = onHelp, modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))) {
+            Text("?", color = Color.White.copy(alpha = 0.82f), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
         IconButton(onClick = onToggleDrawing, modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.12f))) {
             Icon(
                 Icons.Filled.Edit,
@@ -305,10 +361,11 @@ private fun ControlsPanel(
     isPlaying: Boolean,
     currentTime: Float,
     duration: Float,
+    metadata: SwingVideoMetadata,
     playbackRate: Float,
     showDetails: Boolean,
     onTogglePlay: () -> Unit,
-    onStep: (Long) -> Unit,
+    onStepFrames: (Int) -> Unit,
     onSeek: (Float) -> Unit,
     onRate: (Float) -> Unit,
     onFavorite: () -> Unit,
@@ -317,6 +374,8 @@ private fun ControlsPanel(
     onInfo: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val totalFrames = metadata.totalFrames(duration)
+    val currentFrame = metadata.currentFrame(currentTime, duration)
     Column(
         Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -324,24 +383,31 @@ private fun ControlsPanel(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("${"%.1f".format(currentTime)}s", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
             Spacer(Modifier.weight(1f))
+            Text("帧 $currentFrame / $totalFrames", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            Spacer(Modifier.weight(1f))
             Text("${"%.1f".format(duration)}s", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
         }
         Slider(
             value = if (duration > 0) (currentTime / duration).coerceIn(0f, 1f) else 0f,
             onValueChange = onSeek,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White.copy(alpha = 0.72f),
+                inactiveTrackColor = Color.White.copy(alpha = 0.16f),
+            ),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            StepButton("-10") { onStep(-10_000) }
-            StepButton("-3") { onStep(-3_000) }
-            StepButton("-1") { onStep(-1_000) }
+            StepButton("-10") { onStepFrames(-10) }
+            StepButton("-3") { onStepFrames(-3) }
+            StepButton("-1") { onStepFrames(-1) }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onTogglePlay, modifier = Modifier.size(50.dp).clip(CircleShape).background(Color.White)) {
                 Icon(if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(30.dp))
             }
             Spacer(Modifier.weight(1f))
-            StepButton("+1") { onStep(1_000) }
-            StepButton("+3") { onStep(3_000) }
-            StepButton("+10") { onStep(10_000) }
+            StepButton("+1") { onStepFrames(1) }
+            StepButton("+3") { onStepFrames(3) }
+            StepButton("+10") { onStepFrames(10) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(0.1f, 0.25f, 0.5f, 1f).forEach { rate ->
@@ -374,7 +440,10 @@ private fun ControlsPanel(
         if (showDetails) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = 0.08f)).padding(12.dp)) {
                 DetailRow("时间", clip.timestamp.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.CHINA)))
-                DetailRow("时长", durationShort(clip.durationSec))
+                DetailRow("时长", durationShort(if (duration > 0) duration.toDouble() else clip.durationSec))
+                DetailRow("帧率", metadata.fpsLabel)
+                DetailRow("帧数", "$totalFrames 帧")
+                DetailRow("大小", metadata.fileSizeLabel)
                 DetailRow("状态", when (clip.retention) {
                     V2SwingClipRetention.TEMPORARY -> "普通（14天后自动清理）"
                     V2SwingClipRetention.FAVORITED -> "收藏（永久保留）"
@@ -382,6 +451,34 @@ private fun ControlsPanel(
                 })
             }
         }
+    }
+}
+
+@Composable
+private fun HelpDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("功能说明") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                HelpRow("播放与逐帧", "中间按钮播放/暂停，左右按钮按帧前进或后退（±1/±3/±10 帧），适合检查关键动作。")
+                HelpRow("慢放", "下方速率按钮可切换 0.1x、0.25x、0.5x 和 1x。")
+                HelpRow("绘制", "右上角画线按钮进入标注模式，可在画面上画线、编辑端点和清空标注。")
+                HelpRow("收藏与成长池", "收藏会永久保留；存入成长池后会以成长池状态展示，移出后保留为收藏。")
+                HelpRow("保存与删除", "保存会导出到系统相册；删除会移除本地视频和缩略图。")
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        },
+    )
+}
+
+@Composable
+private fun HelpRow(title: String, body: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, color = DSColors.inkGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(body, color = Color.Black.copy(alpha = 0.62f), fontSize = 13.sp)
     }
 }
 
@@ -460,6 +557,52 @@ private suspend fun saveClipToGallery(context: android.content.Context, clip: V2
         }
         true
     }.getOrDefault(false)
+}
+
+private data class SwingVideoMetadata(
+    val fps: Float = 30f,
+    val durationMs: Long = 0L,
+    val fileSizeBytes: Long = 0L,
+) {
+    val frameDurationMs: Float get() = 1000f / fps.coerceAtLeast(1f)
+
+    val fpsLabel: String get() =
+        if (fps > 0f) "${"%.0f".format(fps)} fps" else "—"
+
+    val fileSizeLabel: String get() = when {
+        fileSizeBytes <= 0L -> "—"
+        fileSizeBytes < 1024 * 1024 -> "${fileSizeBytes / 1024} KB"
+        else -> "%.1f MB".format(fileSizeBytes / (1024.0 * 1024.0))
+    }
+
+    fun totalFrames(durationSec: Float): Int {
+        val effectiveDuration = if (durationMs > 0L) durationMs / 1000f else durationSec
+        return (effectiveDuration * fps).roundToInt().coerceAtLeast(1)
+    }
+
+    fun currentFrame(currentTimeSec: Float, durationSec: Float): Int =
+        (currentTimeSec * fps).roundToInt().plus(1).coerceIn(1, totalFrames(durationSec))
+}
+
+private suspend fun loadSwingVideoMetadata(context: Context, uri: Uri): SwingVideoMetadata = withContext(Dispatchers.IO) {
+    val retriever = MediaMetadataRetriever()
+    runCatching {
+        retriever.setDataSource(context, uri)
+        val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        val fps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
+        } else {
+            null
+        }?.takeIf { it > 0f } ?: 30f
+        val fileSize = if (uri.scheme == "file") {
+            uri.path?.let(::File)?.takeIf { it.exists() }?.length() ?: 0L
+        } else {
+            0L
+        }
+        SwingVideoMetadata(fps = fps, durationMs = durationMs, fileSizeBytes = fileSize)
+    }.getOrDefault(SwingVideoMetadata()).also {
+        runCatching { retriever.release() }
+    }
 }
 
 private fun mediaUriFor(pathOrUrl: String): Uri? {

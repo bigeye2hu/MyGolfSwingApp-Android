@@ -199,7 +199,7 @@ fun V2EditProfileScreen(
                     colors = fieldColors(),
                 )
             }
-            FormItem(label = "个人简介（最多 100 字）") {
+            FormItem(label = "个人简介", trailing = "${bio.length}/100") {
                 OutlinedTextField(
                     value = bio,
                     onValueChange = { if (it.length <= 100) bio = it },
@@ -212,7 +212,7 @@ fun V2EditProfileScreen(
 
         // 高尔夫信息
         Section(title = "高尔夫信息") {
-            FormItem(label = "差点") {
+            FormItem(label = "差点 Handicap") {
                 OutlinedTextField(
                     value = handicap,
                     onValueChange = { handicap = it.filter { c -> c.isDigit() || c == '.' }.take(5) },
@@ -221,6 +221,7 @@ fun V2EditProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
+                FieldHint(text = "当前：${handicap.ifBlank { "未设置" }}")
             }
             FormItem(label = "开始学球年份") {
                 OutlinedTextField(
@@ -231,6 +232,7 @@ fun V2EditProfileScreen(
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors(),
                 )
+                FieldHint(text = golfAgeHint(golfStartYear))
             }
             FormItem(label = "惯用手") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -412,11 +414,31 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun FormItem(label: String, content: @Composable () -> Unit) {
+private fun FormItem(
+    label: String,
+    trailing: String? = null,
+    content: @Composable () -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = DSTypography.caption, color = DSColors.shadowGray)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = DSTypography.caption, color = DSColors.shadowGray)
+            if (trailing != null) {
+                Spacer(modifier = Modifier.weight(1f))
+                Text(trailing, style = DSTypography.caption, color = DSColors.shadowGray)
+            }
+        }
         content()
     }
+}
+
+@Composable
+private fun FieldHint(text: String) {
+    Text(
+        text = text,
+        style = DSTypography.caption,
+        color = DSColors.shadowGray,
+        modifier = Modifier.padding(top = 2.dp),
+    )
 }
 
 @Composable
@@ -454,4 +476,11 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 private fun extractStartYear(text: String): Int? {
     val m = Regex("(\\d{4})").find(text) ?: return null
     return m.value.toIntOrNull()
+}
+
+private fun golfAgeHint(text: String): String {
+    val year = text.toIntOrNull() ?: return "球龄：未设置"
+    val currentYear = LocalDate.now().year
+    if (year !in 1970..currentYear) return "球龄：请输入 1970-$currentYear 之间的年份"
+    return "球龄：${currentYear - year} 年"
 }

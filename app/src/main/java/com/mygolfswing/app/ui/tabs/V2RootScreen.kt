@@ -122,6 +122,21 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
     var bootstrapping by remember { mutableStateOf(true) }
     var pendingOnlinePick by remember { mutableStateOf<V2OnlineVideoSelection?>(null) }
 
+    fun completePostAuthRefresh() {
+        showQuickAdd = false
+        selectedTab = V2Tab.HOME
+        nav.resetToRoot()
+        V2ProfileStore.refresh(force = true)
+        V2PlazaStore.refresh()
+        V2MemoStore.pullFromCloud()
+        V2GoalStore.syncFromCloud()
+        ServiceLocator.appScope.launch {
+            ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
+            ServiceLocator.creditsRepo.fetchBalance(force = true)
+            runCatching { V2GolfProfileStore.refreshFromCloud() }
+        }
+    }
+
     LaunchedEffect(Unit) {
         val splashStartedAt = System.currentTimeMillis()
         V2UserScopedCache.startSessionGuard()
@@ -316,18 +331,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         )
         Destination.Login -> V2LoginScreen(
             onClose = null,
-            onLoginSuccess = {
-                nav.resetToRoot()
-                V2ProfileStore.refresh(force = true)
-                V2PlazaStore.refresh()
-                V2MemoStore.pullFromCloud()
-                V2GoalStore.syncFromCloud()
-                ServiceLocator.appScope.launch {
-                    ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
-                    ServiceLocator.creditsRepo.fetchBalance(force = true)
-                    runCatching { V2GolfProfileStore.refreshFromCloud() }
-                }
-            },
+            onLoginSuccess = { completePostAuthRefresh() },
             onOpenRegister = { nav.navigateTo(Destination.Register) },
             onOpenResetPassword = { nav.navigateTo(Destination.ResetPassword) },
             onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
@@ -335,35 +339,13 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         )
         Destination.Register -> V2RegisterScreen(
             onBack = { nav.navigateBack() },
-            onRegisterSuccess = {
-                nav.resetToRoot()
-                V2ProfileStore.refresh(force = true)
-                V2PlazaStore.refresh()
-                V2MemoStore.pullFromCloud()
-                V2GoalStore.syncFromCloud()
-                ServiceLocator.appScope.launch {
-                    ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
-                    ServiceLocator.creditsRepo.fetchBalance(force = true)
-                    runCatching { V2GolfProfileStore.refreshFromCloud() }
-                }
-            },
+            onRegisterSuccess = { completePostAuthRefresh() },
             onOpenTerms = { nav.navigateTo(Destination.Legal(V2LegalDocType.TERMS)) },
             onOpenPrivacy = { nav.navigateTo(Destination.Legal(V2LegalDocType.PRIVACY)) },
         )
         Destination.ResetPassword -> V2ResetPasswordScreen(
             onBack = { nav.navigateBack() },
-            onResetSuccess = {
-                nav.resetToRoot()
-                V2ProfileStore.refresh(force = true)
-                V2PlazaStore.refresh()
-                V2MemoStore.pullFromCloud()
-                V2GoalStore.syncFromCloud()
-                ServiceLocator.appScope.launch {
-                    ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
-                    ServiceLocator.creditsRepo.fetchBalance(force = true)
-                    runCatching { V2GolfProfileStore.refreshFromCloud() }
-                }
-            },
+            onResetSuccess = { completePostAuthRefresh() },
         )
         Destination.EditProfile -> V2EditProfileScreen(
             onBack = { nav.navigateBack() },

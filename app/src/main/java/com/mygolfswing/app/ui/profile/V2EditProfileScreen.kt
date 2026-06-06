@@ -81,8 +81,8 @@ import androidx.compose.foundation.Image as FoundationImage
 private val genderOptions = listOf("男", "女", "保密")
 private val handOptions = listOf("右手", "左手")
 private val brandOptions = listOf(
-    "Titleist", "Callaway", "TaylorMade", "Mizuno", "Honma",
-    "PXG", "Ping", "Cobra", "Bridgestone", "Srixon",
+    "TaylorMade", "Callaway", "Titleist", "Ping", "Cobra",
+    "Mizuno", "Srixon", "Cleveland", "Bridgestone", "Honma",
 )
 private val popularLocationCities = listOf(
     "北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "武汉",
@@ -284,7 +284,12 @@ fun V2EditProfileScreen(
         }
 
         // 球具品牌
-        Section(title = "球具品牌（可多选）") {
+        Section(title = "使用的球具品牌") {
+            Text(
+                text = "选择您常用的品牌（可多选）",
+                style = DSTypography.caption,
+                color = DSColors.shadowGray,
+            )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),

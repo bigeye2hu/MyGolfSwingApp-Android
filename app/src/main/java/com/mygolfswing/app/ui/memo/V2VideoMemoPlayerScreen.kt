@@ -398,6 +398,7 @@ private fun VideoMemoComparisonScreen(
     var primaryDuration by remember { mutableFloatStateOf(0f) }
     var secondaryDuration by remember { mutableFloatStateOf(0f) }
     var syncSeek by remember { mutableStateOf(false) }
+    var comparisonEnded by remember { mutableStateOf(false) }
 
     val primaryPlayer = remember(primaryUrl) {
         ExoPlayer.Builder(context).build().apply {
@@ -415,6 +416,7 @@ private fun VideoMemoComparisonScreen(
         primaryPlayer.pause()
         secondaryPlayer.pause()
         isPlaying = false
+        comparisonEnded = true
     }
 
     DisposableEffect(primaryPlayer, secondaryPlayer) {
@@ -440,6 +442,7 @@ private fun VideoMemoComparisonScreen(
     }
     LaunchedEffect(isPlaying, primaryPlayer, secondaryPlayer) {
         if (isPlaying) {
+            comparisonEnded = false
             primaryPlayer.play()
             secondaryPlayer.play()
         } else {
@@ -540,7 +543,15 @@ private fun VideoMemoComparisonScreen(
                         .size(58.dp)
                         .clip(CircleShape)
                         .background(DSColors.fairway)
-                        .clickable { isPlaying = !isPlaying },
+                        .clickable {
+                            if (comparisonEnded) {
+                                primaryPlayer.seekTo(0)
+                                secondaryPlayer.seekTo(0)
+                                primaryTime = 0f
+                                secondaryTime = 0f
+                            }
+                            isPlaying = !isPlaying
+                        },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(

@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.profile
 
+import android.app.DatePickerDialog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -33,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -95,6 +97,7 @@ fun V2EditProfileScreen(
     var nickname by remember(profile.nickname) { mutableStateOf(profile.nickname.takeIf { it != "未登录" } ?: "") }
     var gender by remember(profile.gender) { mutableStateOf(profile.gender) }
     var birthday by remember(profile.birthday) { mutableStateOf(profile.birthday ?: "") }
+    var hasBirthday by remember(profile.birthday) { mutableStateOf(!profile.birthday.isNullOrBlank()) }
     var location by remember(profile.location) { mutableStateOf(profile.location ?: "") }
     var bio by remember(profile.bio) { mutableStateOf(profile.bio ?: "") }
     var handicap by remember(profile.handicap) {
@@ -180,14 +183,42 @@ fun V2EditProfileScreen(
                 }
             }
             FormItem(label = "生日") {
-                OutlinedTextField(
-                    value = birthday,
-                    onValueChange = { birthday = it },
-                    placeholder = { Text("YYYY-MM-DD") },
-                    singleLine = true,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = if (hasBirthday) "已设置" else "不显示生日",
+                        style = DSTypography.body,
+                        color = if (hasBirthday) DSColors.inkGreen else DSColors.shadowGray,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = hasBirthday,
+                        onCheckedChange = { checked ->
+                            hasBirthday = checked
+                            if (checked && birthday.isBlank()) birthday = LocalDate.now().toString()
+                        },
+                    )
+                }
+                if (hasBirthday) {
+                    BirthdayPickerField(
+                        birthday = birthday,
+                        onPick = {
+                            val initial = parseBirthdayDate(birthday) ?: LocalDate.now()
+                            DatePickerDialog(
+                                context,
+                                { _, year, month, day ->
+                                    birthday = LocalDate.of(year, month + 1, day).toString()
+                                },
+                                initial.year,
+                                initial.monthValue - 1,
+                                initial.dayOfMonth,
+                            ).show()
+                        },
+                    )
+                }
             }
             FormItem(label = "地区") {
                 OutlinedTextField(
@@ -283,7 +314,7 @@ fun V2EditProfileScreen(
                     val r = ServiceLocator.authRepo.updateUserInfo(
                         nickname = nickname.trim(),
                         gender = gender,
-                        birthday = birthday.ifBlank { null },
+                        birthday = if (hasBirthday) birthday.ifBlank { null } else null,
                         location = location.ifBlank { null },
                         bio = bio.ifBlank { null },
                         handicap = handicap.ifBlank { null },
@@ -442,6 +473,30 @@ private fun FieldHint(text: String) {
 }
 
 @Composable
+private fun BirthdayPickerField(
+    birthday: String,
+    onPick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(DSColors.warmWhite, RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, DSColors.borderLine), RoundedCornerShape(12.dp))
+            .clickable(onClick = onPick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = birthday.ifBlank { "选择生日" },
+            style = DSTypography.body,
+            color = if (birthday.isBlank()) DSColors.shadowGray else DSColors.inkGreen,
+            modifier = Modifier.weight(1f),
+        )
+        Text("选择", style = DSTypography.caption, color = DSColors.fairway)
+    }
+}
+
+@Composable
 private fun PillChoice(text: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
@@ -484,3 +539,6 @@ private fun golfAgeHint(text: String): String {
     if (year !in 1970..currentYear) return "球龄：请输入 1970-$currentYear 之间的年份"
     return "球龄：${currentYear - year} 年"
 }
+
+private fun parseBirthdayDate(text: String): LocalDate? =
+    runCatching { LocalDate.parse(text.take(10)) }.getOrNull()

@@ -331,11 +331,12 @@ private fun validate(
     password: String,
     confirmPassword: String,
 ): String? {
-    if (avatarKey == null) return "请选择头像"
-    if (!username.matches(Regex("^[a-zA-Z][a-zA-Z0-9_]{2,19}$"))) return "用户名需字母开头，3–20 字符"
-    if (nickname.isBlank()) return "请填写昵称"
+    if (avatarKey == null) return "请选择一个头像"
+    if (username.isBlank()) return "请输入用户名"
+    if (!username.matches(Regex("^[a-zA-Z][a-zA-Z0-9_]{2,19}$"))) return "用户名需以字母开头，3-20位字母、数字或下划线"
+    if (nickname.isBlank()) return "请输入昵称"
     if (password.length < 8) return "密码至少 8 位"
     if (!password.any { it.isLetter() } || !password.any { it.isDigit() }) return "密码需同时包含字母和数字"
-    if (password != confirmPassword) return "两次密码不一致"
+    if (password != confirmPassword) return "两次输入的密码不一致"
     return null
 }

@@ -470,8 +470,10 @@ fun V2MemoCreateVideoScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showDiscardConfirm = false
-                    deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
-                    deleteFileCountingFreedBytes(pendingCameraFile)
+                    if (!isEditing) {
+                        deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
+                        deleteFileCountingFreedBytes(pendingCameraFile)
+                    }
                     onClose()
                 }) { Text("放弃", color = Color(0xFFC0392B)) }
             },

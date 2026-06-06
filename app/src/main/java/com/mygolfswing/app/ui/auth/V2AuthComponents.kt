@@ -291,9 +291,7 @@ internal fun AuthAgreementRow(
         }
         Spacer(Modifier.width(10.dp))
         Text(
-            modifier = Modifier
-                .weight(1f)
-                .clickable { onAgreedChange(!agreed) },
+            modifier = Modifier.weight(1f),
             style = DSTypography.caption.copy(color = AuthPalette.labelText),
             text = buildAnnotatedString {
                 append("我已阅读并同意 ")

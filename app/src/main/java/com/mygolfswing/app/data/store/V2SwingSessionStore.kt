@@ -90,6 +90,7 @@ object V2SwingSessionStore {
 
     private fun buildDayItems(sessions: List<V2SwingSession>, limit: Int): List<V2SwingDayItem> {
         val today = LocalDate.now()
+        val sessionsByDay = sessions.groupBy { it.date }
         val byDay = sessions.flatMap { s -> s.clips.map { c -> s.date to c } }
             .groupBy({ it.first }, { it.second })
             .toSortedMap(compareByDescending { it })
@@ -97,6 +98,8 @@ object V2SwingSessionStore {
         val monthFmt = DateTimeFormatter.ofPattern("M月", zh)
         return byDay.entries.take(limit).map { (day, clips) ->
             val sorted = clips.sortedBy { it.timestamp }
+            val daySessions = sessionsByDay[day].orEmpty()
+            val locations = daySessions.mapNotNull { it.locationName?.takeIf(String::isNotBlank) }.distinct()
             val mins = (sorted.sumOf { it.durationSec } / 60).toInt().coerceAtLeast(1)
             val rel = when (ChronoUnit.DAYS.between(day, today)) {
                 0L -> "今天"
@@ -116,8 +119,11 @@ object V2SwingSessionStore {
                 monthLabel = monthFmt.format(day),
                 relativeText = rel,
                 title = "${clips.size} 个挥杆 · $mins 分钟",
-                location = sessions.firstOrNull { it.date == day }?.locationName,
+                location = locations.firstOrNull(),
+                extraLocationCount = (locations.size - 1).coerceAtLeast(0),
                 timeRange = timeRange,
+                isInProgress = false,
+                sessionCount = daySessions.size.coerceAtLeast(1),
                 clipCount = clips.size,
                 clipPreviewUrls = sorted.take(3).mapNotNull { it.thumbnailPath ?: it.videoPath },
                 extraClipCount = (clips.size - 3).coerceAtLeast(0),

@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -41,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -361,19 +363,47 @@ private fun V2UserProfile.dominantHandDisplay(): String =
 
 @Composable
 private fun AIArchiveCard(onTap: () -> Unit) {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onTap)
-            .background(DSColors.cardWhite, RoundedCornerShape(20.dp))
-            .padding(DSSpacing.lg),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .background(
+                Brush.linearGradient(
+                    listOf(DSColors.fairway, Color(0xFF40916C), DSColors.leafGreen),
+                ),
+                RoundedCornerShape(20.dp),
+            )
+            .padding(horizontal = 20.dp, vertical = 20.dp),
     ) {
-        Text("AI 训练档案", style = DSTypography.titleMedium, color = DSColors.inkGreen)
-        Text(
-            text = "AI 教练会根据你过去 30 天的练习自动总结你的强项 / 短板。点击查看 →",
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(DSSpacing.md),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("AI 训练档案", style = DSTypography.titleMedium, color = DSColors.warmWhite)
+                Text(
+                    text = "AI 已了解你的练习习惯与短板",
+                    style = DSTypography.caption,
+                    color = DSColors.warmWhite.copy(alpha = 0.82f),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(DSColors.warmWhite.copy(alpha = 0.15f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = DSColors.warmWhite,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
     }
 }

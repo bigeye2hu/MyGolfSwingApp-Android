@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -224,6 +225,7 @@ internal fun AuthPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    visualAlpha: Float = 1f,
 ) {
     Button(
         onClick = onClick,
@@ -235,7 +237,7 @@ internal fun AuthPrimaryButton(
             disabledContainerColor = DSColors.fairway.copy(alpha = 0.55f),
             disabledContentColor = DSColors.warmWhite,
         ),
-        modifier = modifier.fillMaxWidth().height(56.dp),
+        modifier = modifier.fillMaxWidth().height(56.dp).alpha(visualAlpha),
     ) {
         if (loading) {
             CircularProgressIndicator(

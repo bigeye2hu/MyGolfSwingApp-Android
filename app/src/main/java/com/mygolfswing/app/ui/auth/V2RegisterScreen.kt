@@ -187,6 +187,7 @@ fun V2RegisterScreen(
             AuthPrimaryButton(
                 text = "创建账户",
                 loading = loading,
+                visualAlpha = if (agreed) 1f else 0.55f,
                 onClick = {
                     val v = validate(avatarKey, username, nickname, password, confirmPassword)
                     if (v != null) {

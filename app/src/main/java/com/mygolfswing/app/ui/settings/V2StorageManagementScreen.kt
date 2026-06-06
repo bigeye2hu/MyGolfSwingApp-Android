@@ -82,6 +82,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                 loading = loading,
                 onRefresh = { refresh() },
             )
+            Text("存储详情", style = DSTypography.bodyBold, color = DSColors.inkGreen)
             StorageRow(label = "视频 Memo（本地）", size = formatBytes(videoBytes), hint = "含视频文件与缩略图")
             StorageRow(label = "应用缓存", size = formatBytes(cacheBytes), hint = "临时文件、图片缓存等")
 

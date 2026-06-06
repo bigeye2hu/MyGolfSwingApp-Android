@@ -9,6 +9,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +66,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
@@ -96,7 +99,8 @@ fun V2VideoMemoPlayerScreen(
     var showToolsPanel by remember { mutableStateOf(false) }
     var showMoreTools by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var showComparisonNotice by remember { mutableStateOf(false) }
+    var showComparisonPicker by remember { mutableStateOf(false) }
+    var comparisonMemo by remember { mutableStateOf<V2Memo?>(null) }
     var playbackError by remember { mutableStateOf(false) }
     var currentTime by remember { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(0f) }
@@ -106,6 +110,20 @@ fun V2VideoMemoPlayerScreen(
 
     if (memo == null) {
         V2MissingEntityScreen(message = "视频不存在", onBack = onBack, title = "视频 Memo")
+        return
+    }
+
+    val comparisonCandidates = remember(memos, memo.id) {
+        memos
+            .filter { it.id != memo.id && it.hasVideo && resolvePlaybackUrl(it.videoUrl) != null }
+            .sortedByDescending { it.createdAt }
+    }
+    comparisonMemo?.let { selected ->
+        VideoMemoComparisonScreen(
+            primaryMemo = memo,
+            secondaryMemo = selected,
+            onClose = { comparisonMemo = null },
+        )
         return
     }
 
@@ -267,7 +285,7 @@ fun V2VideoMemoPlayerScreen(
                     player.pause()
                     isPlaying = false
                     showMoreTools = false
-                    showComparisonNotice = true
+                    showComparisonPicker = true
                 },
                 onDelete = { showDeleteConfirm = true },
             )
@@ -337,14 +355,210 @@ fun V2VideoMemoPlayerScreen(
         )
     }
 
-    if (showComparisonNotice) {
-        VideoComparisonNoticeDialog(onDismiss = { showComparisonNotice = false })
+    if (showComparisonPicker) {
+        VideoComparisonPickerDialog(
+            candidates = comparisonCandidates,
+            onDismiss = { showComparisonPicker = false },
+            onSelect = { selected ->
+                showComparisonPicker = false
+                comparisonMemo = selected
+            },
+        )
     }
 }
 
 private enum class V2PlaybackState {
     UnavailableNoSource,
     UnavailablePlaybackError,
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun VideoMemoComparisonScreen(
+    primaryMemo: V2Memo,
+    secondaryMemo: V2Memo,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    val primaryUrl = remember(primaryMemo.videoUrl) { resolvePlaybackUrl(primaryMemo.videoUrl) }
+    val secondaryUrl = remember(secondaryMemo.videoUrl) { resolvePlaybackUrl(secondaryMemo.videoUrl) }
+
+    if (primaryUrl == null || secondaryUrl == null) {
+        VideoPlaybackUnavailableOverlay(
+            state = V2PlaybackState.UnavailableNoSource,
+            onBack = onClose,
+            onRetry = null,
+        )
+        return
+    }
+
+    var isPlaying by remember { mutableStateOf(false) }
+    var primaryTime by remember { mutableFloatStateOf(0f) }
+    var secondaryTime by remember { mutableFloatStateOf(0f) }
+    var primaryDuration by remember { mutableFloatStateOf(0f) }
+    var secondaryDuration by remember { mutableFloatStateOf(0f) }
+
+    val primaryPlayer = remember(primaryUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(primaryUrl))
+            prepare()
+        }
+    }
+    val secondaryPlayer = remember(secondaryUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(secondaryUrl))
+            prepare()
+        }
+    }
+
+    DisposableEffect(primaryPlayer, secondaryPlayer) {
+        onDispose {
+            primaryPlayer.release()
+            secondaryPlayer.release()
+        }
+    }
+    LaunchedEffect(isPlaying, primaryPlayer, secondaryPlayer) {
+        if (isPlaying) {
+            primaryPlayer.play()
+            secondaryPlayer.play()
+        } else {
+            primaryPlayer.pause()
+            secondaryPlayer.pause()
+        }
+    }
+    LaunchedEffect(primaryPlayer, secondaryPlayer) {
+        while (true) {
+            primaryTime = (primaryPlayer.currentPosition / 1000f).coerceAtLeast(0f)
+            secondaryTime = (secondaryPlayer.currentPosition / 1000f).coerceAtLeast(0f)
+            primaryPlayer.duration.takeIf { it > 0 }?.let { primaryDuration = it / 1000f }
+            secondaryPlayer.duration.takeIf { it > 0 }?.let { secondaryDuration = it / 1000f }
+            delay(120)
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .v2StatusBarPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircleIconButton(icon = Icons.Filled.Close, contentDescription = "关闭对比", onClick = onClose)
+                Spacer(Modifier.weight(1f))
+                Text("视频对比", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Box(Modifier.size(44.dp))
+            }
+
+            ComparisonVideoPane(
+                player = primaryPlayer,
+                title = primaryMemo.displayTitle ?: primaryMemo.title ?: "当前视频",
+                label = "当前",
+                time = primaryTime,
+                duration = primaryDuration,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.12f)),
+            )
+            ComparisonVideoPane(
+                player = secondaryPlayer,
+                title = secondaryMemo.displayTitle ?: secondaryMemo.title ?: "对比视频",
+                label = "对比",
+                time = secondaryTime,
+                duration = secondaryDuration,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.92f))
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${formatTime(primaryTime)} / ${formatTime(primaryDuration)}",
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .size(58.dp)
+                        .clip(CircleShape)
+                        .background(DSColors.fairway)
+                        .clickable { isPlaying = !isPlaying },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (isPlaying) "暂停" else "播放",
+                        tint = Color.White,
+                        modifier = Modifier.size(34.dp),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${formatTime(secondaryTime)} / ${formatTime(secondaryDuration)}",
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComparisonVideoPane(
+    player: ExoPlayer,
+    title: String,
+    label: String,
+    time: Float,
+    duration: Float,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.background(Color.Black)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = false
+                }
+            },
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.58f), Color.Transparent),
+                    ),
+                )
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = DSColors.goldBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(10.dp))
+            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Spacer(Modifier.weight(1f))
+            Text("${formatTime(time)} / ${formatTime(duration)}", color = Color.White.copy(alpha = 0.72f), fontSize = 11.sp)
+        }
+    }
 }
 
 @Composable
@@ -459,17 +673,81 @@ private fun VideoMemoDeleteConfirmDialog(
 }
 
 @Composable
-private fun VideoComparisonNoticeDialog(onDismiss: () -> Unit) {
+private fun VideoComparisonPickerDialog(
+    candidates: List<V2Memo>,
+    onDismiss: () -> Unit,
+    onSelect: (V2Memo) -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("视频对比") },
-        text = { Text("iOS 的双视频对比入口已经在这里对齐。Android 版对比选择器和双播放器会在后续小目标中接入。") },
+        text = {
+            if (candidates.isEmpty()) {
+                Text("还没有另一条可播放的视频 Memo。先保存至少两条本机视频后，就可以进行上下分屏对比。")
+            } else {
+                LazyColumn(
+                    modifier = Modifier.height(320.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(candidates, key = { it.id }) { memo ->
+                        VideoComparisonCandidateRow(memo = memo, onClick = { onSelect(memo) })
+                    }
+                }
+            }
+        },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("知道了", color = DSColors.fairway)
+                Text(if (candidates.isEmpty()) "知道了" else "取消", color = DSColors.fairway)
             }
         },
     )
+}
+
+@Composable
+private fun VideoComparisonCandidateRow(memo: V2Memo, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(DSColors.mistGreen)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(DSColors.fairway.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.PlayArrow, null, tint = DSColors.fairway, modifier = Modifier.size(24.dp))
+        }
+        Column(
+            modifier = Modifier
+                .padding(start = 10.dp)
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                memo.displayTitle ?: memo.title ?: "无标题视频",
+                color = DSColors.inkGreen,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            Text(
+                listOfNotNull(
+                    memo.trainingMethod?.takeIf { it.isNotBlank() },
+                    memo.metaText?.takeIf { it.isNotBlank() },
+                    memo.durationSec?.let { formatTime(it.toFloat()) },
+                ).joinToString(" · ").ifBlank { "视频 Memo" },
+                color = DSColors.shadowGray,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+        }
+    }
 }
 
 @Composable

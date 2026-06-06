@@ -477,6 +477,7 @@ private fun TabsScaffold(
                     onSwitchToMemo = { onSelectTab(V2Tab.MEMO) },
                     onOpenMemo = onOpenMemoDetail,
                     onOpenPlazaVideo = onOpenPlazaVideo,
+                    onOpenSwingCalendar = onOpenSwingCalendar,
                     onAddTap = onShowQuickAdd,
                 )
                 V2Tab.MEMO -> V2MemoListScreen(

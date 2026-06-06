@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Upgrade
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,10 +27,12 @@ import com.mygolfswing.app.data.model.V2Goal
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
+import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.headerDisplayName
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -53,11 +56,13 @@ fun V2HomeScreen(
     onSwitchToMemo: () -> Unit = {},
     onOpenPlazaVideo: (UUID) -> Unit = {},
     onOpenMemo: (UUID) -> Unit = {},
+    onOpenSwingCalendar: () -> Unit = onSwitchToMemo,
     onAddTap: () -> Unit = {},
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
     val goals by V2GoalStore.goals.collectAsState()
     val memos by V2MemoStore.allMemos.collectAsState()
+    val swingSessions by V2SwingSessionStore.sessions.collectAsState()
     val plazaVideos by V2PlazaStore.videos.collectAsState()
     val plazaLoading by V2PlazaStore.isLoading.collectAsState()
     val plazaRecommends = remember(plazaVideos) {
@@ -81,6 +86,12 @@ fun V2HomeScreen(
     val isEmpty = activeCount == 0
     val headerName = profile.headerDisplayName()
     val recentMemos = remember(memos) { memos.sortedByDescending { it.createdAt }.take(6) }
+    val promotedSwingClips = remember(swingSessions) {
+        swingSessions
+            .flatMap { it.clips }
+            .filter { it.retention == V2SwingClipRetention.PROMOTED }
+            .sortedByDescending { it.timestamp }
+    }
 
     Box(
         modifier = Modifier
@@ -115,6 +126,15 @@ fun V2HomeScreen(
                 )
             }
 
+            if (promotedSwingClips.isNotEmpty()) {
+                V2HomeGrowthPoolSummary(
+                    promotedCount = promotedSwingClips.size,
+                    latestTitle = V2HomeGrowthPoolTitle(promotedSwingClips.first().durationSec),
+                    onTap = onOpenSwingCalendar,
+                    modifier = Modifier.padding(horizontal = DSSpacing.lg),
+                )
+            }
+
             V2HomeMemoSection(
                 memos = recentMemos,
                 onSeeAll = onSwitchToMemo,
@@ -131,6 +151,50 @@ fun V2HomeScreen(
             V2HomeDecorativeFooter(modifier = Modifier.padding(horizontal = DSSpacing.lg))
         }
     }
+}
+
+@Composable
+private fun V2HomeGrowthPoolSummary(
+    promotedCount: Int,
+    latestTitle: String,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(DSColors.deepGreen, shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+            .clickable(onClick = onTap)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .background(DSColors.goldBright.copy(alpha = 0.16f), shape = androidx.compose.foundation.shape.CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Upgrade, null, tint = DSColors.goldBright, modifier = Modifier.size(24.dp))
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text("成长池", style = DSTypography.titleMedium, color = DSColors.cardWhite)
+            Text(
+                "$promotedCount 条挥杆已永久保留 · 最新 $latestTitle",
+                style = DSTypography.caption,
+                color = DSColors.cardWhite.copy(alpha = 0.72f),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("查看", style = DSTypography.caption, color = DSColors.cardWhite.copy(alpha = 0.82f))
+            Icon(Icons.Filled.ChevronRight, null, tint = DSColors.cardWhite.copy(alpha = 0.82f), modifier = Modifier.size(15.dp))
+        }
+    }
+}
+
+private fun V2HomeGrowthPoolTitle(durationSec: Double): String {
+    val seconds = durationSec.toInt().coerceAtLeast(0)
+    return if (seconds > 0) "${seconds}s" else "挥杆视频"
 }
 
 @Composable
@@ -219,4 +283,3 @@ private fun ManageAllGoalsFooter(remaining: Int, onTap: () -> Unit) {
         }
     }
 }
-

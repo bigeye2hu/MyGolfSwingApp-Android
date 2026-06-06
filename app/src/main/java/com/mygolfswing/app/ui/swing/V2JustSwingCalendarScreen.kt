@@ -84,12 +84,16 @@ fun V2JustSwingCalendarScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var selectedClipIds by remember { mutableStateOf(setOf<UUID>()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var selectedFilter by remember { mutableStateOf<V2SwingClipRetention?>(null) }
 
     val clipDays = remember(sessions) {
         sessions.flatMap { session -> session.clips.map { session.date } }.toSet()
     }
-    val clips = remember(sessions, selectedDate) {
+    val dayClips = remember(sessions, selectedDate) {
         V2SwingSessionStore.clipsForDay(selectedDate).sortedByDescending { it.timestamp }
+    }
+    val clips = remember(dayClips, selectedFilter) {
+        selectedFilter?.let { filter -> dayClips.filter { it.retention == filter } } ?: dayClips
     }
 
     Column(Modifier.fillMaxSize().background(DSColors.warmWhite)) {
@@ -107,7 +111,7 @@ fun V2JustSwingCalendarScreen(
 
         DateHeader(
             day = selectedDate,
-            clipCount = clips.size,
+            clipCount = dayClips.size,
             expanded = expandedCalendar,
             onToggleCalendar = { expandedCalendar = !expandedCalendar },
         )
@@ -135,11 +139,21 @@ fun V2JustSwingCalendarScreen(
             )
         }
 
+        RetentionFilterBar(
+            selectedFilter = selectedFilter,
+            clips = dayClips,
+            onFilterChange = {
+                selectedFilter = it
+                selectionMode = false
+                selectedClipIds = emptySet()
+            },
+        )
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = DSSpacing.lg, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("当天视频", fontWeight = FontWeight.Bold, color = DSColors.inkGreen, fontSize = 16.sp)
+            Text(filterTitle(selectedFilter), fontWeight = FontWeight.Bold, color = DSColors.inkGreen, fontSize = 16.sp)
             Spacer(Modifier.weight(1f))
             if (clips.isNotEmpty()) {
                 TextButton(
@@ -245,6 +259,80 @@ private fun DateHeader(day: LocalDate, clipCount: Int, expanded: Boolean, onTogg
             Icon(Icons.Filled.CalendarMonth, null, tint = if (expanded) DSColors.fairway else DSColors.shadowGray, modifier = Modifier.size(18.dp))
         }
     }
+}
+
+@Composable
+private fun RetentionFilterBar(
+    selectedFilter: V2SwingClipRetention?,
+    clips: List<V2SwingClip>,
+    onFilterChange: (V2SwingClipRetention?) -> Unit,
+) {
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = DSSpacing.lg, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            RetentionFilterChip(
+                label = "全部",
+                count = clips.size,
+                selected = selectedFilter == null,
+                onClick = { onFilterChange(null) },
+            )
+        }
+        item {
+            RetentionFilterChip(
+                label = "收藏",
+                count = clips.count { it.retention == V2SwingClipRetention.FAVORITED },
+                selected = selectedFilter == V2SwingClipRetention.FAVORITED,
+                onClick = { onFilterChange(V2SwingClipRetention.FAVORITED) },
+            )
+        }
+        item {
+            RetentionFilterChip(
+                label = "成长池",
+                count = clips.count { it.retention == V2SwingClipRetention.PROMOTED },
+                selected = selectedFilter == V2SwingClipRetention.PROMOTED,
+                onClick = { onFilterChange(V2SwingClipRetention.PROMOTED) },
+            )
+        }
+        item {
+            RetentionFilterChip(
+                label = "普通",
+                count = clips.count { it.retention == V2SwingClipRetention.TEMPORARY },
+                selected = selectedFilter == V2SwingClipRetention.TEMPORARY,
+                onClick = { onFilterChange(V2SwingClipRetention.TEMPORARY) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RetentionFilterChip(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) DSColors.fairway.copy(alpha = 0.14f) else DSColors.cardWhite)
+            .border(1.dp, if (selected) DSColors.fairway.copy(alpha = 0.36f) else DSColors.listCardBorder, RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(label, color = if (selected) DSColors.fairway else DSColors.inkGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text("$count", color = DSColors.shadowGray, fontSize = 11.sp)
+    }
+}
+
+private fun filterTitle(filter: V2SwingClipRetention?): String = when (filter) {
+    V2SwingClipRetention.FAVORITED -> "收藏视频"
+    V2SwingClipRetention.PROMOTED -> "成长池视频"
+    V2SwingClipRetention.TEMPORARY -> "普通视频"
+    null -> "当天视频"
 }
 
 @Composable

@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Snackbar
@@ -71,6 +72,7 @@ fun V2ProfileScreen(
     onOpenStorage: () -> Unit = {},
     onOpenAIConfig: () -> Unit = {},
     onOpenAIArchive: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onOpenFeedback: () -> Unit = {},
     onOpenTerms: () -> Unit = {},
     onOpenPrivacy: () -> Unit = {},
@@ -121,7 +123,7 @@ fun V2ProfileScreen(
                 .padding(vertical = DSSpacing.sm),
             verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
         ) {
-            Header()
+            Header(onOpenSettings = onOpenSettings)
             if (!profile.isLoggedIn) {
                 LoginPromptBanner(onClick = onRequestLogin)
             }
@@ -216,15 +218,35 @@ private val demoMemoTitles = setOf(
 )
 
 @Composable
-private fun Header() {
-    Column(
+private fun Header(onOpenSettings: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = DSSpacing.sm),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = "我的", style = DSTypography.titleLarge, color = DSColors.inkGreen)
-        Text(text = "My 高尔夫之路", style = DSTypography.caption, color = DSColors.shadowGray)
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(text = "我的", style = DSTypography.titleLarge, color = DSColors.inkGreen)
+            Text(text = "My 高尔夫之路", style = DSTypography.caption, color = DSColors.shadowGray)
+        }
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .shadow(elevation = 4.dp, shape = CircleShape)
+                .background(DSColors.cardWhite, CircleShape)
+                .clickable(onClick = onOpenSettings),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "设置",
+                tint = DSColors.fairway,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

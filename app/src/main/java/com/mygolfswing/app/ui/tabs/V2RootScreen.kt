@@ -64,6 +64,7 @@ import com.mygolfswing.app.ui.profile.V2AIArchiveScreen
 import com.mygolfswing.app.ui.profile.V2EditProfileScreen
 import com.mygolfswing.app.ui.profile.V2ProfileCloudConsistencyAuditScreen
 import com.mygolfswing.app.ui.profile.V2ProfileScreen
+import com.mygolfswing.app.ui.profile.V2ProfileSettingsScreen
 import com.mygolfswing.app.ui.swing.V2JustSwingCalendarScreen
 import com.mygolfswing.app.ui.swing.V2SwingClipDetailScreen
 import com.mygolfswing.app.ui.swing.V2SwingDayDetailScreen
@@ -95,6 +96,7 @@ private sealed class Destination {
     data object JustSwingMain : Destination()
     data object OnlineVideoPicker : Destination()
     data object AIArchive : Destination()
+    data object ProfileSettings : Destination()
     data object Login : Destination()
     data object Register : Destination()
     data object ResetPassword : Destination()
@@ -190,6 +192,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenGrowthPool = { nav.navigateTo(Destination.SwingCalendar(initialFilter = V2SwingClipRetention.PROMOTED)) },
             onOpenJustSwing = { nav.navigateTo(Destination.JustSwingMain) },
             onOpenAIArchive = { nav.navigateTo(Destination.AIArchive) },
+            onOpenProfileSettings = { nav.navigateTo(Destination.ProfileSettings) },
             onOpenAIConfig = { nav.navigateTo(Destination.AIConfig) },
             onSwitchToAI = { selectedTab = V2Tab.AI },
             onOpenMemoDetail = { memo ->
@@ -293,6 +296,10 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         )
         Destination.AIArchive -> V2AIArchiveScreen(
             onBack = { nav.navigateBack() },
+        )
+        Destination.ProfileSettings -> V2ProfileSettingsScreen(
+            onBack = { nav.navigateBack() },
+            onRequestLogin = { nav.navigateTo(Destination.Login) },
         )
         Destination.AllMemos -> V2MemoAllListScreen(
             onBack = { nav.navigateBack() },
@@ -441,6 +448,7 @@ private fun TabsScaffold(
     onOpenGrowthPool: () -> Unit,
     onOpenJustSwing: () -> Unit,
     onOpenAIArchive: () -> Unit,
+    onOpenProfileSettings: () -> Unit,
     onOpenAIConfig: () -> Unit,
     onSwitchToAI: () -> Unit,
     onOpenMemoDetail: (UUID) -> Unit,
@@ -511,6 +519,7 @@ private fun TabsScaffold(
                     onOpenStorage = onOpenStorage,
                     onOpenAIConfig = onOpenAIConfig,
                     onOpenAIArchive = onOpenAIArchive,
+                    onOpenSettings = onOpenProfileSettings,
                     onOpenFeedback = onOpenFeedback,
                     onOpenTerms = onOpenTerms,
                     onOpenPrivacy = onOpenPrivacy,

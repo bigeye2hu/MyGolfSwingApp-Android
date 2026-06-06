@@ -38,7 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -61,9 +60,8 @@ fun V2AccountDeletionScreen(
     onBack: () -> Unit,
     onDeletionComplete: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repo = remember { V2AccountDeletionRepository(context.applicationContext) }
+    val repo = remember { V2AccountDeletionRepository() }
 
     var isDeleting by remember { mutableStateOf(false) }
     var completed by remember { mutableStateOf(false) }
@@ -172,16 +170,18 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
         ) {
             Text("删除后，以下数据将被永久清除：", color = Muted, fontSize = 15.sp)
             DeletionItem("账号信息及登录凭证")
+            DeletionItem("好友关系及聊天记录")
             DeletionItem("AI 对话记录")
-            DeletionItem("训练目标与视频备忘录")
+            DeletionItem("训练心得卡片")
+            DeletionItem("视频备忘录记录")
             DeletionItem("挥杆记录及视频文件")
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.padding(top = 8.dp),
             ) {
-                Icon(Icons.Filled.PushPin, contentDescription = null, tint = Danger, modifier = Modifier.size(12.dp))
-                Text("App 私有本地视频缓存也会清理；已导出到系统相册或外部位置的文件不受影响", color = Muted, fontSize = 14.sp)
+                Icon(Icons.Filled.PushPin, contentDescription = null, tint = Success, modifier = Modifier.size(12.dp))
+                Text("已下载的本地视频将保留在设备上", color = Success, fontSize = 14.sp)
             }
         }
 

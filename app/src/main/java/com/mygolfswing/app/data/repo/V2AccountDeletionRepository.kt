@@ -1,10 +1,7 @@
 package com.mygolfswing.app.data.repo
 
-import android.content.Context
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.store.V2UserScopedCache
-import com.mygolfswing.app.data.store.V2ProfileStore
-import com.mygolfswing.app.data.video.V2VideoFileStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -29,11 +26,9 @@ enum class V2AccountDeletionStep(val label: String) {
 /**
  * 账号删除（对齐 iOS `AccountDeletionService`）。
  *
- * 云端走 `accountManagement` 云函数；本地清 Room + 用户文件目录。
+ * 云端走 `accountManagement` 云函数；本地清 Room 记录，已下载到设备的视频文件保留。
  */
-class V2AccountDeletionRepository(
-    private val context: Context,
-) {
+class V2AccountDeletionRepository {
     suspend fun deleteAccount(
         onStep: (V2AccountDeletionStep) -> Unit = {},
     ): Result<Unit> = withContext(Dispatchers.IO) {
@@ -54,7 +49,6 @@ class V2AccountDeletionRepository(
 
             onStep(V2AccountDeletionStep.LOCAL_SWINGS)
             ServiceLocator.db.swingSessions().clear(uid)
-            V2VideoFileStore.deleteUserDirectory(context, uid)
 
             onStep(V2AccountDeletionStep.DELETE_ACCOUNT)
             callAccountManagement("deleteAccount", uid)

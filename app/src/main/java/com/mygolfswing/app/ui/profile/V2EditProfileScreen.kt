@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,6 +84,17 @@ private val brandOptions = listOf(
     "Titleist", "Callaway", "TaylorMade", "Mizuno", "Honma",
     "PXG", "Ping", "Cobra", "Bridgestone", "Srixon",
 )
+private val popularLocationCities = listOf(
+    "北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "武汉",
+    "西安", "南京", "苏州", "天津", "青岛", "厦门", "三亚", "海口",
+)
+private val locationProvinces = listOf(
+    "北京", "上海", "天津", "重庆",
+    "广东", "浙江", "江苏", "山东", "四川", "湖北", "湖南", "河南",
+    "福建", "安徽", "河北", "陕西", "辽宁", "江西", "云南", "广西",
+    "山西", "贵州", "黑龙江", "吉林", "甘肃", "内蒙古", "新疆", "海南",
+    "宁夏", "青海", "西藏", "香港", "澳门", "台湾",
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -115,6 +127,7 @@ fun V2EditProfileScreen(
     var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var uploadingAvatar by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var showLocationPicker by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     // 系统相册选图
@@ -221,13 +234,9 @@ fun V2EditProfileScreen(
                 }
             }
             FormItem(label = "地区") {
-                OutlinedTextField(
-                    value = location,
-                    onValueChange = { location = it },
-                    placeholder = { Text("例：上海") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
+                LocationPickerField(
+                    location = location,
+                    onClick = { showLocationPicker = true },
                 )
             }
             FormItem(label = "个人简介", trailing = "${bio.length}/100") {
@@ -356,6 +365,21 @@ fun V2EditProfileScreen(
     LaunchedEffect(Unit) {
         // 进编辑页时刷新一遍最新用户信息
         V2ProfileStore.refresh(force = false)
+    }
+
+    if (showLocationPicker) {
+        LocationPickerDialog(
+            selectedLocation = location,
+            onSelect = {
+                location = it
+                showLocationPicker = false
+            },
+            onClear = {
+                location = ""
+                showLocationPicker = false
+            },
+            onDismiss = { showLocationPicker = false },
+        )
     }
 }
 
@@ -493,6 +517,134 @@ private fun BirthdayPickerField(
             modifier = Modifier.weight(1f),
         )
         Text("选择", style = DSTypography.caption, color = DSColors.fairway)
+    }
+}
+
+@Composable
+private fun LocationPickerField(
+    location: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(DSColors.warmWhite, RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, DSColors.borderLine), RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = location.ifBlank { "选择您所在的地区" },
+            style = DSTypography.body,
+            color = if (location.isBlank()) DSColors.shadowGray else DSColors.inkGreen,
+            modifier = Modifier.weight(1f),
+        )
+        Text("选择", style = DSTypography.caption, color = DSColors.fairway)
+    }
+}
+
+@Composable
+private fun LocationPickerDialog(
+    selectedLocation: String,
+    onSelect: (String) -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var searchText by remember { mutableStateOf("") }
+    val filteredCities = remember(searchText) {
+        popularLocationCities.filter { searchText.isBlank() || it.contains(searchText) }
+    }
+    val filteredProvinces = remember(searchText) {
+        locationProvinces.filter { searchText.isBlank() || it.contains(searchText) }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择地区", style = DSTypography.titleMedium, color = DSColors.inkGreen) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = searchText,
+                    onValueChange = { searchText = it },
+                    placeholder = { Text("搜索城市") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = fieldColors(),
+                )
+                LocationPickerSection(
+                    title = "热门城市",
+                    options = filteredCities,
+                    selectedLocation = selectedLocation,
+                    emptyText = "没有匹配的城市",
+                    onSelect = onSelect,
+                )
+                LocationPickerSection(
+                    title = "选择省份 / 地区",
+                    options = filteredProvinces,
+                    selectedLocation = selectedLocation,
+                    emptyText = "没有匹配的省份",
+                    onSelect = onSelect,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("完成", color = DSColors.fairway)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onClear) {
+                Text("清除", color = DSColors.shadowGray)
+            }
+        },
+    )
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun LocationPickerSection(
+    title: String,
+    options: List<String>,
+    selectedLocation: String,
+    emptyText: String,
+    onSelect: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = DSTypography.bodyBold, color = DSColors.inkGreen)
+            Spacer(modifier = Modifier.weight(1f))
+            if (options.isNotEmpty()) {
+                Text(options.size.toString(), style = DSTypography.caption, color = DSColors.shadowGray)
+            }
+        }
+        if (options.isEmpty()) {
+            Text(
+                text = emptyText,
+                style = DSTypography.caption,
+                color = DSColors.shadowGray,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                options.forEach { option ->
+                    PillChoice(
+                        text = option,
+                        selected = selectedLocation == option,
+                        onClick = { onSelect(option) },
+                    )
+                }
+            }
+        }
     }
 }
 

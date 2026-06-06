@@ -105,21 +105,32 @@ fun V2MemoCreateVideoScreen(
     onOpenOnlinePicker: (() -> Unit)? = null,
     pendingOnline: V2OnlineVideoSelection? = null,
     onPendingOnlineConsumed: () -> Unit = {},
+    editingMemoId: UUID? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val allMemos by V2MemoStore.allMemos.collectAsState()
+    val editingMemo = remember(allMemos, editingMemoId) {
+        editingMemoId?.let { id -> allMemos.firstOrNull { it.id == id } }
+    }
+    val isEditing = editingMemoId != null
+
+    if (isEditing && editingMemo == null) {
+        Text("视频 Memo 不存在", modifier = Modifier.padding(24.dp), color = Color(0xFF1B2A21))
+        return
+    }
 
     // 视频源状态
-    var sourceKind by remember { mutableStateOf<SourceKind?>(null) }
-    var localAbsolutePath by remember { mutableStateOf<String?>(null) }
-    var localThumbPath by remember { mutableStateOf<String?>(null) }
-    var localDurationSec by remember { mutableStateOf<Double?>(null) }
-    var onlineUrl by remember { mutableStateOf<String?>(null) }
-    var onlinePlatform by remember { mutableStateOf<String?>(null) }
-    var onlineThumbUrl by remember { mutableStateOf<String?>(null) }
+    var sourceKind by remember(editingMemo?.id) { mutableStateOf(initialSourceKind(editingMemo)) }
+    var localAbsolutePath by remember(editingMemo?.id) { mutableStateOf(initialLocalPath(editingMemo)) }
+    var localThumbPath by remember(editingMemo?.id) { mutableStateOf(initialLocalThumbPath(editingMemo)) }
+    var localDurationSec by remember(editingMemo?.id) { mutableStateOf(editingMemo?.durationSec) }
+    var onlineUrl by remember(editingMemo?.id) { mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.videoUrl else null) }
+    var onlinePlatform by remember(editingMemo?.id) { mutableStateOf(editingMemo?.platform) }
+    var onlineThumbUrl by remember(editingMemo?.id) { mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.thumbnailUrl else null) }
     var showOnlineDialog by remember { mutableStateOf(false) }
-    var selectedTagIds by remember { mutableStateOf(setOf<String>()) }
-    var selectedGoalIds by remember { mutableStateOf(setOf<UUID>()) }
+    var selectedTagIds by remember(editingMemo?.id) { mutableStateOf(editingMemo?.tagIds.orEmpty().toSet()) }
+    var selectedGoalIds by remember(editingMemo?.id) { mutableStateOf(editingMemo?.linkedGoalIds.orEmpty().toSet()) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
 
     val activeGoals by V2GoalStore.goals.collectAsState()
@@ -186,9 +197,9 @@ fun V2MemoCreateVideoScreen(
     }
 
     // 表单状态
-    var title by rememberSaveable { mutableStateOf("") }
-    var note by rememberSaveable { mutableStateOf("") }
-    var noteExpanded by remember { mutableStateOf(false) }
+    var title by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.displayTitle ?: editingMemo?.title ?: "") }
+    var note by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.text ?: "") }
+    var noteExpanded by remember(editingMemo?.id) { mutableStateOf(!editingMemo?.text.isNullOrBlank()) }
 
     androidx.compose.runtime.LaunchedEffect(pendingOnline) {
         val pick = pendingOnline ?: return@LaunchedEffect
@@ -237,14 +248,45 @@ fun V2MemoCreateVideoScreen(
 
     val hasVideo = localAbsolutePath != null || onlineUrl != null
     val canSave = hasVideo && title.isNotBlank() && !importing
-    val hasDraft = title.isNotBlank() || note.isNotBlank() || hasVideo ||
-        selectedTagIds.isNotEmpty() || selectedGoalIds.isNotEmpty()
+    val hasDraft = if (isEditing) {
+        title != (editingMemo?.displayTitle ?: editingMemo?.title ?: "") ||
+            note != (editingMemo?.text ?: "") ||
+            selectedTagIds != editingMemo?.tagIds.orEmpty().toSet() ||
+            selectedGoalIds != editingMemo?.linkedGoalIds.orEmpty().toSet()
+    } else {
+        title.isNotBlank() || note.isNotBlank() || hasVideo ||
+            selectedTagIds.isNotEmpty() || selectedGoalIds.isNotEmpty()
+    }
 
     fun attemptClose() {
         if (hasDraft) showDiscardConfirm = true else onClose()
     }
 
     fun buildAndSave() {
+        if (editingMemo != null) {
+            val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
+            val tagIds = selectedTagIds.toList()
+            val topic = V2MemoBridge.inferTopic(
+                category = V2CategoryStore.groupForItemId(tagIds.firstOrNull() ?: "")?.name,
+                tags = tagNames,
+                title = title.trim(),
+            )
+            V2MemoStore.update(
+                editingMemo.copy(
+                    title = title.trim().ifBlank { "视频 Memo" },
+                    displayTitle = title.trim().ifBlank { "视频 Memo" },
+                    text = note.trim(),
+                    topic = topic,
+                    tags = tagNames,
+                    tagIds = tagIds,
+                    linkedGoalIds = selectedGoalIds.toList(),
+                    thumbnailKind = V2MemoBridge.thumbnailKindFor(topic),
+                ),
+            )
+            V2GoalStore.replaceMemoLinks(editingMemo.id, selectedGoalIds)
+            onClose()
+            return
+        }
         val isOnline = onlineUrl != null
         val videoStringForStore = onlineUrl ?: localAbsolutePath?.let { "file://$it" }
         if (!isOnline && !memoVideoPlayable(videoStringForStore)) {
@@ -297,7 +339,7 @@ fun V2MemoCreateVideoScreen(
             .background(Color(0xFFFAF7F0)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            NavBar(canSave = canSave, onClose = ::attemptClose, onSave = ::buildAndSave)
+            NavBar(canSave = canSave, title = if (isEditing) "编辑视频 Memo" else "新建视频 Memo", onClose = ::attemptClose, onSave = ::buildAndSave)
 
             Column(
                 modifier = Modifier
@@ -315,6 +357,7 @@ fun V2MemoCreateVideoScreen(
                     onlineThumbUrl = onlineThumbUrl,
                     durationSec = localDurationSec,
                     importing = importing,
+                    editing = isEditing,
                     onPickCamera = {
                         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
                             == PackageManager.PERMISSION_GRANTED
@@ -369,7 +412,12 @@ fun V2MemoCreateVideoScreen(
                 )
             }
         }
-        BottomSaveBar(canSave = canSave, onSave = ::buildAndSave, modifier = Modifier.align(Alignment.BottomCenter))
+        BottomSaveBar(
+            canSave = canSave,
+            editing = isEditing,
+            onSave = ::buildAndSave,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 
     if (showOnlineDialog && onOpenOnlinePicker == null) {
@@ -435,6 +483,19 @@ fun V2MemoCreateVideoScreen(
 }
 
 private enum class SourceKind { CAMERA, ALBUM, ONLINE }
+
+private fun initialSourceKind(memo: V2Memo?): SourceKind? = when {
+    memo == null -> null
+    memo.isOnlineVideo -> SourceKind.ONLINE
+    memo.trainingMethod == "拍摄" -> SourceKind.CAMERA
+    else -> SourceKind.ALBUM
+}
+
+private fun initialLocalPath(memo: V2Memo?): String? =
+    memo?.videoUrl?.takeUnless { memo.isOnlineVideo }?.removePrefix("file://")
+
+private fun initialLocalThumbPath(memo: V2Memo?): String? =
+    memo?.thumbnailUrl?.takeUnless { memo.isOnlineVideo }?.removePrefix("file://")
 
 private fun detectPlatform(url: String): String = when {
     url.contains("bilibili", ignoreCase = true) -> "bilibili"
@@ -566,7 +627,7 @@ private fun NoteSection(
 }
 
 @Composable
-private fun BottomSaveBar(canSave: Boolean, onSave: () -> Unit, modifier: Modifier = Modifier) {
+private fun BottomSaveBar(canSave: Boolean, editing: Boolean, onSave: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -576,7 +637,11 @@ private fun BottomSaveBar(canSave: Boolean, onSave: () -> Unit, modifier: Modifi
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("将保存到 视频笔记 · 视频 Memo", fontSize = 11.sp, color = Color(0xFF9CA3AF))
+        Text(
+            if (editing) "保留原视频源，仅更新标题、笔记、标签与目标" else "将保存到 视频笔记 · 视频 Memo",
+            fontSize = 11.sp,
+            color = Color(0xFF9CA3AF),
+        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -587,7 +652,7 @@ private fun BottomSaveBar(canSave: Boolean, onSave: () -> Unit, modifier: Modifi
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
-            Text("保存视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(if (editing) "保存修改" else "保存视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
     }
 }
@@ -597,7 +662,7 @@ private fun BottomSaveBar(canSave: Boolean, onSave: () -> Unit, modifier: Modifi
 // =================================================================
 
 @Composable
-private fun NavBar(canSave: Boolean, onClose: () -> Unit, onSave: () -> Unit) {
+private fun NavBar(canSave: Boolean, title: String, onClose: () -> Unit, onSave: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -618,7 +683,7 @@ private fun NavBar(canSave: Boolean, onClose: () -> Unit, onSave: () -> Unit) {
             Icon(Icons.Filled.Close, contentDescription = "关闭", tint = Color(0xFF1B2A21), modifier = Modifier.size(14.dp))
         }
         Spacer(modifier = Modifier.weight(1f))
-        Text("新建视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+        Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text = "保存",
@@ -647,6 +712,7 @@ private fun VideoSourceBlock(
     onlineThumbUrl: String?,
     durationSec: Double?,
     importing: Boolean,
+    editing: Boolean,
     onPickCamera: () -> Unit,
     onPickAlbum: () -> Unit,
     onPickOnline: () -> Unit,
@@ -664,7 +730,7 @@ private fun VideoSourceBlock(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("视频来源", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
             Spacer(Modifier.weight(1f))
-            if (sourceKind != null && !importing) {
+            if (sourceKind != null && !importing && !editing) {
                 Text(
                     text = "重新选择",
                     fontSize = 12.sp,
@@ -677,28 +743,45 @@ private fun VideoSourceBlock(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            SourceChip(
-                icon = Icons.Filled.Videocam,
-                label = "拍视频",
-                selected = sourceKind == SourceKind.CAMERA,
-                modifier = Modifier.weight(1f),
-                onClick = onPickCamera,
+        if (editing) {
+            Text(
+                text = when (sourceKind) {
+                    SourceKind.CAMERA -> "拍摄"
+                    SourceKind.ALBUM -> "本地上传"
+                    SourceKind.ONLINE -> "在线视频"
+                    null -> "视频源"
+                },
+                fontSize = 12.sp,
+                color = Color(0xFF7B8A82),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFE8F5E9))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             )
-            SourceChip(
-                icon = Icons.Filled.Photo,
-                label = "选相册",
-                selected = sourceKind == SourceKind.ALBUM,
-                modifier = Modifier.weight(1f),
-                onClick = onPickAlbum,
-            )
-            SourceChip(
-                icon = Icons.Filled.Link,
-                label = "在线视频",
-                selected = sourceKind == SourceKind.ONLINE,
-                modifier = Modifier.weight(1f),
-                onClick = onPickOnline,
-            )
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                SourceChip(
+                    icon = Icons.Filled.Videocam,
+                    label = "拍视频",
+                    selected = sourceKind == SourceKind.CAMERA,
+                    modifier = Modifier.weight(1f),
+                    onClick = onPickCamera,
+                )
+                SourceChip(
+                    icon = Icons.Filled.Photo,
+                    label = "选相册",
+                    selected = sourceKind == SourceKind.ALBUM,
+                    modifier = Modifier.weight(1f),
+                    onClick = onPickAlbum,
+                )
+                SourceChip(
+                    icon = Icons.Filled.Link,
+                    label = "在线视频",
+                    selected = sourceKind == SourceKind.ONLINE,
+                    modifier = Modifier.weight(1f),
+                    onClick = onPickOnline,
+                )
+            }
         }
 
         PreviewArea(

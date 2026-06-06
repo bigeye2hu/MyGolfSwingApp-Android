@@ -254,6 +254,27 @@ object V2GoalStore {
         }
     }
 
+    fun replaceMemoLinks(memoId: UUID, goalIds: Set<UUID>) {
+        val selected = goalIds.toSet()
+        _goals.value.forEach { goal ->
+            val hasMemo = memoId in goal.derivedFromMemoIds
+            val shouldHaveMemo = goal.id in selected
+            if (hasMemo == shouldHaveMemo) return@forEach
+            scope.launch {
+                repo.upsert(
+                    goal.copy(
+                        derivedFromMemoIds = if (shouldHaveMemo) {
+                            (goal.derivedFromMemoIds + memoId).distinct()
+                        } else {
+                            goal.derivedFromMemoIds.filterNot { it == memoId }
+                        },
+                        updatedAt = LocalDateTime.now(),
+                    ),
+                )
+            }
+        }
+    }
+
     /**
      * 测试 / 演示数据（仅在本地为空时往 DB 写一份）。
      * 上层 [com.mygolfswing.app.ui.tabs.V2RootScreen] 在启动时判空再调。

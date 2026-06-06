@@ -81,7 +81,7 @@ private sealed class Destination {
     data class NewGoal(val editingId: UUID? = null) : Destination()
     data class GoalDetail(val id: UUID) : Destination()
     data object NewTextMemo : Destination()
-    data object NewVideoMemo : Destination()
+    data class NewVideoMemo(val editingId: UUID? = null) : Destination()
     data class MemoDetail(val id: UUID) : Destination()
     data class VideoMemoPlay(val id: UUID) : Destination()
     data class PlazaPlay(val id: UUID) : Destination()
@@ -181,7 +181,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenGoalDetail = { nav.navigateTo(Destination.GoalDetail(it)) },
             onCreateGoal = { nav.navigateTo(Destination.NewGoal()) },
             onCreateTextMemo = { nav.navigateTo(Destination.NewTextMemo) },
-            onCreateVideoMemo = { nav.navigateTo(Destination.NewVideoMemo) },
+            onCreateVideoMemo = { nav.navigateTo(Destination.NewVideoMemo()) },
             onOpenAllMemos = { nav.navigateTo(Destination.AllMemos) },
             onOpenVideoMemoList = { nav.navigateTo(Destination.VideoMemoList) },
             onOpenTextMemoList = { nav.navigateTo(Destination.TextMemoList) },
@@ -234,11 +234,12 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         Destination.NewTextMemo -> V2MemoCreateTextScreen(
             onClose = { nav.navigateBack() },
         )
-        Destination.NewVideoMemo -> V2MemoCreateVideoScreen(
+        is Destination.NewVideoMemo -> V2MemoCreateVideoScreen(
             onClose = { nav.navigateBack() },
             onOpenOnlinePicker = { nav.navigateTo(Destination.OnlineVideoPicker) },
             pendingOnline = pendingOnlinePick,
             onPendingOnlineConsumed = { pendingOnlinePick = null },
+            editingMemoId = d.editingId,
         )
         Destination.OnlineVideoPicker -> V2OnlineVideoSelectorScreen(
             onBack = { nav.navigateBack() },
@@ -257,6 +258,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         is Destination.VideoMemoPlay -> V2VideoMemoPlayerScreen(
             memoId = d.id,
             onBack = { nav.navigateBack() },
+            onEdit = { nav.navigateTo(Destination.NewVideoMemo(editingId = it)) },
         )
         is Destination.PlazaPlay -> V2PlazaPlayerScreen(
             videoId = d.id,
@@ -407,7 +409,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         V2QuickAddSheet(
             showCreateGoal = isHomeTab,
             onCreateGoal = { nav.navigateTo(Destination.NewGoal()) },
-            onCreateVideoMemo = { nav.navigateTo(Destination.NewVideoMemo) },
+            onCreateVideoMemo = { nav.navigateTo(Destination.NewVideoMemo()) },
             onCreateTextMemo = { nav.navigateTo(Destination.NewTextMemo) },
             onCreateSwingClip = {
                 showQuickAdd = false

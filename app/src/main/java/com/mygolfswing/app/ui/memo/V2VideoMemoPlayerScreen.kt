@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -83,6 +84,7 @@ import java.util.UUID
 fun V2VideoMemoPlayerScreen(
     memoId: UUID,
     onBack: () -> Unit = {},
+    onEdit: (UUID) -> Unit = {},
 ) {
     val memos by V2MemoStore.allMemos.collectAsState()
     val memo = memos.firstOrNull { it.id == memoId }
@@ -246,6 +248,11 @@ fun V2VideoMemoPlayerScreen(
                     if (player.isPlaying) player.play()
                 },
                 onToggleMore = { showMoreTools = !showMoreTools },
+                onEdit = {
+                    player.pause()
+                    isPlaying = false
+                    onEdit(memo.id)
+                },
                 onDelete = { showDeleteConfirm = true },
             )
         } else {
@@ -459,6 +466,7 @@ private fun RightFloatingTools(
     showMoreTools: Boolean,
     onSpeed: () -> Unit,
     onToggleMore: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Column(
@@ -475,6 +483,7 @@ private fun RightFloatingTools(
             exit = fadeOut() + slideOutHorizontally { it / 2 },
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.End) {
+                FloatingIconButton(icon = Icons.Filled.Folder, label = "分类", onClick = onEdit)
                 FloatingIconButton(icon = Icons.Filled.DeleteOutline, label = "删除", onClick = onDelete)
             }
         }

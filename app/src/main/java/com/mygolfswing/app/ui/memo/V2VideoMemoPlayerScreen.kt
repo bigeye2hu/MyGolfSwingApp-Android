@@ -397,6 +397,7 @@ private fun VideoMemoComparisonScreen(
     var secondaryTime by remember { mutableFloatStateOf(0f) }
     var primaryDuration by remember { mutableFloatStateOf(0f) }
     var secondaryDuration by remember { mutableFloatStateOf(0f) }
+    var syncSeek by remember { mutableStateOf(false) }
 
     val primaryPlayer = remember(primaryUrl) {
         ExoPlayer.Builder(context).build().apply {
@@ -453,7 +454,7 @@ private fun VideoMemoComparisonScreen(
                 Spacer(Modifier.weight(1f))
                 Text("视频对比", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.size(44.dp))
+                SyncSeekToggle(enabled = syncSeek, onToggle = { syncSeek = !syncSeek })
             }
 
             ComparisonVideoPane(
@@ -465,6 +466,11 @@ private fun VideoMemoComparisonScreen(
                 onSeek = { seconds ->
                     primaryPlayer.seekTo((seconds * 1000).toLong())
                     primaryTime = seconds
+                    if (syncSeek) {
+                        val syncedSeconds = seconds.coerceIn(0f, secondaryDuration.coerceAtLeast(0f))
+                        secondaryPlayer.seekTo((syncedSeconds * 1000).toLong())
+                        secondaryTime = syncedSeconds
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -485,6 +491,11 @@ private fun VideoMemoComparisonScreen(
                 onSeek = { seconds ->
                     secondaryPlayer.seekTo((seconds * 1000).toLong())
                     secondaryTime = seconds
+                    if (syncSeek) {
+                        val syncedSeconds = seconds.coerceIn(0f, primaryDuration.coerceAtLeast(0f))
+                        primaryPlayer.seekTo((syncedSeconds * 1000).toLong())
+                        primaryTime = syncedSeconds
+                    }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -527,6 +538,27 @@ private fun VideoMemoComparisonScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SyncSeekToggle(enabled: Boolean, onToggle: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (enabled) DSColors.fairway else Color.White.copy(alpha = 0.14f))
+            .border(1.dp, Color.White.copy(alpha = if (enabled) 0.18f else 0.12f), RoundedCornerShape(50))
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = if (enabled) "同步" else "独立",
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

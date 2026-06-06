@@ -583,7 +583,9 @@ private fun VideoMemoComparisonScreen(
         if (showDrawingTools) {
             V2DrawingOverlay(
                 state = comparisonDrawingState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 84.dp, end = 92.dp, bottom = 150.dp),
             )
             V2DrawingToolsPanel(
                 state = comparisonDrawingState,

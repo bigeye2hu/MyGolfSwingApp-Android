@@ -77,6 +77,7 @@ import kotlinx.coroutines.delay
 fun V2JustSwingCalendarScreen(
     onBack: () -> Unit,
     onOpenClip: (UUID) -> Unit,
+    initialFilter: V2SwingClipRetention? = null,
 ) {
     val sessions by V2SwingSessionStore.sessions.collectAsState()
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
@@ -84,7 +85,8 @@ fun V2JustSwingCalendarScreen(
     var selectionMode by remember { mutableStateOf(false) }
     var selectedClipIds by remember { mutableStateOf(setOf<UUID>()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableStateOf<V2SwingClipRetention?>(null) }
+    var selectedFilter by remember(initialFilter) { mutableStateOf(initialFilter) }
+    var didApplyInitialFilter by remember(initialFilter) { mutableStateOf(initialFilter == null) }
 
     val clipDays = remember(sessions) {
         sessions.flatMap { session -> session.clips.map { session.date } }.toSet()
@@ -94,6 +96,21 @@ fun V2JustSwingCalendarScreen(
     }
     val clips = remember(dayClips, selectedFilter) {
         selectedFilter?.let { filter -> dayClips.filter { it.retention == filter } } ?: dayClips
+    }
+
+    LaunchedEffect(sessions, initialFilter, didApplyInitialFilter) {
+        val filter = initialFilter ?: return@LaunchedEffect
+        if (didApplyInitialFilter) return@LaunchedEffect
+        val latestDate = sessions
+            .flatMap { session -> session.clips.map { clip -> session.date to clip } }
+            .filter { (_, clip) -> clip.retention == filter }
+            .maxByOrNull { (_, clip) -> clip.timestamp }
+            ?.first
+        if (latestDate != null) {
+            selectedDate = latestDate
+            selectedFilter = filter
+            didApplyInitialFilter = true
+        }
     }
 
     Column(Modifier.fillMaxSize().background(DSColors.warmWhite)) {

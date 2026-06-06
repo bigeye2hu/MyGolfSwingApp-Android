@@ -57,6 +57,7 @@ fun V2HomeScreen(
     onOpenPlazaVideo: (UUID) -> Unit = {},
     onOpenMemo: (UUID) -> Unit = {},
     onOpenSwingCalendar: () -> Unit = onSwitchToMemo,
+    onOpenGrowthPool: () -> Unit = onOpenSwingCalendar,
     onAddTap: () -> Unit = {},
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
@@ -130,7 +131,7 @@ fun V2HomeScreen(
                 V2HomeGrowthPoolSummary(
                     promotedCount = promotedSwingClips.size,
                     latestTitle = V2HomeGrowthPoolTitle(promotedSwingClips.first().durationSec),
-                    onTap = onOpenSwingCalendar,
+                    onTap = onOpenGrowthPool,
                     modifier = Modifier.padding(horizontal = DSSpacing.lg),
                 )
             }

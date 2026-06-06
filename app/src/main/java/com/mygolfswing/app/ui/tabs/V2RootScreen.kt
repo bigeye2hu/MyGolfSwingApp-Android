@@ -21,6 +21,7 @@ import com.mygolfswing.app.ui.swing.V2JustSwingMainScreen
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.mygolfswing.app.data.model.V2MemoKind
+import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2UserScopedCache
 import com.mygolfswing.app.data.store.V2GoalStore
@@ -88,7 +89,7 @@ private sealed class Destination {
     data object AllMemos : Destination()
     data object VideoMemoList : Destination()
     data object TextMemoList : Destination()
-    data object SwingCalendar : Destination()
+    data class SwingCalendar(val initialFilter: V2SwingClipRetention? = null) : Destination()
     data class SwingDayDetail(val day: LocalDate) : Destination()
     data class SwingClipDetail(val clipId: UUID) : Destination()
     data object JustSwingMain : Destination()
@@ -185,7 +186,8 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
             onOpenAllMemos = { nav.navigateTo(Destination.AllMemos) },
             onOpenVideoMemoList = { nav.navigateTo(Destination.VideoMemoList) },
             onOpenTextMemoList = { nav.navigateTo(Destination.TextMemoList) },
-            onOpenSwingCalendar = { nav.navigateTo(Destination.SwingCalendar) },
+            onOpenSwingCalendar = { nav.navigateTo(Destination.SwingCalendar()) },
+            onOpenGrowthPool = { nav.navigateTo(Destination.SwingCalendar(initialFilter = V2SwingClipRetention.PROMOTED)) },
             onOpenJustSwing = { nav.navigateTo(Destination.JustSwingMain) },
             onOpenAIArchive = { nav.navigateTo(Destination.AIArchive) },
             onOpenAIConfig = { nav.navigateTo(Destination.AIConfig) },
@@ -276,7 +278,8 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 nav.navigateTo(Destination.MemoDetail(memoId))
             },
         )
-        Destination.SwingCalendar -> V2JustSwingCalendarScreen(
+        is Destination.SwingCalendar -> V2JustSwingCalendarScreen(
+            initialFilter = d.initialFilter,
             onBack = { nav.navigateBack() },
             onOpenClip = { nav.navigateTo(Destination.SwingClipDetail(it)) },
         )
@@ -435,6 +438,7 @@ private fun TabsScaffold(
     onOpenVideoMemoList: () -> Unit,
     onOpenTextMemoList: () -> Unit,
     onOpenSwingCalendar: () -> Unit,
+    onOpenGrowthPool: () -> Unit,
     onOpenJustSwing: () -> Unit,
     onOpenAIArchive: () -> Unit,
     onOpenAIConfig: () -> Unit,
@@ -478,6 +482,7 @@ private fun TabsScaffold(
                     onOpenMemo = onOpenMemoDetail,
                     onOpenPlazaVideo = onOpenPlazaVideo,
                     onOpenSwingCalendar = onOpenSwingCalendar,
+                    onOpenGrowthPool = onOpenGrowthPool,
                     onAddTap = onShowQuickAdd,
                 )
                 V2Tab.MEMO -> V2MemoListScreen(

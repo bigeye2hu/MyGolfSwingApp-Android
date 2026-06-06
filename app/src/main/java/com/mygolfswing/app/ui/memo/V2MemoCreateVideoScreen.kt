@@ -746,20 +746,23 @@ private fun VideoSourceBlock(
         }
 
         if (editing) {
-            Text(
-                text = when (sourceKind) {
-                    SourceKind.CAMERA -> "拍摄"
-                    SourceKind.ALBUM -> "本地上传"
-                    SourceKind.ONLINE -> "在线视频"
-                    null -> "视频源"
-                },
-                fontSize = 12.sp,
-                color = Color(0xFF7B8A82),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0xFFE8F5E9))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = when (sourceKind) {
+                        SourceKind.CAMERA -> "拍摄"
+                        SourceKind.ALBUM -> "本地上传"
+                        SourceKind.ONLINE -> "在线视频"
+                        null -> "视频源"
+                    },
+                    fontSize = 12.sp,
+                    color = Color(0xFF7B8A82),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFFE8F5E9))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                Text("视频源已锁定，编辑模式下不可更换", fontSize = 12.sp, color = Color(0xFF9CA3AF))
+            }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 SourceChip(

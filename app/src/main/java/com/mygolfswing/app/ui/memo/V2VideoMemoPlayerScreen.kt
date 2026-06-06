@@ -462,6 +462,10 @@ private fun VideoMemoComparisonScreen(
                 label = "当前",
                 time = primaryTime,
                 duration = primaryDuration,
+                onSeek = { seconds ->
+                    primaryPlayer.seekTo((seconds * 1000).toLong())
+                    primaryTime = seconds
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -478,6 +482,10 @@ private fun VideoMemoComparisonScreen(
                 label = "对比",
                 time = secondaryTime,
                 duration = secondaryDuration,
+                onSeek = { seconds ->
+                    secondaryPlayer.seekTo((seconds * 1000).toLong())
+                    secondaryTime = seconds
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
@@ -529,6 +537,7 @@ private fun ComparisonVideoPane(
     label: String,
     time: Float,
     duration: Float,
+    onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.background(Color.Black)) {
@@ -557,6 +566,29 @@ private fun ComparisonVideoPane(
             Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             Spacer(Modifier.weight(1f))
             Text("${formatTime(time)} / ${formatTime(duration)}", color = Color.White.copy(alpha = 0.72f), fontSize = 11.sp)
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f)),
+                    ),
+                )
+                .padding(horizontal = 16.dp)
+                .padding(top = 22.dp, bottom = 8.dp),
+        ) {
+            Slider(
+                value = time.coerceIn(0f, duration.coerceAtLeast(0f)),
+                onValueChange = onSeek,
+                valueRange = 0f..duration.coerceAtLeast(0.01f),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = DSColors.goldBright,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.28f),
+                ),
+            )
         }
     }
 }

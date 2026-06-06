@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Slider
@@ -107,6 +108,7 @@ fun V2VideoMemoPlayerScreen(
     }
 
     val playbackUrl = remember(memo.videoUrl) { resolvePlaybackUrl(memo.videoUrl) }
+    var isLoading by remember(playbackUrl) { mutableStateOf(true) }
     if (playbackUrl == null) {
         VideoPlaybackUnavailableOverlay(
             state = V2PlaybackState.UnavailableNoSource,
@@ -127,17 +129,30 @@ fun V2VideoMemoPlayerScreen(
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 playbackError = true
+                isLoading = false
                 isPlaying = false
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
-                    player.pause()
-                    player.seekTo(0)
-                    player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
-                    currentTime = 0f
-                    isPlaying = false
-                    showPlayPauseIcon = true
+                when (playbackState) {
+                    Player.STATE_IDLE,
+                    Player.STATE_BUFFERING -> {
+                        isLoading = true
+                    }
+
+                    Player.STATE_READY -> {
+                        isLoading = false
+                    }
+
+                    Player.STATE_ENDED -> {
+                        isLoading = false
+                        player.pause()
+                        player.seekTo(0)
+                        player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
+                        currentTime = 0f
+                        isPlaying = false
+                        showPlayPauseIcon = true
+                    }
                 }
             }
         }
@@ -178,12 +193,17 @@ fun V2VideoMemoPlayerScreen(
             },
         )
 
+        if (isLoading && !playbackError) {
+            VideoPlaybackLoadingOverlay()
+        }
+
         if (playbackError) {
             VideoPlaybackUnavailableOverlay(
                 state = V2PlaybackState.UnavailablePlaybackError,
                 onBack = onBack,
                 onRetry = {
                     playbackError = false
+                    isLoading = true
                     player.setMediaItem(MediaItem.fromUri(playbackUrl))
                     player.prepare()
                     player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
@@ -313,6 +333,32 @@ fun V2VideoMemoPlayerScreen(
 private enum class V2PlaybackState {
     UnavailableNoSource,
     UnavailablePlaybackError,
+}
+
+@Composable
+private fun VideoPlaybackLoadingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.18f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(34.dp),
+                color = Color.White.copy(alpha = 0.72f),
+                strokeWidth = 2.dp,
+            )
+            Text(
+                text = "加载中...",
+                color = Color.White.copy(alpha = 0.62f),
+                fontSize = 13.sp,
+            )
+        }
+    }
 }
 
 @Composable

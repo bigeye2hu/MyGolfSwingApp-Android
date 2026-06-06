@@ -111,7 +111,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                 colors = ButtonDefaults.buttonColors(containerColor = DSColors.flagRed),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                Text("清理视频与缓存", style = DSTypography.bodyBold, color = DSColors.warmWhite)
+                Text("清理普通视频与缓存", style = DSTypography.bodyBold, color = DSColors.warmWhite)
             }
         }
     }
@@ -144,8 +144,8 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("确认清理？") },
-            text = { Text("将删除普通本地视频文件与应用缓存；收藏和成长池中的挥杆视频会保留。") },
+            title = { Text("确认清理普通视频？") },
+            text = { Text("将删除未收藏且未进入成长池的本地视频文件，并清理应用缓存；收藏和成长池中的挥杆视频会保留。") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmClear = false

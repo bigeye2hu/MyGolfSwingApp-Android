@@ -146,6 +146,23 @@ fun V2LoginScreen(
             onOpenPrivacy = onOpenPrivacy,
             loading = loading,
             onSubmit = {
+                val validationError = when (mode) {
+                    LoginMode.SMS -> when {
+                        phone.length != 11 -> "请输入 11 位手机号"
+                        smsCode.length < 4 -> "请输入验证码"
+                        else -> null
+                    }
+                    LoginMode.PASSWORD -> when {
+                        username.isBlank() -> "请输入登录账号"
+                        password.isBlank() -> "请输入密码"
+                        password.length < 6 -> "密码至少需要 6 位"
+                        else -> null
+                    }
+                }
+                if (validationError != null) {
+                    error = validationError
+                    return@Card
+                }
                 if (!agreed) {
                     error = "请先同意《用户协议》《隐私政策》"
                     return@Card
@@ -153,21 +170,8 @@ fun V2LoginScreen(
                 scope.launch {
                     loading = true
                     val r = when (mode) {
-                        LoginMode.SMS -> {
-                            if (phone.length != 11) {
-                                error = "请输入 11 位手机号"; loading = false; return@launch
-                            }
-                            if (smsCode.length < 4) {
-                                error = "请输入验证码"; loading = false; return@launch
-                            }
-                            ServiceLocator.authRepo.loginByPhone(phone, smsCode)
-                        }
-                        LoginMode.PASSWORD -> {
-                            if (username.isBlank() || password.length < 6) {
-                                error = "请输入正确的用户名和密码（至少 6 位）"; loading = false; return@launch
-                            }
-                            ServiceLocator.authRepo.loginWithUsername(username, password)
-                        }
+                        LoginMode.SMS -> ServiceLocator.authRepo.loginByPhone(phone, smsCode)
+                        LoginMode.PASSWORD -> ServiceLocator.authRepo.loginWithUsername(username, password)
                     }
                     loading = false
                     r.onSuccess { onLoginSuccess() }

@@ -48,9 +48,9 @@ fun V2MemoListScreen(
     val textRow = remember(allMemos) { V2MemoStore.textMemos.take(ROW_PREVIEW_LIMIT) }
     val totalVideo = remember(allMemos) { V2MemoStore.totalVideoRowCount }
     val totalText = remember(allMemos) { V2MemoStore.totalTextCount }
-    val totalCount = remember(allMemos) { V2MemoStore.totalCount }
     val swingItems by V2SwingSessionStore.dayItems.collectAsState()
     val totalSwingClips = remember(swingItems) { V2SwingSessionStore.totalClipCount }
+    val totalCount = remember(allMemos, totalSwingClips) { V2MemoStore.totalCount + totalSwingClips }
     val golfProfile by V2GolfProfileStore.profile.collectAsState()
 
     LazyColumn(

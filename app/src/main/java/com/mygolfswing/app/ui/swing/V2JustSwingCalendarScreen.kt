@@ -189,7 +189,7 @@ fun V2JustSwingCalendarScreen(
         }
 
         if (clips.isEmpty()) {
-            EmptyDayState()
+            EmptyDayState(selectedFilter)
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
@@ -584,13 +584,25 @@ private fun RetentionRow(label: String, value: String, color: Color) {
 }
 
 @Composable
-private fun EmptyDayState() {
+private fun EmptyDayState(filter: V2SwingClipRetention?) {
+    val title = when (filter) {
+        V2SwingClipRetention.FAVORITED -> "暂无收藏视频"
+        V2SwingClipRetention.PROMOTED -> "暂无成长池视频"
+        V2SwingClipRetention.TEMPORARY -> "暂无普通视频"
+        null -> "暂无挥杆记录"
+    }
+    val subtitle = when (filter) {
+        V2SwingClipRetention.FAVORITED -> "这一天还没有收藏的挥杆记录"
+        V2SwingClipRetention.PROMOTED -> "这一天还没有加入成长池的挥杆记录"
+        V2SwingClipRetention.TEMPORARY -> "这一天还没有普通挥杆记录"
+        null -> "这一天还没有拍摄记录"
+    }
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("暂无挥杆记录", color = DSColors.inkGreen, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        Text("这一天还没有拍摄记录", color = DSColors.shadowGray, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+        Text(title, color = DSColors.inkGreen, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        Text(subtitle, color = DSColors.shadowGray, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 

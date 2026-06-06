@@ -112,18 +112,7 @@ fun V2VideoMemoPlayerScreen(
             state = V2PlaybackState.UnavailableNoSource,
             onBack = onBack,
             onRetry = null,
-            onDelete = { showDeleteConfirm = true },
         )
-        if (showDeleteConfirm) {
-            VideoMemoDeleteConfirmDialog(
-                onDismiss = { showDeleteConfirm = false },
-                onConfirm = {
-                    showDeleteConfirm = false
-                    V2MemoStore.delete(memo.id)
-                    onBack()
-                },
-            )
-        }
         return
     }
 
@@ -201,7 +190,6 @@ fun V2VideoMemoPlayerScreen(
                     player.play()
                     isPlaying = true
                 },
-                onDelete = null,
             )
         }
 
@@ -332,7 +320,6 @@ private fun VideoPlaybackUnavailableOverlay(
     state: V2PlaybackState,
     onBack: () -> Unit,
     onRetry: (() -> Unit)?,
-    onDelete: (() -> Unit)?,
 ) {
     Box(
         modifier = Modifier
@@ -376,20 +363,6 @@ private fun VideoPlaybackUnavailableOverlay(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text("重试", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-            if (onDelete != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(DSColors.flagRed.copy(alpha = 0.18f))
-                        .border(1.dp, DSColors.flagRed.copy(alpha = 0.45f), RoundedCornerShape(50))
-                        .clickable(onClick = onDelete),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("删除记录", color = DSColors.flagRed, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
             }
             Box(

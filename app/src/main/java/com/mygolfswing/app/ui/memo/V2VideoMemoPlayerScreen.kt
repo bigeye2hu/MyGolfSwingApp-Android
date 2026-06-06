@@ -411,9 +411,29 @@ private fun VideoMemoComparisonScreen(
             prepare()
         }
     }
+    fun stopComparisonAtEnd() {
+        primaryPlayer.pause()
+        secondaryPlayer.pause()
+        isPlaying = false
+    }
 
     DisposableEffect(primaryPlayer, secondaryPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    stopComparisonAtEnd()
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                stopComparisonAtEnd()
+            }
+        }
+        primaryPlayer.addListener(listener)
+        secondaryPlayer.addListener(listener)
         onDispose {
+            primaryPlayer.removeListener(listener)
+            secondaryPlayer.removeListener(listener)
             primaryPlayer.release()
             secondaryPlayer.release()
         }

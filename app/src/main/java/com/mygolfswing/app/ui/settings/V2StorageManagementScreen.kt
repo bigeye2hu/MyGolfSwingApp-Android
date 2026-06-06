@@ -51,6 +51,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
     var cacheBytes by remember { mutableLongStateOf(0L) }
     var loading by remember { mutableStateOf(true) }
     var confirmClear by remember { mutableStateOf(false) }
+    var confirmClearCache by remember { mutableStateOf(false) }
     var clearedMsg by remember { mutableStateOf<String?>(null) }
 
     fun refresh() {
@@ -94,6 +95,16 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
             )
 
             Button(
+                onClick = { confirmClearCache = true },
+                enabled = !loading && cacheBytes > 0,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DSColors.fairway),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Text("仅清理应用缓存", style = DSTypography.bodyBold, color = DSColors.warmWhite)
+            }
+
+            Button(
                 onClick = { confirmClear = true },
                 enabled = !loading && (videoBytes + cacheBytes) > 0,
                 shape = RoundedCornerShape(14.dp),
@@ -103,6 +114,31 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                 Text("清理视频与缓存", style = DSTypography.bodyBold, color = DSColors.warmWhite)
             }
         }
+    }
+
+    if (confirmClearCache) {
+        AlertDialog(
+            onDismissRequest = { confirmClearCache = false },
+            title = { Text("确认清理缓存？") },
+            text = { Text("将清理临时文件、图片缓存等；不会删除视频文件和已保存的 Memo 记录。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearCache = false
+                    scope.launch {
+                        loading = true
+                        val freedCache = clearAppCache(context)
+                        V2VideoThumbnailLoader.clearMemoryCache()
+                        videoBytes = V2VideoFileStore.calculateUsedBytes(context)
+                        cacheBytes = calculateCacheBytes(context)
+                        loading = false
+                        clearedMsg = "已释放 ${formatBytes(freedCache)}"
+                    }
+                }) { Text("清理", color = DSColors.flagRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearCache = false }) { Text("取消") }
+            },
+        )
     }
 
     if (confirmClear) {

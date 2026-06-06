@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -144,7 +143,7 @@ private fun StatCell(
                     .align(Alignment.CenterEnd)
                     .width(1.dp)
                     .fillMaxSize()
-                    .background(Color(0x14000000)),
+                    .background(DSColors.mistGreen),
             )
         }
         // 底描边
@@ -154,7 +153,7 @@ private fun StatCell(
                     .align(Alignment.BottomStart)
                     .height(1.dp)
                     .fillMaxWidth()
-                    .background(Color(0x14000000)),
+                    .background(DSColors.mistGreen),
             )
         }
     }

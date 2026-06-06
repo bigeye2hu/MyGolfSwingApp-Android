@@ -337,7 +337,7 @@ fun V2EditProfileScreen(
                     saving = true
                     val r = ServiceLocator.authRepo.updateUserInfo(
                         nickname = nickname.trim(),
-                        gender = gender,
+                        gender = gender.takeUnless { it.isBlank() || it == "保密" },
                         birthday = if (hasBirthday) birthday.ifBlank { null } else null,
                         location = location.ifBlank { null },
                         bio = bio.ifBlank { null },

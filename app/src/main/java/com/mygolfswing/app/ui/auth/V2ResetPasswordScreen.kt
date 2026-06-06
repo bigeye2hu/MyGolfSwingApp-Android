@@ -141,7 +141,7 @@ fun V2ResetPasswordScreen(
                     Button(
                         onClick = {
                             if (phone.length != 11) {
-                                error = "请输入 11 位手机号"; return@Button
+                                error = "请输入正确的手机号"; return@Button
                             }
                             scope.launch {
                                 loading = true
@@ -304,10 +304,10 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 private fun validate(phone: String, code: String, newPw: String, confirmPw: String): String? {
-    if (phone.length != 11) return "请输入 11 位手机号"
+    if (phone.length != 11) return "请输入正确的手机号"
     if (code.length != 6) return "请输入 6 位验证码"
     if (newPw.length < 8) return "新密码至少 8 位"
     if (!newPw.any { it.isLetter() } || !newPw.any { it.isDigit() }) return "密码需同时包含字母和数字"
-    if (newPw != confirmPw) return "两次密码不一致"
+    if (newPw != confirmPw) return "两次输入的密码不一致"
     return null
 }

@@ -75,23 +75,24 @@ fun V2NewGoalScreen(
     val isEditMode = existing != null
 
     var name by rememberSaveable { mutableStateOf(existing?.title ?: "") }
-    var clubKind by remember { mutableStateOf(existing?.clubKind ?: V2Goal.ClubKind.IRON) }
+    var clubKind by remember { mutableStateOf(existing?.clubKind ?: V2Goal.ClubKind.DRIVER) }
     var metricKind by remember { mutableStateOf(existing?.metric?.kind ?: V2Goal.Metric.Kind.COUNT) }
+    var countSubKind by remember { mutableStateOf(countSubKindOf(existing?.metric)) }
     var targetAmount by rememberSaveable {
         mutableDoubleStateOf(
-            existing?.metric?.target ?: defaultTargetFor(V2Goal.Metric.Kind.COUNT),
+            existing?.metric?.target ?: defaultTargetFor(V2Goal.Metric.Kind.COUNT, CountSubKind.TIMES),
         )
     }
     var cadenceCategory by remember { mutableStateOf(cadenceCategoryOf(existing?.cadence) ?: CadenceCategory.PER_WEEK) }
     var perCountValue by rememberSaveable {
-        mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.PerWeek)?.times ?: 3)
+        mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.PerWeek)?.times ?: 10)
     }
     var rangeMonths by rememberSaveable {
         mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.WithinMonths)?.months ?: 1)
     }
-    var priority by remember { mutableStateOf(existing?.priority ?: V2Goal.Priority.NORMAL) }
+    var priority by remember { mutableStateOf(existing?.priority ?: V2Goal.Priority.CRITICAL) }
     var targetSessions by rememberSaveable {
-        mutableIntStateOf(existing?.targetSessions ?: 5)
+        mutableIntStateOf(existing?.targetSessions ?: 10)
     }
     var linkedMemoIds by remember {
         mutableStateOf(existing?.derivedFromMemoIds?.toSet() ?: emptySet())
@@ -123,6 +124,7 @@ fun V2NewGoalScreen(
                         name = name,
                         clubKind = clubKind,
                         metricKind = metricKind,
+                        countSubKind = countSubKind,
                         targetAmount = targetAmount,
                         cadenceCategory = cadenceCategory,
                         perCountValue = perCountValue,
@@ -156,16 +158,31 @@ fun V2NewGoalScreen(
                         DividerLine()
                         TargetStepperField(
                             kind = existing.metric.kind,
+                            countSubKind = countSubKind,
                             amount = targetAmount,
                             onAmountChange = { targetAmount = it },
                         )
                         DividerLine()
                         LockedCadenceRow(cadence = existing.cadence ?: V2Goal.Cadence.Continuous)
                     } else {
-                        MetricKindField(selection = metricKind, onSelect = { metricKind = it; targetAmount = defaultTargetFor(it) })
+                        MetricKindField(
+                            selection = metricKind,
+                            countSubKind = countSubKind,
+                            onSelect = {
+                                metricKind = it
+                                if (it != V2Goal.Metric.Kind.COUNT) countSubKind = CountSubKind.TIMES
+                                targetAmount = defaultTargetFor(it, countSubKind)
+                            },
+                            onCountSubKind = {
+                                countSubKind = it
+                                metricKind = V2Goal.Metric.Kind.COUNT
+                                targetAmount = defaultTargetFor(V2Goal.Metric.Kind.COUNT, it)
+                            },
+                        )
                         DividerLine()
                         TargetStepperField(
                             kind = metricKind,
+                            countSubKind = countSubKind,
                             amount = targetAmount,
                             onAmountChange = { targetAmount = it },
                         )
@@ -199,6 +216,7 @@ fun V2NewGoalScreen(
                             name = name,
                             clubKind = clubKind,
                             metricKind = metricKind,
+                            countSubKind = countSubKind,
                             targetAmount = targetAmount,
                             cadenceCategory = cadenceCategory,
                             perCountValue = perCountValue,
@@ -262,9 +280,14 @@ private fun MemoLinkSection(count: Int, onTap: () -> Unit) {
 
 private enum class CadenceCategory(val displayName: String) {
     DAYS_STREAK("连续天数"),
-    PER_WEEK("每周次数"),
-    WITHIN_MONTHS("总时间"),
-    CONTINUOUS("永久"),
+    PER_WEEK("按次数"),
+    WITHIN_MONTHS("按时间段"),
+    CONTINUOUS("永久练习"),
+}
+
+private enum class CountSubKind(val displayName: String, val unit: String) {
+    TIMES("次数", "次"),
+    BALLS("球数", "球"),
 }
 
 private fun cadenceCategoryOf(c: V2Goal.Cadence?): CadenceCategory? = when (c) {
@@ -275,15 +298,22 @@ private fun cadenceCategoryOf(c: V2Goal.Cadence?): CadenceCategory? = when (c) {
     null -> null
 }
 
-private fun defaultTargetFor(k: V2Goal.Metric.Kind): Double = when (k) {
-    V2Goal.Metric.Kind.COUNT -> 50.0
-    V2Goal.Metric.Kind.DURATION -> 40.0
-    V2Goal.Metric.Kind.DISTANCE -> 0.3
+private fun countSubKindOf(metric: V2Goal.Metric?): CountSubKind =
+    if (metric?.kind == V2Goal.Metric.Kind.COUNT && metric.unit == CountSubKind.BALLS.unit) {
+        CountSubKind.BALLS
+    } else {
+        CountSubKind.TIMES
+    }
+
+private fun defaultTargetFor(k: V2Goal.Metric.Kind, countSubKind: CountSubKind): Double = when (k) {
+    V2Goal.Metric.Kind.COUNT -> if (countSubKind == CountSubKind.BALLS) 30.0 else 30.0
+    V2Goal.Metric.Kind.DURATION -> 30.0
+    V2Goal.Metric.Kind.DISTANCE -> 100.0
     V2Goal.Metric.Kind.FREE -> 0.0
 }
 
-private fun unitFor(k: V2Goal.Metric.Kind): String? = when (k) {
-    V2Goal.Metric.Kind.COUNT -> "球"
+private fun unitFor(k: V2Goal.Metric.Kind, countSubKind: CountSubKind = CountSubKind.TIMES): String? = when (k) {
+    V2Goal.Metric.Kind.COUNT -> countSubKind.unit
     V2Goal.Metric.Kind.DURATION -> "分钟"
     V2Goal.Metric.Kind.DISTANCE -> "米"
     V2Goal.Metric.Kind.FREE -> null
@@ -294,6 +324,7 @@ private fun handleSave(
     name: String,
     clubKind: V2Goal.ClubKind,
     metricKind: V2Goal.Metric.Kind,
+    countSubKind: CountSubKind,
     targetAmount: Double,
     cadenceCategory: CadenceCategory,
     perCountValue: Int,
@@ -309,7 +340,16 @@ private fun handleSave(
         CadenceCategory.CONTINUOUS -> V2Goal.Cadence.Continuous
     }
 
-    val metric = V2Goal.Metric(metricKind, targetAmount, unitFor(metricKind))
+    val actualMetricKind = if (cadenceCategory == CadenceCategory.CONTINUOUS) {
+        V2Goal.Metric.Kind.FREE
+    } else {
+        metricKind
+    }
+    val metric = V2Goal.Metric(
+        actualMetricKind,
+        if (actualMetricKind == V2Goal.Metric.Kind.FREE) 0.0 else targetAmount,
+        unitFor(actualMetricKind, countSubKind),
+    )
 
     if (existing == null) {
         val goal = V2Goal(
@@ -320,7 +360,7 @@ private fun handleSave(
             clubKind = clubKind,
             priority = priority,
             cadence = cadence,
-            targetSessions = if (metricKind == V2Goal.Metric.Kind.FREE) null else targetSessions,
+            targetSessions = if (actualMetricKind == V2Goal.Metric.Kind.FREE) null else targetSessions,
             sessionUnit = "次",
             derivedFromMemoIds = linkedMemoIds,
         )
@@ -629,13 +669,12 @@ private fun ClubChipsField(selection: V2Goal.ClubKind, onSelect: (V2Goal.ClubKin
 }
 
 @Composable
-private fun MetricKindField(selection: V2Goal.Metric.Kind, onSelect: (V2Goal.Metric.Kind) -> Unit) {
-    val all = listOf(
-        V2Goal.Metric.Kind.COUNT to "次数",
-        V2Goal.Metric.Kind.DURATION to "时长",
-        V2Goal.Metric.Kind.DISTANCE to "精度",
-        V2Goal.Metric.Kind.FREE to "自由",
-    )
+private fun MetricKindField(
+    selection: V2Goal.Metric.Kind,
+    countSubKind: CountSubKind,
+    onSelect: (V2Goal.Metric.Kind) -> Unit,
+    onCountSubKind: (CountSubKind) -> Unit,
+) {
     Column {
         SectionLabel("完成方式")
         Row(
@@ -644,14 +683,24 @@ private fun MetricKindField(selection: V2Goal.Metric.Kind, onSelect: (V2Goal.Met
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            all.forEach { (k, name) ->
-                ChipPill(
-                    label = name,
-                    selected = k == selection,
-                    onClick = { onSelect(k) },
-                    modifier = Modifier.weight(1f),
-                )
-            }
+            ChipPill(
+                label = CountSubKind.TIMES.displayName,
+                selected = selection == V2Goal.Metric.Kind.COUNT && countSubKind == CountSubKind.TIMES,
+                onClick = { onCountSubKind(CountSubKind.TIMES) },
+                modifier = Modifier.weight(1f),
+            )
+            ChipPill(
+                label = CountSubKind.BALLS.displayName,
+                selected = selection == V2Goal.Metric.Kind.COUNT && countSubKind == CountSubKind.BALLS,
+                onClick = { onCountSubKind(CountSubKind.BALLS) },
+                modifier = Modifier.weight(1f),
+            )
+            ChipPill(
+                label = "时长",
+                selected = selection == V2Goal.Metric.Kind.DURATION,
+                onClick = { onSelect(V2Goal.Metric.Kind.DURATION) },
+                modifier = Modifier.weight(1f),
+            )
         }
         Spacer(modifier = Modifier.height(8.dp))
     }
@@ -660,12 +709,13 @@ private fun MetricKindField(selection: V2Goal.Metric.Kind, onSelect: (V2Goal.Met
 @Composable
 private fun TargetStepperField(
     kind: V2Goal.Metric.Kind,
+    countSubKind: CountSubKind,
     amount: Double,
     onAmountChange: (Double) -> Unit,
 ) {
     if (kind == V2Goal.Metric.Kind.FREE) {
         Column {
-            SectionLabel("单次量")
+            SectionLabel("目标数量")
             Text(
                 text = "自由练习：无单次量约束",
                 fontSize = 13.sp,
@@ -678,7 +728,7 @@ private fun TargetStepperField(
     }
 
     val step = when (kind) {
-        V2Goal.Metric.Kind.COUNT -> 5.0
+        V2Goal.Metric.Kind.COUNT -> if (countSubKind == CountSubKind.BALLS) 5.0 else 1.0
         V2Goal.Metric.Kind.DURATION -> 5.0
         V2Goal.Metric.Kind.DISTANCE -> 0.1
         else -> 1.0
@@ -690,10 +740,10 @@ private fun TargetStepperField(
         V2Goal.Metric.Kind.DISTANCE -> 5.0
         else -> 100.0
     }
-    val unit = unitFor(kind) ?: ""
+    val unit = unitFor(kind, countSubKind) ?: ""
 
     Column {
-        SectionLabel("单次量")
+        SectionLabel("目标数量")
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -763,7 +813,11 @@ private fun CadenceField(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            CadenceCategory.entries.forEach { c ->
+            listOf(
+                CadenceCategory.PER_WEEK,
+                CadenceCategory.WITHIN_MONTHS,
+                CadenceCategory.CONTINUOUS,
+            ).forEach { c ->
                 ChipPill(
                     label = c.displayName,
                     selected = c == category,

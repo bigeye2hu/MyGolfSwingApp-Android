@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,11 @@ fun V2FeedbackScreen(onBack: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showSuccess by remember { mutableStateOf(false) }
+    val canSubmit by remember {
+        derivedStateOf {
+            content.trim().isNotEmpty() && content.length <= 500
+        }
+    }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -94,7 +100,10 @@ fun V2FeedbackScreen(onBack: () -> Unit) {
             Text("反馈内容 *", style = DSTypography.bodyBold, color = DSColors.inkGreen)
             OutlinedTextField(
                 value = content,
-                onValueChange = { if (it.length <= 500) content = it },
+                onValueChange = {
+                    content = it
+                    error = null
+                },
                 placeholder = { Text("请详细描述您的问题或建议…") },
                 modifier = Modifier.fillMaxWidth().height(150.dp),
                 colors = fieldColors(),
@@ -122,10 +131,6 @@ fun V2FeedbackScreen(onBack: () -> Unit) {
 
             Button(
                 onClick = {
-                    if (content.isBlank()) {
-                        error = "请填写反馈内容"
-                        return@Button
-                    }
                     scope.launch {
                         loading = true
                         val r = ServiceLocator.feedbackRepo.submit(type.label, content, contact)
@@ -134,9 +139,12 @@ fun V2FeedbackScreen(onBack: () -> Unit) {
                             .onFailure { error = it.message ?: "提交失败" }
                     }
                 },
-                enabled = !loading,
+                enabled = canSubmit && !loading,
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DSColors.fairway),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = DSColors.fairway,
+                    disabledContainerColor = DSColors.shadowGray.copy(alpha = 0.4f),
+                ),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
                 if (loading) {

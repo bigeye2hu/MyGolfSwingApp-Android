@@ -142,7 +142,12 @@ fun V2ProfileScreen(
                 videoMemoCount = videoMemoCount,
                 swingCount = swingCount,
             )
-            GolfRecordCard(profile = profile)
+            GolfRecordCard(
+                profile = profile,
+                onEditTap = {
+                    if (!profile.isLoggedIn) onRequestLogin() else onOpenEditProfile()
+                },
+            )
             AIArchiveCard(onTap = onOpenAIArchive)
             V2ProfileMoreList(
                 isLoggedIn = profile.isLoggedIn,
@@ -299,33 +304,60 @@ private fun LoginPromptBanner(onClick: () -> Unit) {
 }
 
 @Composable
-private fun GolfRecordCard(profile: V2UserProfile) {
+private fun GolfRecordCard(profile: V2UserProfile, onEditTap: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(DSColors.cardWhite, RoundedCornerShape(20.dp))
             .padding(DSSpacing.lg),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
     ) {
-        Text("高尔夫档案", style = DSTypography.titleMedium, color = DSColors.inkGreen)
-        RecordRow(label = "差点 Handicap", value = profile.handicap)
-        RecordRow(label = "球龄 Years", value = profile.golfYears)
-        RecordRow(label = "惯用手", value = profile.dominantHand)
-        RecordRow(label = "球杆品牌", value = profile.clubBrand)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("高尔夫档案", style = DSTypography.titleMedium, color = DSColors.inkGreen, modifier = Modifier.weight(1f))
+            TextButton(onClick = onEditTap) {
+                Text("编辑", style = DSTypography.caption, color = DSColors.fairway)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm + 2.dp)) {
+            RecordChip(label = "差点 Handicap", value = profile.handicap, primary = true, modifier = Modifier.weight(1f))
+            RecordChip(label = "球龄 Years", value = profile.golfYears, primary = false, modifier = Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm + 2.dp)) {
+            RecordChip(label = "惯用手 Hand", value = profile.dominantHandDisplay(), primary = false, modifier = Modifier.weight(1f))
+            RecordChip(label = "球具品牌 Brand", value = profile.clubBrand, primary = false, modifier = Modifier.weight(1f))
+        }
     }
 }
 
 @Composable
-private fun RecordRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+private fun RecordChip(
+    label: String,
+    value: String,
+    primary: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .background(DSColors.mistGreen, RoundedCornerShape(12.dp))
+            .padding(DSSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(label, style = DSTypography.caption, color = DSColors.shadowGray)
-        Spacer(modifier = Modifier.weight(1f))
-        Text(value, style = DSTypography.bodyBold, color = DSColors.inkGreen)
+        Text(
+            text = value,
+            style = DSTypography.titleMedium,
+            color = if (primary) DSColors.fairway else DSColors.inkGreen,
+            maxLines = 1,
+        )
     }
 }
+
+private fun V2UserProfile.dominantHandDisplay(): String =
+    when (dominantHand) {
+        "右手" -> "右手"
+        "左手" -> "左手"
+        else -> dominantHand
+    }
 
 @Composable
 private fun AIArchiveCard(onTap: () -> Unit) {

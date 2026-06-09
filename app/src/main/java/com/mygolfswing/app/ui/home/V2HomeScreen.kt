@@ -211,6 +211,9 @@ private fun GoalsBlock(
     val focused = remember(activeGoals) {
         activeGoals.firstOrNull { it.todayFocus } ?: activeGoals.firstOrNull()
     }
+    val focusedIndex = remember(activeGoals, focused) {
+        activeGoals.indexOfFirst { it.id == focused?.id }.takeIf { it >= 0 } ?: 0
+    }
     val others = remember(activeGoals, focused) {
         activeGoals.filter { it.id != focused?.id }.take(2)
     }
@@ -229,6 +232,7 @@ private fun GoalsBlock(
             key(g.id, g.status, g.progress.current, g.progress.lastIncrementAt, g.hasCheckedInToday) {
                 V2GoalHeroCard(
                     goal = g,
+                    style = V2GoalHeroStyle.cycled(focusedIndex),
                     linkedMemoCount = V2GoalStore.linkedMemoCount(g),
                     linkedVideoCount = V2GoalStore.linkedVideoCount(g),
                     onEdit = onOpenAllGoals,

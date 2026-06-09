@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -46,6 +45,9 @@ import com.mygolfswing.app.R
 import com.mygolfswing.app.data.model.V2Goal
 
 private val Gold = Color(0xFFE0A82E)
+private val TwilightBlueAccent = Color(0xFF38BDF8)
+private val WarmSunsetAccent = Color(0xFFF97316)
+private val MistyDawnAccent = Color(0xFF86EFAC)
 
 /**
  * 主页 Hero 聚焦目标卡（对齐 iOS `V2GoalHeroCard.swift`）。
@@ -57,6 +59,7 @@ private val Gold = Color(0xFFE0A82E)
 @Composable
 fun V2GoalHeroCard(
     goal: V2Goal,
+    style: V2GoalHeroStyle = V2GoalHeroStyle.ClassicFairway,
     linkedMemoCount: Int,
     linkedVideoCount: Int,
     modifier: Modifier = Modifier,
@@ -69,22 +72,23 @@ fun V2GoalHeroCard(
             .fillMaxWidth()
             .shadow(
                 elevation = 24.dp,
-                shape = RoundedCornerShape(24.dp),
-                spotColor = Color(0xFF2D6A4F).copy(alpha = 0.18f),
+                shape = RoundedCornerShape(style.cornerRadius),
+                spotColor = style.shadowColor,
             )
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(style.cornerRadius))
+            .border(width = 1.dp, color = style.borderColor, shape = RoundedCornerShape(style.cornerRadius))
             .background(Color.Transparent)
-            .defaultMinSize(minHeight = 210.dp),
+            .height(206.dp),
     ) {
-        GolfScapeBackground(modifier = Modifier.matchParentSize())
+        GolfScapeBackground(style = style, modifier = Modifier.fillMaxSize())
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            HeaderRow(onEdit = onEdit)
+            HeaderRow(style = style, onEdit = onEdit)
 
             Column(
                 modifier = Modifier
@@ -94,18 +98,19 @@ fun V2GoalHeroCard(
             ) {
                 Text(
                     text = goal.title,
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
+                    color = style.primaryText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                MetricRow(goal = goal)
-                ProgressRow(goal = goal)
+                MetricRow(goal = goal, style = style)
+                ProgressRow(goal = goal, style = style)
             }
 
             FooterRow(
                 goal = goal,
+                style = style,
                 linkedMemoCount = linkedMemoCount,
                 linkedVideoCount = linkedVideoCount,
                 onComplete = onComplete,
@@ -115,65 +120,129 @@ fun V2GoalHeroCard(
 }
 
 @Composable
-private fun GolfScapeBackground(modifier: Modifier = Modifier) {
-    val darkGreen = Color(0xFF1B4332)
-    val midGreen = Color(0xFF2D6A4F)
-    val lightOverlay = Color(0xFFD8E2DC)
-
+private fun GolfScapeBackground(style: V2GoalHeroStyle, modifier: Modifier = Modifier) {
     BoxWithConstraints(modifier = modifier) {
-        val gradientStart = Offset(constraints.maxWidth * 0.25f, constraints.maxHeight.toFloat())
-        val gradientEnd = Offset(constraints.maxWidth * 0.75f, 0f)
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(darkGreen, midGreen),
-                        start = gradientStart,
-                        end = gradientEnd,
-                    ),
-                ),
-        )
-        Image(
-            painter = painterResource(id = R.drawable.v2_hero_grass_bg),
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            alignment = Alignment.BottomEnd,
-            alpha = 0.45f,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            lightOverlay.copy(alpha = 0.18f),
-                            midGreen.copy(alpha = 0.5f),
+        when (style) {
+            V2GoalHeroStyle.ClassicFairway -> {
+                val gradientStart = Offset(constraints.maxWidth * 0.25f, constraints.maxHeight.toFloat())
+                val gradientEnd = Offset(constraints.maxWidth * 0.75f, 0f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(Color(0xFF1B4332), Color(0xFF2D6A4F)),
+                                start = gradientStart,
+                                end = gradientEnd,
+                            ),
                         ),
-                        start = gradientStart,
-                        end = gradientEnd,
-                    ),
-                ),
-        )
-        // iOS ④ 顶 vignette：底为 transparent
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.0f to darkGreen.copy(alpha = 0.72f),
-                        0.55f to darkGreen.copy(alpha = 0.10f),
-                        1.0f to Color.Transparent,
-                    ),
-                ),
-        )
+                )
+                Image(
+                    painter = painterResource(id = R.drawable.v2_hero_grass_bg),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.BottomEnd,
+                    alpha = 0.45f,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFD8E2DC).copy(alpha = 0.18f),
+                                    Color(0xFF2D6A4F).copy(alpha = 0.5f),
+                                ),
+                                start = gradientStart,
+                                end = gradientEnd,
+                            ),
+                        ),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to Color(0xFF1B4332).copy(alpha = 0.72f),
+                                0.55f to Color(0xFF1B4332).copy(alpha = 0.10f),
+                                1.0f to Color.Transparent,
+                            ),
+                        ),
+                )
+            }
+
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.linearGradient(
+                                colors = style.backgroundColors,
+                                start = Offset.Zero,
+                                end = Offset(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()),
+                            ),
+                        ),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(style.glowColor, Color.Transparent),
+                                center = Offset(
+                                    x = constraints.maxWidth * style.glowCenterX,
+                                    y = constraints.maxHeight * style.glowCenterY,
+                                ),
+                                radius = constraints.maxWidth.coerceAtLeast(constraints.maxHeight) * 0.8f,
+                            ),
+                        ),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(style.verticalOverlay),
+                        ),
+                )
+                style.topWash?.let { wash ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(wash, Color.Transparent),
+                                ),
+                            ),
+                    )
+                }
+                style.bottomWash?.let { wash ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color.Transparent, wash),
+                                ),
+                            ),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f)),
+                            ),
+                        ),
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun HeaderRow(onEdit: () -> Unit) {
+private fun HeaderRow(style: V2GoalHeroStyle, onEdit: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -205,15 +274,15 @@ private fun HeaderRow(onEdit: () -> Unit) {
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text = "编辑",
-            fontSize = 14.sp,
-            color = Color.White.copy(alpha = 0.7f),
+            fontSize = 13.sp,
+            color = style.secondaryText,
             modifier = Modifier.clickable { onEdit() },
         )
     }
 }
 
 @Composable
-private fun MetricRow(goal: V2Goal) {
+private fun MetricRow(goal: V2Goal, style: V2GoalHeroStyle) {
     val targetText = when {
         goal.metric.kind == V2Goal.Metric.Kind.FREE -> "∞"
         goal.metric.target % 1.0 == 0.0 -> goal.metric.target.toInt().toString()
@@ -237,8 +306,8 @@ private fun MetricRow(goal: V2Goal) {
     Row(verticalAlignment = Alignment.Bottom) {
         Text(
             text = targetText,
-            color = Color.White,
-            fontSize = 36.sp,
+            color = style.primaryText,
+            fontSize = 40.sp,
             fontWeight = FontWeight.Black,
             letterSpacing = 1.125.sp,
         )
@@ -246,10 +315,10 @@ private fun MetricRow(goal: V2Goal) {
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = unitText,
-                color = Color.White.copy(alpha = 0.5f),
-                fontSize = 14.sp,
+                color = style.mutedText,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
-                letterSpacing = 4.sp,
+                letterSpacing = 7.sp,
                 modifier = Modifier.padding(bottom = 6.dp),
             )
         }
@@ -257,13 +326,13 @@ private fun MetricRow(goal: V2Goal) {
         Box(
             modifier = Modifier
                 .width(1.dp)
-                .height(24.dp)
-                .background(Gold.copy(alpha = 0.5f)),
+                .height(26.dp)
+                .background(style.accent.copy(alpha = 0.5f)),
         )
         Spacer(modifier = Modifier.width(12.dp))
         Text(
             text = subtitleText,
-            color = Color.White.copy(alpha = 0.7f),
+            color = style.secondaryText,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
@@ -276,7 +345,7 @@ private fun MetricRow(goal: V2Goal) {
 }
 
 @Composable
-private fun ProgressRow(goal: V2Goal) {
+private fun ProgressRow(goal: V2Goal, style: V2GoalHeroStyle) {
     val ratio = goal.ratio.coerceIn(0.0, 1.0).toFloat()
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -288,19 +357,19 @@ private fun ProgressRow(goal: V2Goal) {
                 .weight(1f)
                 .height(8.dp)
                 .clip(RoundedCornerShape(50))
-                .background(Color.White.copy(alpha = 0.2f)),
+                .background(style.progressTrack),
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .width(maxWidth * ratio)
                     .clip(RoundedCornerShape(50))
-                    .background(Gold),
+                    .background(style.accent),
             )
         }
         Text(
             text = goal.sessionProgressDisplay,
-            color = Color.White,
+            color = style.primaryText,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -312,6 +381,7 @@ private fun ProgressRow(goal: V2Goal) {
 @Composable
 private fun FooterRow(
     goal: V2Goal,
+    style: V2GoalHeroStyle,
     linkedMemoCount: Int,
     linkedVideoCount: Int,
     onComplete: () -> Unit,
@@ -326,31 +396,31 @@ private fun FooterRow(
         ) {
             Text(
                 text = "📚 $linkedMemoCount 条 Memo",
-                color = Color.White.copy(alpha = 0.7f),
+                color = style.secondaryText,
                 fontSize = 12.sp,
                 maxLines = 1,
             )
             Text(
                 text = "·",
-                color = Color.White.copy(alpha = 0.4f),
+                color = style.mutedText,
                 fontSize = 10.sp,
                 letterSpacing = 2.sp,
             )
             Text(
                 text = "🎬 $linkedVideoCount 个视频",
-                color = Color.White.copy(alpha = 0.7f),
+                color = style.secondaryText,
                 fontSize = 12.sp,
                 maxLines = 1,
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        HeroCheckInButton(goal = goal, onComplete = onComplete)
+        HeroCheckInButton(goal = goal, style = style, onComplete = onComplete)
     }
 }
 
 /** iOS `checkInButton`：文案与图标始终为白色；仅背景色随状态变化 */
 @Composable
-private fun HeroCheckInButton(goal: V2Goal, onComplete: () -> Unit) {
+private fun HeroCheckInButton(goal: V2Goal, style: V2GoalHeroStyle, onComplete: () -> Unit) {
     val state = heroButtonState(goal)
     val shape = RoundedCornerShape(12.dp)
 
@@ -361,10 +431,10 @@ private fun HeroCheckInButton(goal: V2Goal, onComplete: () -> Unit) {
             .shadow(
                 elevation = if (state == HeroButtonState.Active) 6.dp else 0.dp,
                 shape = shape,
-                spotColor = Gold.copy(alpha = 0.4f),
+                spotColor = style.buttonShadow,
             )
             .clip(shape)
-            .background(state.backgroundColor(Gold))
+            .background(state.backgroundColor(style))
             .then(
                 if (state == HeroButtonState.Active) {
                     Modifier.clickable(onClick = onComplete)
@@ -377,12 +447,12 @@ private fun HeroCheckInButton(goal: V2Goal, onComplete: () -> Unit) {
         Icon(
             imageVector = state.icon,
             contentDescription = state.title,
-            tint = Color.White,
+            tint = style.buttonText,
             modifier = Modifier.size(12.dp),
         )
         Text(
             text = state.title,
-            color = Color.White,
+            color = style.buttonText,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -414,10 +484,10 @@ private enum class HeroButtonState {
             Paused -> Icons.Filled.Pause
         }
 
-    fun backgroundColor(gold: Color): Color = when (this) {
-        Active -> gold
+    fun backgroundColor(style: V2GoalHeroStyle): Color = when (this) {
+        Active -> style.accent
         CheckedInToday -> Color.White.copy(alpha = 0.18f)
-        AllDone -> gold.copy(alpha = 0.55f)
+        AllDone -> style.accent.copy(alpha = 0.55f)
         Paused -> Color.White.copy(alpha = 0.18f)
     }
 }
@@ -427,4 +497,140 @@ private fun heroButtonState(goal: V2Goal): HeroButtonState = when {
     goal.status == V2Goal.Status.PAUSED -> HeroButtonState.Paused
     goal.hasCheckedInToday -> HeroButtonState.CheckedInToday
     else -> HeroButtonState.Active
+}
+
+enum class V2GoalHeroStyle {
+    TwilightBlue,
+    WarmSunset,
+    MistyDawn,
+    ClassicFairway,
+    ;
+
+    val accent: Color
+        get() = when (this) {
+            TwilightBlue -> TwilightBlueAccent
+            WarmSunset -> WarmSunsetAccent
+            MistyDawn -> MistyDawnAccent
+            ClassicFairway -> Gold
+        }
+
+    val primaryText: Color
+        get() = when (this) {
+            WarmSunset -> Color(0xFFFFF5E8)
+            MistyDawn -> Color(0xFFF0FFF4)
+            else -> Color.White
+        }
+
+    val secondaryText: Color
+        get() = when (this) {
+            ClassicFairway -> Color.White.copy(alpha = 0.68f)
+            TwilightBlue -> Color.White.copy(alpha = 0.75f)
+            WarmSunset -> Color(0xFFFFF0DB).copy(alpha = 0.72f)
+            MistyDawn -> Color(0xFFE6FFE8).copy(alpha = 0.68f)
+        }
+
+    val mutedText: Color
+        get() = when (this) {
+            ClassicFairway -> Color.White.copy(alpha = 0.48f)
+            TwilightBlue -> Color.White.copy(alpha = 0.55f)
+            WarmSunset -> Color(0xFFFFF0DB).copy(alpha = 0.52f)
+            MistyDawn -> Color(0xFFE6FFE8).copy(alpha = 0.48f)
+        }
+
+    val buttonText: Color
+        get() = when (this) {
+            MistyDawn -> Color(0xFF1E2218)
+            else -> Color.White
+        }
+
+    val progressTrack: Color
+        get() = when (this) {
+            ClassicFairway -> Color.White.copy(alpha = 0.18f)
+            TwilightBlue -> Color.White.copy(alpha = 0.22f)
+            WarmSunset -> Color.White.copy(alpha = 0.20f)
+            MistyDawn -> Color(0xFFD8E2DC).copy(alpha = 0.26f)
+        }
+
+    val borderColor: Color
+        get() = when (this) {
+            ClassicFairway -> Color.White.copy(alpha = 0.12f)
+            else -> Color.White.copy(alpha = 0.08f)
+        }
+
+    val shadowColor: Color
+        get() = when (this) {
+            TwilightBlue -> Color(0xFF0A2A5E).copy(alpha = 0.60f)
+            WarmSunset -> Color(0xFF7B2D00).copy(alpha = 0.60f)
+            MistyDawn -> Color(0xFF2D3D2A).copy(alpha = 0.55f)
+            ClassicFairway -> Color(0xFF2D6A4F).copy(alpha = 0.24f)
+        }
+
+    val buttonShadow: Color
+        get() = when (this) {
+            ClassicFairway -> Gold.copy(alpha = 0.40f)
+            TwilightBlue -> TwilightBlueAccent.copy(alpha = 0.45f)
+            WarmSunset -> WarmSunsetAccent.copy(alpha = 0.45f)
+            MistyDawn -> MistyDawnAccent.copy(alpha = 0.40f)
+        }
+
+    val backgroundColors: List<Color>
+        get() = when (this) {
+            TwilightBlue -> listOf(Color(0xFF0A2A5E), Color(0xFF1565C0), Color(0xFF0A1E4A))
+            WarmSunset -> listOf(Color(0xFF7B2D00), Color(0xFFC75000), Color(0xFF4A1800))
+            MistyDawn -> listOf(Color(0xFF2D3D2A), Color(0xFF4A5C42), Color(0xFF1E2E1C))
+            ClassicFairway -> listOf(Color(0xFF1B4332), Color(0xFF2D6A4F))
+        }
+
+    val verticalOverlay: List<Color>
+        get() = when (this) {
+            TwilightBlue -> listOf(Color(0xFF0A1E4A).copy(alpha = 0.88f), Color(0xFF1565C0).copy(alpha = 0.20f), Color(0xFF0A2A5E).copy(alpha = 0.75f))
+            WarmSunset -> listOf(Color(0xFF7B2D00).copy(alpha = 0.88f), Color(0xFFC75000).copy(alpha = 0.18f), Color(0xFF3C0A50).copy(alpha = 0.65f))
+            MistyDawn -> listOf(Color(0xFF1E2E1C).copy(alpha = 0.88f), Color(0xFF4A5C42).copy(alpha = 0.15f), Color(0xFF2D3D2A).copy(alpha = 0.72f))
+            ClassicFairway -> emptyList()
+        }
+
+    val glowColor: Color
+        get() = when (this) {
+            TwilightBlue -> TwilightBlueAccent.copy(alpha = 0.24f)
+            WarmSunset -> Color(0xFFFFA028).copy(alpha = 0.32f)
+            MistyDawn -> MistyDawnAccent.copy(alpha = 0.14f)
+            ClassicFairway -> Color.Transparent
+        }
+
+    val glowCenterX: Float
+        get() = when (this) {
+            MistyDawn, WarmSunset -> 0.5f
+            else -> 0.5f
+        }
+
+    val glowCenterY: Float
+        get() = when (this) {
+            TwilightBlue -> 0.85f
+            WarmSunset -> 0.55f
+            MistyDawn -> 0.4f
+            ClassicFairway -> 0.5f
+        }
+
+    val topWash: Color?
+        get() = when (this) {
+            MistyDawn -> Color(0xFFB0BEC5).copy(alpha = 0.18f)
+            else -> null
+        }
+
+    val bottomWash: Color?
+        get() = when (this) {
+            WarmSunset -> Color(0xFF46145A).copy(alpha = 0.55f)
+            MistyDawn -> MistyDawnAccent.copy(alpha = 0.10f)
+            else -> null
+        }
+
+    val cornerRadius = 16.dp
+
+    companion object {
+        fun cycled(index: Int): V2GoalHeroStyle {
+            val styles = listOf(ClassicFairway, TwilightBlue, WarmSunset, MistyDawn)
+            val normalized = ((index % styles.size) + styles.size) % styles.size
+            return styles[normalized]
+        }
+    }
 }

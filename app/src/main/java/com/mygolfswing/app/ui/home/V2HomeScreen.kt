@@ -1,22 +1,40 @@
 package com.mygolfswing.app.ui.home
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Upgrade
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,6 +77,9 @@ fun V2HomeScreen(
     onOpenSwingCalendar: () -> Unit = onSwitchToMemo,
     onOpenGrowthPool: () -> Unit = onOpenSwingCalendar,
     onAddTap: () -> Unit = {},
+    onOpenTrajectory: () -> Unit = {},
+    onOpenAnalysis: () -> Unit = {},
+    onOpenOnlineDownload: () -> Unit = {},
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
     val goals by V2GoalStore.goals.collectAsState()
@@ -124,6 +145,10 @@ fun V2HomeScreen(
                     onCreateGoal = onCreateGoal,
                     onOpenAllGoals = onOpenAllGoals,
                     onOpenGoalDetail = onOpenGoalDetail,
+                    onOpenTrajectory = onOpenTrajectory,
+                    onOpenAnalysis = onOpenAnalysis,
+                    onOpenOnlineDownload = onOpenOnlineDownload,
+                    onSwitchToPlaza = onSwitchToPlaza,
                 )
             }
 
@@ -203,6 +228,10 @@ private fun GoalsBlock(
     onCreateGoal: () -> Unit,
     onOpenAllGoals: () -> Unit,
     onOpenGoalDetail: (UUID) -> Unit,
+    onOpenTrajectory: () -> Unit = {},
+    onOpenAnalysis: () -> Unit = {},
+    onOpenOnlineDownload: () -> Unit = {},
+    onSwitchToPlaza: () -> Unit = {},
 ) {
     val goals by V2GoalStore.goals.collectAsState()
     val activeGoals = remember(goals) {
@@ -211,79 +240,239 @@ private fun GoalsBlock(
     val focused = remember(activeGoals) {
         activeGoals.firstOrNull { it.todayFocus } ?: activeGoals.firstOrNull()
     }
-    val focusedIndex = remember(activeGoals, focused) {
-        activeGoals.indexOfFirst { it.id == focused?.id }.takeIf { it >= 0 } ?: 0
-    }
-    val others = remember(activeGoals, focused) {
-        activeGoals.filter { it.id != focused?.id }.take(2)
-    }
-    val remaining = remember(activeGoals, focused) {
-        val visible = activeGoals.count { it.id != focused?.id }
-        (visible - 2).coerceAtLeast(0)
+    val homeDeckGoals = remember(activeGoals, focused) {
+        if (focused == null) activeGoals
+        else listOf(focused) + activeGoals.filter { it.id != focused.id }
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = DSSpacing.lg),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
     ) {
-        focused?.let { g ->
-            key(g.id, g.status, g.progress.current, g.progress.lastIncrementAt, g.hasCheckedInToday) {
-                V2GoalHeroCard(
-                    goal = g,
-                    style = V2GoalHeroStyle.cycled(focusedIndex),
-                    linkedMemoCount = V2GoalStore.linkedMemoCount(g),
-                    linkedVideoCount = V2GoalStore.linkedVideoCount(g),
-                    onEdit = onOpenAllGoals,
-                    onComplete = { V2GoalStore.checkIn(g.id) },
-                    onTap = { onOpenGoalDetail(g.id) },
-                )
-            }
-        }
-        others.forEach { g ->
-            key(g.id, g.status, g.progress.current, g.progress.lastIncrementAt, g.hasCheckedInToday) {
-                V2GoalRow(
-                    goal = g,
-                    onTap = { onOpenGoalDetail(g.id) },
-                    onComplete = { V2GoalStore.checkIn(g.id) },
-                )
-            }
-        }
-        ManageAllGoalsFooter(
-            remaining = remaining,
-            onTap = onOpenAllGoals,
+        V2GoalCardDeck(
+            goals = homeDeckGoals,
+            onEdit = { onOpenAllGoals() },
+            onCheckIn = { V2GoalStore.checkIn(it.id) },
+            onTap = { onOpenGoalDetail(it.id) },
+        )
+
+        V2HomeToolEntryGrid(
+            onTrajectoryTap = onOpenTrajectory,
+            onAnalysisTap = onOpenAnalysis,
+            onDownloadTap = onOpenOnlineDownload,
         )
     }
 }
 
 @Composable
-private fun ManageAllGoalsFooter(remaining: Int, onTap: () -> Unit) {
+private fun V2GoalCardDeck(
+    goals: List<V2Goal>,
+    onEdit: (V2Goal) -> Unit,
+    onCheckIn: (V2Goal) -> Unit,
+    onTap: (V2Goal) -> Unit,
+) {
+    if (goals.isEmpty()) return
+
+    val pagerState = rememberPagerState(pageCount = { goals.size })
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(236.dp),
+        ) {
+            // 叠牌背景：最多展示后面 2 张，偏移 + 缩小 + 半透明
+            for (offset in minOf(goals.size - 1, 2) downTo 1) {
+                val nextIndex = (pagerState.currentPage + offset) % goals.size
+                val goal = goals[nextIndex]
+                val scaleFactor = 1f - offset * 0.045f
+                val alpha = if (offset == 1) 0.38f else 0.22f
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer {
+                            scaleX = scaleFactor
+                            scaleY = scaleFactor
+                            translationX = (offset * 14).dp.toPx()
+                            translationY = (offset * 10).dp.toPx()
+                            this.alpha = alpha
+                        },
+                ) {
+                    V2GoalHeroCard(
+                        goal = goal,
+                        style = V2GoalHeroStyle.cycled(nextIndex),
+                        linkedMemoCount = V2GoalStore.linkedMemoCount(goal),
+                        linkedVideoCount = V2GoalStore.linkedVideoCount(goal),
+                    )
+                }
+            }
+
+            // 可滑动的主卡片层
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(236.dp)
+                    .zIndex(1f),
+            ) { page ->
+                val goal = goals[page]
+                key(goal.id, goal.status, goal.progress.current, goal.progress.lastIncrementAt, goal.hasCheckedInToday) {
+                    V2GoalHeroCard(
+                        goal = goal,
+                        style = V2GoalHeroStyle.cycled(page),
+                        linkedMemoCount = V2GoalStore.linkedMemoCount(goal),
+                        linkedVideoCount = V2GoalStore.linkedVideoCount(goal),
+                        onEdit = { onEdit(goal) },
+                        onComplete = { onCheckIn(goal) },
+                        onTap = { onTap(goal) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = if (goals.size > 1) 18.dp else 0.dp),
+                    )
+                }
+            }
+        }
+
+        // 分页指示点（多于 1 个目标时显示）
+        if (goals.size > 1) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                goals.indices.forEach { index ->
+                    val isSelected = pagerState.currentPage == index
+                    val dotWidth by animateDpAsState(
+                        targetValue = if (isSelected) 18.dp else 6.dp,
+                        animationSpec = tween(200),
+                        label = "dot_width_$index",
+                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .width(dotWidth)
+                            .height(6.dp)
+                            .background(
+                                color = if (isSelected) DSColors.deepGreen else DSColors.shadowGray.copy(alpha = 0.28f),
+                                shape = RoundedCornerShape(50),
+                            ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─── 常用工具入口网格（对齐 iOS V2HomeToolEntryGrid）────────────────────────────
+
+private data class ToolEntry(
+    val title: String,
+    val subtitle: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val accent: androidx.compose.ui.graphics.Color,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun V2HomeToolEntryGrid(
+    onTrajectoryTap: () -> Unit,
+    onAnalysisTap: () -> Unit,
+    onDownloadTap: () -> Unit,
+) {
+    val entries = listOf(
+        ToolEntry("分析工具", "动作对比", Icons.Filled.BarChart, androidx.compose.ui.graphics.Color(0xFF3B82F6), onAnalysisTap),
+        ToolEntry("轨迹绘制", "球路标注", Icons.Filled.Edit, androidx.compose.ui.graphics.Color(0xFF52B788), onTrajectoryTap),
+        ToolEntry("在线下载", "导入视频", Icons.Filled.Download, DSColors.fairway, onDownloadTap),
+    )
+
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (remaining > 0) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
             Text(
-                text = "还有 $remaining 个目标在管理页",
+                text = "常用工具",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = DSColors.inkGreen,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "常用功能入口",
                 style = DSTypography.caption,
                 color = DSColors.shadowGray,
             )
         }
+
         Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.clickable { onTap() },
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(text = "管理所有目标", style = DSTypography.cardTitle, color = DSColors.deepGreen)
+            entries.forEach { entry ->
+                ToolEntryButton(
+                    entry = entry,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolEntryButton(entry: ToolEntry, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(18.dp),
+                spotColor = DSColors.deepGreen.copy(alpha = 0.07f),
+            )
+            .background(DSColors.cardWhite, shape = RoundedCornerShape(18.dp))
+            .border(
+                width = 1.dp,
+                color = entry.accent.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = entry.onClick)
+            .padding(vertical = 14.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .background(entry.accent.copy(alpha = 0.14f), shape = CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
-                imageVector = Icons.Filled.ChevronRight,
+                imageVector = entry.icon,
                 contentDescription = null,
-                tint = DSColors.deepGreen,
-                modifier = Modifier.size(14.dp),
+                tint = entry.accent,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = entry.title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = DSColors.inkGreen,
+                maxLines = 1,
+            )
+            Text(
+                text = entry.subtitle,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = DSColors.shadowGray,
+                maxLines = 1,
             )
         }
     }

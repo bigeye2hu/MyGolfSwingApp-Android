@@ -3,6 +3,8 @@ package com.mygolfswing.app.ui.home
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.R
 import com.mygolfswing.app.data.model.V2Goal
 
-private val Gold = Color(0xFFE0A82E)
+private val Gold = Color(0xFFD4A017)
 private val TwilightBlueAccent = Color(0xFF38BDF8)
 private val WarmSunsetAccent = Color(0xFFF97316)
 private val MistyDawnAccent = Color(0xFF86EFAC)
@@ -98,6 +100,13 @@ fun V2GoalHeroCard(
             ) {
                 Text(
                     text = goal.title,
+                    style = TextStyle(
+                        shadow = Shadow(
+                            color = Color.Black.copy(alpha = 0.28f),
+                            offset = Offset(0f, 1f),
+                            blurRadius = 1f,
+                        ),
+                    ),
                     color = style.primaryText,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Black,
@@ -172,72 +181,91 @@ private fun GolfScapeBackground(style: V2GoalHeroStyle, modifier: Modifier = Mod
                 )
             }
 
-            else -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.linearGradient(
-                                colors = style.backgroundColors,
-                                start = Offset.Zero,
-                                end = Offset(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()),
-                            ),
-                        ),
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(style.glowColor, Color.Transparent),
-                                center = Offset(
-                                    x = constraints.maxWidth * style.glowCenterX,
-                                    y = constraints.maxHeight * style.glowCenterY,
-                                ),
-                                radius = constraints.maxWidth.coerceAtLeast(constraints.maxHeight) * 0.8f,
-                            ),
-                        ),
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(style.verticalOverlay),
-                        ),
-                )
-                style.topWash?.let { wash ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(wash, Color.Transparent),
-                                ),
-                            ),
-                    )
-                }
-                style.bottomWash?.let { wash ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, wash),
-                                ),
-                            ),
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f)),
-                            ),
-                        ),
-                )
-            }
+            else -> FigmaImageBackground(style = style)
         }
+    }
+}
+
+/**
+ * 对齐 iOS `figmaImageBackground`：底层色块 + 实景图全填充 + 渐变遮罩 + 径向光晕 + 底部暗角。
+ */
+@Composable
+private fun FigmaImageBackground(style: V2GoalHeroStyle) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = style.backgroundColors,
+                        start = Offset.Zero,
+                        end = Offset.Infinite,
+                    ),
+                ),
+        )
+
+        style.themeImageRes?.let { imageRes ->
+            Image(
+                painter = painterResource(id = imageRes),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
+        // overlayColors 按 iOS 约定存为 bottom→top，反转后对应 Compose 默认的 top→bottom
+        if (style.overlayColors.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = style.overlayColors.reversed(),
+                        ),
+                    ),
+            )
+        }
+
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(style.glowColor, Color.Transparent),
+                            center = Offset(
+                                x = constraints.maxWidth * style.glowCenterX,
+                                y = constraints.maxHeight * style.glowCenterY,
+                            ),
+                            radius = constraints.maxWidth.coerceAtLeast(constraints.maxHeight) * 0.8f,
+                        ),
+                    ),
+            )
+        }
+
+        style.topWash?.let { wash ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(colors = listOf(wash, Color.Transparent))),
+            )
+        }
+
+        style.bottomWash?.let { wash ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(colors = listOf(Color.Transparent, wash))),
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f))),
+                ),
+        )
     }
 }
 
@@ -581,12 +609,34 @@ enum class V2GoalHeroStyle {
             ClassicFairway -> listOf(Color(0xFF1B4332), Color(0xFF2D6A4F))
         }
 
-    val verticalOverlay: List<Color>
+    /** 对齐 iOS figmaImageBackground 的 overlayColors（bottom→top 方向渐变） */
+    val overlayColors: List<Color>
         get() = when (this) {
-            TwilightBlue -> listOf(Color(0xFF0A1E4A).copy(alpha = 0.88f), Color(0xFF1565C0).copy(alpha = 0.20f), Color(0xFF0A2A5E).copy(alpha = 0.75f))
-            WarmSunset -> listOf(Color(0xFF7B2D00).copy(alpha = 0.88f), Color(0xFFC75000).copy(alpha = 0.18f), Color(0xFF3C0A50).copy(alpha = 0.65f))
-            MistyDawn -> listOf(Color(0xFF1E2E1C).copy(alpha = 0.88f), Color(0xFF4A5C42).copy(alpha = 0.15f), Color(0xFF2D3D2A).copy(alpha = 0.72f))
+            TwilightBlue -> listOf(
+                Color(0xFF0A2A5E).copy(alpha = 0.75f),
+                Color(0xFF1565C0).copy(alpha = 0.20f),
+                Color(0xFF0A1E4A).copy(alpha = 0.88f),
+            )
+            WarmSunset -> listOf(
+                Color(0xFF3C0A50).copy(alpha = 0.65f),
+                Color(0xFFC75000).copy(alpha = 0.18f),
+                Color(0xFF7B2D00).copy(alpha = 0.88f),
+            )
+            MistyDawn -> listOf(
+                Color(0xFF2D3D2A).copy(alpha = 0.72f),
+                Color(0xFF4A5C42).copy(alpha = 0.15f),
+                Color(0xFF1E2E1C).copy(alpha = 0.88f),
+            )
             ClassicFairway -> emptyList()
+        }
+
+    /** 对应 iOS imageset 里的实景背景图；ClassicFairway 用草地图，其余用主题摄影图 */
+    val themeImageRes: Int?
+        get() = when (this) {
+            TwilightBlue -> R.drawable.v2_goal_twilight
+            WarmSunset -> R.drawable.v2_goal_sunset
+            MistyDawn -> R.drawable.v2_goal_misty_dawn
+            ClassicFairway -> null
         }
 
     val glowColor: Color

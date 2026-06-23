@@ -121,6 +121,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
     var showQuickAdd by remember { mutableStateOf(false) }
     var bootstrapping by remember { mutableStateOf(true) }
     var pendingOnlinePick by remember { mutableStateOf<V2OnlineVideoSelection?>(null) }
+    var showGolfCamTrajectory by remember { mutableStateOf(false) }
 
     fun completePostAuthRefresh() {
         showQuickAdd = false
@@ -234,6 +235,7 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
                 selectedTab = V2Tab.HOME
                 nav.resetTo(Destination.Login)
             },
+            onOpenTrajectory = { showGolfCamTrajectory = true },
             modifier = modifier,
         )
         Destination.AllGoals -> V2AllGoalsScreen(
@@ -411,6 +413,12 @@ fun V2RootScreen(modifier: Modifier = Modifier) {
         )
     }
 
+    if (showGolfCamTrajectory) {
+        com.mygolfswing.app.ui.golfcam.GolfCamTrajectoryEntry(
+            onDismiss = { showGolfCamTrajectory = false },
+        )
+    }
+
 }
 
 @Composable
@@ -444,6 +452,7 @@ private fun TabsScaffold(
     onOpenTerms: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onLogoutComplete: () -> Unit,
+    onOpenTrajectory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -474,6 +483,9 @@ private fun TabsScaffold(
                     onOpenSwingCalendar = onOpenSwingCalendar,
                     onOpenGrowthPool = onOpenGrowthPool,
                     onAddTap = onShowQuickAdd,
+                    onOpenTrajectory = onOpenTrajectory,
+                    onOpenAnalysis = {},
+                    onOpenOnlineDownload = {},
                 )
                 V2Tab.MEMO -> V2MemoListScreen(
                     onCreateMemo = onShowQuickAdd,

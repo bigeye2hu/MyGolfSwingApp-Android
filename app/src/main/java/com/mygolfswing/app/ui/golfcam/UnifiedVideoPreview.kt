@@ -409,35 +409,52 @@ private fun LandingOverlay(
     val nx = landing?.normalizedX ?: 0.5f
     val ny = landing?.normalizedY ?: 0.5f
 
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    onLandingChange?.invoke(
-                        (offset.x / size.width).coerceIn(0.02f, 0.98f),
-                        (offset.y / size.height).coerceIn(0.02f, 0.98f),
-                    )
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val wPx = with(density) { maxWidth.toPx() }
+        val hPx = with(density) { maxHeight.toPx() }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            onLandingChange?.invoke(
+                                (offset.x / wPx).coerceIn(0.02f, 0.98f),
+                                (offset.y / hPx).coerceIn(0.02f, 0.98f),
+                            )
+                        },
+                    ) { change, _ ->
+                        change.consume()
+                        onLandingChange?.invoke(
+                            (change.position.x / wPx).coerceIn(0.02f, 0.98f),
+                            (change.position.y / hPx).coerceIn(0.02f, 0.98f),
+                        )
+                    }
                 }
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        onLandingChange?.invoke(
+                            (offset.x / wPx).coerceIn(0.02f, 0.98f),
+                            (offset.y / hPx).coerceIn(0.02f, 0.98f),
+                        )
+                    }
+                },
+        ) {
+            val cx = nx * size.width
+            val cy = ny * size.height
+            val outerRadius = 18.dp.toPx()
+            val innerRadius = 11.dp.toPx()
+            val strokeWidth = 2.dp.toPx()
+            val d = 4.dp.toPx()
+            drawCircle(color = DSColors.fairway.copy(alpha = 0.22f), radius = outerRadius, center = Offset(cx, cy))
+            drawCircle(color = DSColors.fairway, radius = innerRadius, center = Offset(cx, cy), style = Stroke(strokeWidth))
+            val path = Path().apply {
+                moveTo(cx, cy - d); lineTo(cx + d, cy); lineTo(cx, cy + d); lineTo(cx - d, cy); close()
             }
-            .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
-                    onLandingChange?.invoke(
-                        (change.position.x / size.width).coerceIn(0.02f, 0.98f),
-                        (change.position.y / size.height).coerceIn(0.02f, 0.98f),
-                    )
-                }
-            },
-    ) {
-        val cx = nx * size.width
-        val cy = ny * size.height
-        drawCircle(color = DSColors.fairway.copy(alpha = 0.22f), radius = 36f, center = Offset(cx, cy))
-        drawCircle(color = DSColors.fairway, radius = 22f, center = Offset(cx, cy), style = Stroke(2.8f))
-        val d = 7f
-        val path = Path().apply {
-            moveTo(cx, cy - d); lineTo(cx + d, cy); lineTo(cx, cy + d); lineTo(cx - d, cy); close()
+            drawPath(path, color = DSColors.fairway)
         }
-        drawPath(path, color = DSColors.fairway)
     }
 }
 
@@ -489,6 +506,7 @@ private fun FlightCurveOverlay(
                     },
                     onDragEnd = { dragging = null },
                 ) { change, _ ->
+                    change.consume()
                     val w = size.width.toFloat(); val h = size.height.toFloat()
                     val newX = (change.position.x / w).coerceIn(0.02f, 0.98f)
                     val newY = (change.position.y / h).coerceIn(-0.5f, 1.2f)
@@ -508,12 +526,12 @@ private fun FlightCurveOverlay(
 
         drawGolfCamCurveStroke(p0 = p0, p1 = p1, p2 = p2, p3 = p3)
 
-        drawCircle(Color.White.copy(alpha = 0.9f), 9f, p0)
-        drawCircle(Color.White.copy(alpha = 0.9f), 9f, p3)
-        drawCircle(DSColors.fairway.copy(alpha = 0.25f), 26f, p1)
-        drawCircle(DSColors.fairway, 14f, p1)
-        drawCircle(DSColors.fairway.copy(alpha = 0.25f), 26f, p2)
-        drawCircle(DSColors.fairway, 14f, p2)
+        drawCircle(Color.White.copy(alpha = 0.9f), 4.5.dp.toPx(), p0)
+        drawCircle(Color.White.copy(alpha = 0.9f), 4.5.dp.toPx(), p3)
+        drawCircle(DSColors.fairway.copy(alpha = 0.25f), 18.dp.toPx(), p1)
+        drawCircle(DSColors.fairway, 9.dp.toPx(), p1)
+        drawCircle(DSColors.fairway.copy(alpha = 0.25f), 18.dp.toPx(), p2)
+        drawCircle(DSColors.fairway, 9.dp.toPx(), p2)
     }
 }
 

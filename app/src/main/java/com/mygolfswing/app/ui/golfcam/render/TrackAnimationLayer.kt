@@ -22,6 +22,7 @@ import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
+import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 
@@ -73,12 +74,17 @@ fun TrajectoryAnimationOverlay(
     elapsedMs: Long,
     modifier: Modifier = Modifier,
 ) {
-    val model = remember(bezier, timing, style) {
-        TrajectoryMotionModel(
-            bezier = bezier,
-            timing = timing,
-            params = TrajectoryMotionModel.parametersFromStyle(style),
-        )
+    val legacyProgressAtTime = remember(bezier, timing, style) {
+        if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+            null
+        } else {
+            val model = TrajectoryMotionModel(
+                bezier = bezier,
+                timing = timing,
+                params = TrajectoryMotionModel.parametersFromStyle(style),
+            )
+            model::progressAtTime
+        }
     }
 
     val arcTable = remember(bezier) { ArcLengthTable(bezier) }
@@ -90,7 +96,7 @@ fun TrajectoryAnimationOverlay(
         timing = timing,
         style = style,
         elapsedSec = elapsedSec,
-        legacyProgressAtTime = model::progressAtTime,
+        legacyProgressAtTime = legacyProgressAtTime,
     )
 
     val textMeasurer = rememberTextMeasurer()

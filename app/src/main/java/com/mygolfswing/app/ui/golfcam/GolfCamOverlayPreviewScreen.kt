@@ -66,10 +66,12 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
+import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
+import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -285,12 +287,18 @@ private suspend fun exportVideoWithTrajectory(
     val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 3000L
     val fps = timing.fps.roundToInt().coerceIn(1, 120)
 
-    val model = TrajectoryMotionModel(
-        bezier = selection.flightCurve.bezierPath,
-        timing = timing,
-        params = TrajectoryMotionModel.parametersFromStyle(selection.style),
-    )
-    val arcTable = ArcLengthTable(selection.flightCurve.bezierPath)
+    val bezier = selection.flightCurve.bezierPath
+    val legacyProgressAtTime = if (selection.style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+        null
+    } else {
+        val model = TrajectoryMotionModel(
+            bezier = bezier,
+            timing = timing,
+            params = TrajectoryMotionModel.parametersFromStyle(selection.style),
+        )
+        model::progressAtTime
+    }
+    val arcTable = ArcLengthTable(bezier)
 
     // 输出文件
     val outputFile = File(context.cacheDir, "trajectory_export_${System.currentTimeMillis()}.mp4")
@@ -334,7 +342,7 @@ private suspend fun exportVideoWithTrajectory(
         }
 
         // 绘制轨迹叠加
-        drawTrajectoryOnCanvas(c, model, arcTable, selection.style, elapsedSec, width.toFloat(), height.toFloat(), timing)
+        drawTrajectoryOnCanvas(c, bezier, arcTable, selection.style, elapsedSec, width.toFloat(), height.toFloat(), timing, legacyProgressAtTime)
 
         surface.unlockCanvasAndPost(c)
 
@@ -421,27 +429,28 @@ private suspend fun exportVideoWithTrajectory(
 
 private fun drawTrajectoryOnCanvas(
     canvas: AndroidCanvas,
-    model: TrajectoryMotionModel,
+    bezier: BezierPath,
     arcTable: ArcLengthTable,
     style: TrackStyle,
     elapsedSec: Double,
     width: Float,
     height: Float,
     timing: TrajectoryTiming,
+    legacyProgressAtTime: ((Double) -> Double)?,
 ) {
     val snapshot = TrajectoryOverlayFrameSampler.sample(
-        bezier = model.bezier,
+        bezier = bezier,
         arcTable = arcTable,
         timing = timing,
         style = style,
         elapsedSec = elapsedSec,
-        legacyProgressAtTime = model::progressAtTime,
+        legacyProgressAtTime = legacyProgressAtTime,
     ) ?: return
     val tuning = style.renderTuning
 
     TrajectoryRibbonRenderer.draw(
         canvas = canvas,
-        bezier = model.bezier,
+        bezier = bezier,
         arcTable = arcTable,
         headProgress = snapshot.headProgress,
         tailProgress = snapshot.tailProgress,

@@ -320,6 +320,38 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun trajectoryOverlaySamplerUsesLegacyMotionOnlyForOldAlgorithm() {
+        val bezier = BezierPath(
+            p0 = NormalizedPoint(0.10f, 0.80f),
+            p1 = NormalizedPoint(0.18f, 0.30f),
+            p2 = NormalizedPoint(0.60f, 0.20f),
+            p3 = NormalizedPoint(0.90f, 0.60f),
+        )
+        val arcTable = ArcLengthTable(bezier)
+        val timing = TrajectoryTiming(impactTimeMs = 0L, landingTimeMs = 3000L, fps = 60.0)
+
+        val golfCamLike = TrajectoryOverlayFrameSampler.sample(
+            bezier = bezier,
+            arcTable = arcTable,
+            timing = timing,
+            style = TrackStyle(activeTrajectoryAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE),
+            elapsedSec = 1.0,
+            legacyProgressAtTime = { 0.01 },
+        ) ?: error("missing V5 sample")
+        val legacy = TrajectoryOverlayFrameSampler.sample(
+            bezier = bezier,
+            arcTable = arcTable,
+            timing = timing,
+            style = TrackStyle(activeTrajectoryAlgorithm = TrajectoryAlgorithmKind.CURRENT_V5),
+            elapsedSec = 1.0,
+            legacyProgressAtTime = { 0.25 },
+        ) ?: error("missing legacy sample")
+
+        assertEquals(GolfCamSpeedConfig.progress(1.0 / 3.0, GolfCamSpeedConfig.DEFAULT_LEVEL).toFloat(), golfCamLike.headProgress, 1e-6f)
+        assertEquals(0.25f, legacy.headProgress, 1e-6f)
+    }
+
+    @Test
     fun distanceLabelRenderSpecMatchesIosOffsetAndStackedTextRules() {
         val height = 1080f
         val metrics = DistanceLabelTextMetrics(

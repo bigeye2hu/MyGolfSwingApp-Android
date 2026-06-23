@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.golfcam.model
 
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.serialization.json.JsonArray
@@ -140,6 +141,74 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(1250L, GolfCamFrameTimeline.timeMsForFrame(trimStartMs = 1000L, frameIndex = 15, frameRate = 60.0))
         assertEquals(540, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 60.0))
         assertEquals(270, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 30.0))
+    }
+
+    @Test
+    fun trajectoryOverlaySamplerCoversPreviewExportAcceptanceFrames() {
+        val bezier = BezierPath(
+            p0 = NormalizedPoint(0.08f, 0.78f),
+            p1 = NormalizedPoint(0.18f, 0.20f),
+            p2 = NormalizedPoint(0.55f, 0.10f),
+            p3 = NormalizedPoint(0.90f, 0.58f),
+        )
+        val arcTable = ArcLengthTable(bezier)
+        val timing = TrajectoryTiming(impactTimeMs = 0L, landingTimeMs = 3000L, fps = 60.0)
+        val style = TrackStyle(
+            speedLevel = GolfCamSpeedConfig.DEFAULT_LEVEL,
+            tailHalfLife = 70.0,
+            showDistance = true,
+            totalDistance = 150.0,
+            distanceUnit = DistanceUnit.YARDS,
+        )
+        val sampleTimes = listOf(
+            15.0 / timing.fps,
+            timing.totalDurationSec * 0.5,
+            timing.totalDurationSec - (1.0 / timing.fps),
+        )
+
+        val samples = sampleTimes.map { elapsed ->
+            TrajectoryOverlayFrameSampler.sample(
+                bezier = bezier,
+                arcTable = arcTable,
+                timing = timing,
+                style = style,
+                elapsedSec = elapsed,
+            ) ?: error("missing trajectory sample")
+        }
+
+        samples.zip(sampleTimes).forEach { (sample, elapsed) ->
+            assertEquals(
+                GolfCamSpeedConfig.progress(elapsed / timing.totalDurationSec, style.speedLevel).toFloat(),
+                sample.headProgress,
+                1e-6f,
+            )
+            assertEquals(
+                GolfCamSpeedConfig.displayDistance(
+                    totalDistance = style.totalDistance,
+                    elapsedSec = elapsed,
+                    totalDurationSec = timing.totalDurationSec,
+                    speedLevel = style.speedLevel,
+                    frameRate = timing.fps,
+                ),
+                sample.distance,
+            )
+            assertTrue(sample.tailProgress <= sample.headProgress)
+            assertTrue(sample.headPoint.x in 0f..1f)
+        }
+
+        assertTrue(samples[0].headProgress < samples[1].headProgress)
+        assertTrue(samples[1].headProgress < samples[2].headProgress)
+        assertTrue((samples.last().distance ?: 0) <= style.totalDistance.toInt())
+        assertEquals(
+            style.totalDistance.toInt(),
+            TrajectoryOverlayFrameSampler.sample(
+                bezier = bezier,
+                arcTable = arcTable,
+                timing = timing,
+                style = style,
+                elapsedSec = timing.totalDurationSec,
+            )?.distance,
+        )
     }
 
     @Test

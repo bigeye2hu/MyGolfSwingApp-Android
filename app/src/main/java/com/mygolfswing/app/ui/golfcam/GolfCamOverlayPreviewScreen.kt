@@ -66,15 +66,14 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
-import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
-import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
@@ -428,42 +427,34 @@ private fun drawTrajectoryOnCanvas(
     height: Float,
     timing: TrajectoryTiming,
 ) {
-    val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
-        GolfCamSpeedConfig.progress(elapsedSec / timing.totalDurationSec, style.speedLevel)
-    } else {
-        model.progressAtTime(elapsedSec)
-    }.toFloat()
-        .coerceIn(0f, 1f)
-    if (headProgress <= 0f) return
-
-    val tailProgress = GolfCamSpeedConfig.visibleTailStartProgress(
-        headProgress = headProgress.toDouble(),
-        tailHalfLife = style.tailHalfLife,
-        activeAlgorithm = style.activeTrajectoryAlgorithm,
-        apexProgress = arcTable.apexProgress().toDouble(),
-    ).toFloat()
+    val snapshot = TrajectoryOverlayFrameSampler.sample(
+        bezier = model.bezier,
+        arcTable = arcTable,
+        timing = timing,
+        style = style,
+        elapsedSec = elapsedSec,
+        legacyProgressAtTime = model::progressAtTime,
+    ) ?: return
     val tuning = style.renderTuning
-    val apexProgress = arcTable.apexProgress()
 
     TrajectoryRibbonRenderer.draw(
         canvas = canvas,
         bezier = model.bezier,
         arcTable = arcTable,
-        headProgress = headProgress,
-        tailProgress = tailProgress,
+        headProgress = snapshot.headProgress,
+        tailProgress = snapshot.tailProgress,
         style = style,
         width = width,
         height = height,
     )
 
-    val head = model.bezier.pointAtArcProgress(headProgress, arcTable)
-    val headX = head.x * width
-    val headY = head.y * height
+    val headX = snapshot.headPoint.x * width
+    val headY = snapshot.headPoint.y * height
     val headGlowRadius = GolfCamTrailGeometry.strokeWidth(
         widthPct = style.widthPct,
         videoHeight = height,
-        globalProgress = headProgress,
-        apexProgress = apexProgress,
+        globalProgress = snapshot.headProgress,
+        apexProgress = snapshot.apexProgress,
         tuning = tuning,
     ) * 1.25f
     val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
@@ -478,14 +469,7 @@ private fun drawTrajectoryOnCanvas(
     glowPaint.color = android.graphics.Color.argb((255 * glowAlphas.core).toInt().coerceIn(0, 255), 255, 255, 255)
     canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
 
-    if (style.showDistance) {
-        val displayDist = GolfCamSpeedConfig.displayDistance(
-            totalDistance = style.totalDistance,
-            elapsedSec = elapsedSec,
-            totalDurationSec = timing.totalDurationSec,
-            speedLevel = style.speedLevel,
-            frameRate = timing.fps,
-        )
+    snapshot.distance?.let { displayDist ->
         drawDistanceLabelOnCanvas(canvas, headX, headY, displayDist, style.distanceUnit.abbreviation, width, height)
     }
 }

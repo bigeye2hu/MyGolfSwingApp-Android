@@ -18,11 +18,9 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
-import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
-import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 
@@ -48,9 +46,7 @@ fun TrajectoryStaticOverlay(
             style = style,
         )
         drawHeadGlow(
-            bezier = bezier,
-            arcTable = arcTable,
-            headProgress = 1f,
+            headPoint = bezier.pointAtArcProgress(1f, arcTable),
             color = Color(style.primaryColorArgb()),
             radius = style.headGlowRadius(videoHeight = size.height, headProgress = 1f, apexProgress = arcTable.apexProgress()),
             alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
@@ -84,61 +80,45 @@ fun TrajectoryAnimationOverlay(
         )
     }
 
-    val totalDurSec = timing.totalDurationSec
     val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
     val elapsedSec = elapsedMs / 1000.0
-    val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
-        GolfCamSpeedConfig.progress(elapsedSec / totalDurSec, style.speedLevel)
-    } else {
-        model.progressAtTime(elapsedSec)
-    }.toFloat().coerceIn(0f, 1f)
-
-    val tailProgress = remember(headProgress, style.tailHalfLife, style.activeTrajectoryAlgorithm, arcTable) {
-        GolfCamSpeedConfig.visibleTailStartProgress(
-            headProgress = headProgress.toDouble(),
-            tailHalfLife = style.tailHalfLife,
-            activeAlgorithm = style.activeTrajectoryAlgorithm,
-            apexProgress = arcTable.apexProgress().toDouble(),
-        ).toFloat()
-    }
+    val snapshot = TrajectoryOverlayFrameSampler.sample(
+        bezier = bezier,
+        arcTable = arcTable,
+        timing = timing,
+        style = style,
+        elapsedSec = elapsedSec,
+        legacyProgressAtTime = model::progressAtTime,
+    )
 
     val textMeasurer = rememberTextMeasurer()
 
     Canvas(modifier = modifier.fillMaxSize()) {
-        drawTrajectoryPath(
-            bezier = bezier,
-            arcTable = arcTable,
-            headProgress = headProgress,
-            tailProgress = tailProgress,
-            style = style,
-        )
-        if (headProgress > 0f && headProgress < 1f) {
-            drawHeadGlow(
+        snapshot?.let { frame ->
+            drawTrajectoryPath(
                 bezier = bezier,
                 arcTable = arcTable,
-                headProgress = headProgress,
-                color = Color(style.primaryColorArgb()),
-                radius = style.headGlowRadius(videoHeight = size.height, headProgress = headProgress, apexProgress = arcTable.apexProgress()),
-                alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
+                headProgress = frame.headProgress,
+                tailProgress = frame.tailProgress,
+                style = style,
             )
-        }
-        if (style.showDistance && headProgress > 0f) {
-            val displayDist = GolfCamSpeedConfig.displayDistance(
-                totalDistance = style.totalDistance,
-                elapsedSec = elapsedMs / 1000.0,
-                totalDurationSec = totalDurSec,
-                speedLevel = style.speedLevel,
-                frameRate = timing.fps,
-            )
-            drawDistanceLabel(
-                bezier = bezier,
-                arcTable = arcTable,
-                headProgress = headProgress,
-                distance = displayDist,
-                unit = style.distanceUnit.abbreviation,
-                textMeasurer = textMeasurer,
-            )
+            if (frame.headProgress < 1f) {
+                drawHeadGlow(
+                    headPoint = frame.headPoint,
+                    color = Color(style.primaryColorArgb()),
+                    radius = style.headGlowRadius(videoHeight = size.height, headProgress = frame.headProgress, apexProgress = frame.apexProgress),
+                    alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
+                )
+            }
+            frame.distance?.let { displayDist ->
+                drawDistanceLabel(
+                    headPoint = frame.headPoint,
+                    distance = displayDist,
+                    unit = style.distanceUnit.abbreviation,
+                    textMeasurer = textMeasurer,
+                )
+            }
         }
     }
 }
@@ -168,15 +148,12 @@ private fun DrawScope.drawTrajectoryPath(
 }
 
 private fun DrawScope.drawHeadGlow(
-    bezier: BezierPath,
-    arcTable: ArcLengthTable,
-    headProgress: Float,
+    headPoint: NormalizedPoint,
     color: Color,
     radius: Float,
     alphaMultiplier: Float,
 ) {
-    val pt = bezier.pointAtArcProgress(headProgress, arcTable)
-    val center = Offset(pt.x * size.width, pt.y * size.height)
+    val center = Offset(headPoint.x * size.width, headPoint.y * size.height)
     val alphas = TrajectoryOverlayRenderSpec.headGlowAlphas(alphaMultiplier)
 
     drawCircle(color = color.copy(alpha = alphas.outer), radius = radius * 1.8f, center = center)
@@ -185,16 +162,13 @@ private fun DrawScope.drawHeadGlow(
 }
 
 private fun DrawScope.drawDistanceLabel(
-    bezier: BezierPath,
-    arcTable: ArcLengthTable,
-    headProgress: Float,
+    headPoint: NormalizedPoint,
     distance: Int,
     unit: String,
     textMeasurer: TextMeasurer,
 ) {
     if (distance <= 0) return
-    val pt = bezier.pointAtArcProgress(headProgress, arcTable)
-    val center = Offset(pt.x * size.width, pt.y * size.height)
+    val center = Offset(headPoint.x * size.width, headPoint.y * size.height)
 
     val text = "$distance$unit"
     val style = TextStyle(

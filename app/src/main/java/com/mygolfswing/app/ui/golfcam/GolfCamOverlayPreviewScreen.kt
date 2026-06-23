@@ -66,6 +66,7 @@ import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
+import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
@@ -414,8 +415,7 @@ private fun drawTrajectoryOnCanvas(
     ).toFloat()
     val tuning = style.renderTuning
     val bandAlpha = trackBandAlpha(style)
-    val baseStrokeWidth = 8f * (style.widthPct / 50.0).toFloat()
-    val taperPower = style.renderTuning.widthTaperPower.takeIf { it > 0f } ?: style.taperPower
+    val apexProgress = arcTable.apexProgress()
 
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.STROKE
@@ -435,10 +435,15 @@ private fun drawTrajectoryOnCanvas(
             val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
             val alpha = (alphaFor(localProgress.coerceIn(0f, 1f), colorProgress) * 255f).toInt().coerceIn(0, 255)
             if (alpha <= 0) continue
-            val taper = Math.pow((1f - colorProgress).toDouble(), taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
 
             paint.color = interpolateTrackColor(style.colorPreset.gradientColors, colorProgress, alpha)
-            paint.strokeWidth = baseStrokeWidth * taper * widthMultiplier
+            paint.strokeWidth = GolfCamTrailGeometry.strokeWidth(
+                widthPct = style.widthPct,
+                videoHeight = height,
+                globalProgress = colorProgress,
+                apexProgress = apexProgress,
+                tuning = tuning,
+            ) * widthMultiplier
             canvas.drawLine(p0.x * width, p0.y * height, p1.x * width, p1.y * height, paint)
         }
     }
@@ -479,17 +484,24 @@ private fun drawTrajectoryOnCanvas(
     val head = model.bezier.pointAtArcProgress(headProgress, arcTable)
     val headX = head.x * width
     val headY = head.y * height
+    val headGlowRadius = GolfCamTrailGeometry.strokeWidth(
+        widthPct = style.widthPct,
+        videoHeight = height,
+        globalProgress = headProgress,
+        apexProgress = apexProgress,
+        tuning = tuning,
+    ) * 1.25f
     val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
     val glowColor = interpolateTrackColor(style.colorPreset.gradientColors, 1f, (255 * glowAlpha).toInt().coerceIn(0, 255))
     val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.FILL
     }
     glowPaint.color = glowColor
-    canvas.drawCircle(headX, headY, baseStrokeWidth * 2.5f * 1.8f, glowPaint)
+    canvas.drawCircle(headX, headY, headGlowRadius * 1.8f, glowPaint)
     glowPaint.alpha = (190 * glowAlpha).toInt().coerceIn(0, 255)
-    canvas.drawCircle(headX, headY, baseStrokeWidth * 2.5f, glowPaint)
+    canvas.drawCircle(headX, headY, headGlowRadius, glowPaint)
     glowPaint.color = android.graphics.Color.argb((230 * glowAlpha).toInt().coerceIn(0, 255), 255, 255, 255)
-    canvas.drawCircle(headX, headY, baseStrokeWidth, glowPaint)
+    canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
 
     if (style.showDistance) {
         val displayDist = GolfCamSpeedConfig.displayDistance(

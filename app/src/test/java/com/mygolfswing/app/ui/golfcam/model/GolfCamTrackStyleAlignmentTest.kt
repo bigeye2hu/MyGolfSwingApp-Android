@@ -108,6 +108,52 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun trailStrokeWidthUsesIosHeightScaledRibbonFormula() {
+        val tuning = TrackRenderTuning()
+        val tailWidth1080 = GolfCamTrailGeometry.strokeWidth(
+            widthPct = 40.0,
+            videoHeight = 1080f,
+            globalProgress = 0f,
+            apexProgress = 0.6f,
+            tuning = tuning,
+        )
+        val headWidth1080 = GolfCamTrailGeometry.strokeWidth(
+            widthPct = 40.0,
+            videoHeight = 1080f,
+            globalProgress = 1f,
+            apexProgress = 0.6f,
+            tuning = tuning,
+        )
+        val tailWidth720 = GolfCamTrailGeometry.strokeWidth(
+            widthPct = 40.0,
+            videoHeight = 720f,
+            globalProgress = 0f,
+            apexProgress = 0.6f,
+            tuning = tuning,
+        )
+        val apexWidth = GolfCamTrailGeometry.strokeWidth(
+            widthPct = 40.0,
+            videoHeight = 1080f,
+            globalProgress = 0.6f,
+            apexProgress = 0.6f,
+            tuning = tuning,
+        )
+        val nearApexWidth = GolfCamTrailGeometry.strokeWidth(
+            widthPct = 40.0,
+            videoHeight = 1080f,
+            globalProgress = 0.6f,
+            apexProgress = 0.95f,
+            tuning = tuning,
+        )
+
+        assertEquals(15.80f, tailWidth1080, 0.02f)
+        assertEquals(2.17f, headWidth1080, 0.02f)
+        assertEquals(tailWidth1080 * (720f / 1080f), tailWidth720, 0.02f)
+        assertTrue(tailWidth1080 > headWidth1080)
+        assertTrue(apexWidth < nearApexWidth)
+    }
+
+    @Test
     fun cloudConfigConsumesDefaultsPresetsAndRenderTuningWithIosClamps() {
         val config = JsonObject(
             mapOf(

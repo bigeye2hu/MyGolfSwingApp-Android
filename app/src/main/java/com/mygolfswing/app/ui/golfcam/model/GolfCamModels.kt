@@ -917,6 +917,37 @@ data class TrackStyle(
     val renderTuning: TrackRenderTuning = TrackRenderTuning(),
 )
 
+object GolfCamTrailGeometry {
+    private const val TRAIL_WIDTH_HEAD_RATIO = 0.00085f
+    private const val TAIL_WIDTH_MIN_RATIO = 0.0040f
+    private const val TAIL_WIDTH_MAX_RATIO = 0.0095f
+    private const val GLOW_WIDTH_MULTIPLIER = 1.18f
+
+    fun strokeWidth(
+        widthPct: Double,
+        videoHeight: Float,
+        globalProgress: Float,
+        apexProgress: Float,
+        tuning: TrackRenderTuning,
+    ): Float {
+        val safeHeight = videoHeight.coerceAtLeast(1f)
+        val pct = (widthPct.toFloat().coerceIn(0f, 160f)) / 100f
+        val headHalfWidth = safeHeight * TRAIL_WIDTH_HEAD_RATIO * GLOW_WIDTH_MULTIPLIER
+        val minTailHalfWidth = safeHeight * TAIL_WIDTH_MIN_RATIO * GLOW_WIDTH_MULTIPLIER
+        val maxTailHalfWidth = safeHeight * TAIL_WIDTH_MAX_RATIO * GLOW_WIDTH_MULTIPLIER
+        val tailHalfWidth = minTailHalfWidth + (maxTailHalfWidth - minTailHalfWidth) * pct
+        val p = globalProgress.coerceIn(0f, 1f)
+        val taper = (1f - p).toDouble().pow(tuning.widthTaperPower.toDouble()).toFloat()
+        val halfWidth = headHalfWidth + (tailHalfWidth - headHalfWidth) * taper
+        val apex = apexProgress.coerceIn(0.05f, 0.95f)
+        val radius = tuning.apexThinRadius.coerceAtLeast(0.001f)
+        val distance = (abs(p - apex) / radius).coerceIn(0f, 1f)
+        val apexWeight = 1f - distance * distance * (3f - 2f * distance)
+        val thinFactor = 1f - tuning.apexThinStrength * apexWeight
+        return (2f * halfWidth * thinFactor).coerceAtLeast(0.10f)
+    }
+}
+
 // ─── 工作流步骤输出（对齐 iOS GolfCamWorkflowState 各步骤）───────────────────────
 
 data class TrimResult(val startMs: Long, val endMs: Long)

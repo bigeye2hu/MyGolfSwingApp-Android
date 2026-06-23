@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
+import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
@@ -57,7 +58,6 @@ fun TrajectoryStaticOverlay(
     modifier: Modifier = Modifier,
 ) {
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
-    val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
     val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
     Canvas(modifier = modifier.fillMaxSize()) {
@@ -67,7 +67,6 @@ fun TrajectoryStaticOverlay(
             headProgress = 1f,
             tailProgress = 0f,
             gradientColors = gradientColors,
-            baseStrokeWidth = baseWidth,
             style = style,
         )
         drawHeadGlow(
@@ -75,7 +74,7 @@ fun TrajectoryStaticOverlay(
             arcTable = arcTable,
             headProgress = 1f,
             color = gradientColors.last(),
-            radius = baseWidth * 2.5f,
+            radius = style.headGlowRadius(videoHeight = size.height, headProgress = 1f, apexProgress = arcTable.apexProgress()),
             alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
         )
     }
@@ -108,7 +107,6 @@ fun TrajectoryAnimationOverlay(
     }
 
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
-    val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
     val totalDurSec = timing.totalDurationSec
     val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
@@ -137,7 +135,6 @@ fun TrajectoryAnimationOverlay(
             headProgress = headProgress,
             tailProgress = tailProgress,
             gradientColors = gradientColors,
-            baseStrokeWidth = baseWidth,
             style = style,
         )
         if (headProgress > 0f && headProgress < 1f) {
@@ -146,7 +143,7 @@ fun TrajectoryAnimationOverlay(
                 arcTable = arcTable,
                 headProgress = headProgress,
                 color = gradientColors.last(),
-                radius = baseWidth * 2.5f,
+                radius = style.headGlowRadius(videoHeight = size.height, headProgress = headProgress, apexProgress = arcTable.apexProgress()),
                 alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
             )
         }
@@ -177,7 +174,6 @@ private fun DrawScope.drawTrajectoryPath(
     headProgress: Float,
     tailProgress: Float,
     gradientColors: List<Color>,
-    baseStrokeWidth: Float,
     style: TrackStyle,
     steps: Int = 120,
 ) {
@@ -189,7 +185,7 @@ private fun DrawScope.drawTrajectoryPath(
         listOf(gradientColors.firstOrNull() ?: Color.White, Color.White)
     } else gradientColors
     val bandAlpha = style.trackBandAlpha()
-    val taperPower = style.effectiveTaperPower()
+    val apexProgress = arcTable.apexProgress()
 
     fun drawSegmentPass(widthMultiplier: Float, alphaFor: (tailFade: Float, globalProgress: Float) -> Float) {
         for (i in 0 until steps) {
@@ -199,8 +195,13 @@ private fun DrawScope.drawTrajectoryPath(
 
             val localProgress = (t0 - tailProgress) / max(headProgress - tailProgress, 1e-6f)
             val colorProgress = t0.coerceIn(0f, 1f)
-            val taper = (1f - colorProgress).toDouble().pow(taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
-            val strokeWidth = baseStrokeWidth * taper * widthMultiplier
+            val strokeWidth = GolfCamTrailGeometry.strokeWidth(
+                widthPct = style.widthPct,
+                videoHeight = size.height,
+                globalProgress = colorProgress,
+                apexProgress = apexProgress,
+                tuning = tuning,
+            ) * widthMultiplier
 
             val colorIdx = (colorProgress * (effectiveColors.size - 1)).toInt().coerceIn(0, effectiveColors.size - 2)
             val colorFrac = colorProgress * (effectiveColors.size - 1) - colorIdx
@@ -318,8 +319,14 @@ private fun lerpColor(a: Color, b: Color, t: Float): Color {
 private fun TrackStyle.trackBandAlpha(): Float =
     (colorAlpha * colorPreset.bandAlpha * renderTuning.bandAlphaMultiplier).toFloat().coerceIn(0f, 1f)
 
-private fun TrackStyle.effectiveTaperPower(): Float =
-    renderTuning.widthTaperPower.takeIf { it > 0f } ?: taperPower
+private fun TrackStyle.headGlowRadius(videoHeight: Float, headProgress: Float, apexProgress: Float): Float =
+    GolfCamTrailGeometry.strokeWidth(
+        widthPct = widthPct,
+        videoHeight = videoHeight,
+        globalProgress = headProgress,
+        apexProgress = apexProgress,
+        tuning = renderTuning,
+    ) * 1.25f
 
 private fun highlightWeight(progress: Float, start: Float, peak: Float, end: Float, falloffPower: Float): Float {
     if (progress < start || progress > end) return 0f

@@ -129,6 +129,7 @@ fun TrajectoryAnimationOverlay(
                 elapsedSec = elapsedMs / 1000.0,
                 totalDurationSec = totalDurSec,
                 speedLevel = style.speedLevel,
+                frameRate = timing.fps,
             )
             drawDistanceLabel(
                 bezier = bezier,
@@ -176,10 +177,11 @@ private fun DrawScope.drawHeadGlow(
 ) {
     val pt = bezier.pointAtArcProgress(headProgress, arcTable)
     val center = Offset(pt.x * size.width, pt.y * size.height)
+    val alphas = TrajectoryOverlayRenderSpec.headGlowAlphas(alphaMultiplier)
 
-    drawCircle(color = color.copy(alpha = 0.35f * alphaMultiplier), radius = radius * 1.8f, center = center)
-    drawCircle(color = color.copy(alpha = 0.75f * alphaMultiplier), radius = radius, center = center)
-    drawCircle(color = Color.White.copy(alpha = 0.9f * alphaMultiplier), radius = radius * 0.4f, center = center)
+    drawCircle(color = color.copy(alpha = alphas.outer), radius = radius * 1.8f, center = center)
+    drawCircle(color = color.copy(alpha = alphas.body), radius = radius, center = center)
+    drawCircle(color = Color.White.copy(alpha = alphas.core), radius = radius * 0.4f, center = center)
 }
 
 private fun DrawScope.drawDistanceLabel(
@@ -201,15 +203,19 @@ private fun DrawScope.drawDistanceLabel(
         color = Color.White,
     )
     val measured = textMeasurer.measure(text, style)
-    val offsetX = center.x - measured.size.width / 2f
-    val offsetY = center.y - measured.size.height - 16f
+    val labelWidth = measured.size.width + 12f
+    val labelHeight = measured.size.height + 8f
+    val offsetX = (center.x - measured.size.width / 2f)
+        .coerceIn(6f, (size.width - measured.size.width - 6f).coerceAtLeast(6f))
+    val offsetY = (center.y - measured.size.height - 16f)
+        .coerceIn(4f, (size.height - measured.size.height - 4f).coerceAtLeast(4f))
 
     drawRoundRect(
         color = Color.Black.copy(alpha = 0.45f),
         topLeft = Offset(offsetX - 6f, offsetY - 4f),
         size = androidx.compose.ui.geometry.Size(
-            (measured.size.width + 12f).toFloat(),
-            (measured.size.height + 8f).toFloat(),
+            labelWidth.toFloat(),
+            labelHeight.toFloat(),
         ),
         cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f),
     )

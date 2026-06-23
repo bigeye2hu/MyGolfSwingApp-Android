@@ -775,8 +775,14 @@ object GolfCamSpeedConfig {
         return progress(sampledTime / dur, speedLevel)
     }
 
-    fun displayDistance(totalDistance: Double, elapsedSec: Double, totalDurationSec: Double, speedLevel: Double): Int {
-        val p = displayProgress(elapsedSec, totalDurationSec, speedLevel)
+    fun displayDistance(
+        totalDistance: Double,
+        elapsedSec: Double,
+        totalDurationSec: Double,
+        speedLevel: Double,
+        frameRate: Double = 30.0,
+    ): Int {
+        val p = displayProgress(elapsedSec, totalDurationSec, speedLevel, frameRate = frameRate)
         val final = totalDistance.roundToInt()
         if (p >= 1.0) return max(0, final)
         return max(0, min(final, (totalDistance * p).toInt()))

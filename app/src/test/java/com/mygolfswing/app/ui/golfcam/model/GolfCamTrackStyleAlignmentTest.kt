@@ -1,5 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
+import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -81,6 +83,54 @@ class GolfCamTrackStyleAlignmentTest {
                 speedLevel = speedLevel,
             ),
         )
+    }
+
+    @Test
+    fun displayDistanceCadenceHonorsVideoFrameRate() {
+        val thirtyFps = GolfCamSpeedConfig.displayDistance(
+            totalDistance = 150.0,
+            elapsedSec = 1.04,
+            totalDurationSec = 3.0,
+            speedLevel = GolfCamSpeedConfig.DEFAULT_LEVEL,
+            frameRate = 30.0,
+        )
+        val sixtyFps = GolfCamSpeedConfig.displayDistance(
+            totalDistance = 150.0,
+            elapsedSec = 1.04,
+            totalDurationSec = 3.0,
+            speedLevel = GolfCamSpeedConfig.DEFAULT_LEVEL,
+            frameRate = 60.0,
+        )
+
+        assertTrue(sixtyFps > thirtyFps)
+    }
+
+    @Test
+    fun headGlowAlphaSpecIsSharedByPreviewAndExport() {
+        val alphas = TrajectoryOverlayRenderSpec.headGlowAlphas(0.7f)
+
+        assertEquals(0.245f, alphas.outer, 1e-6f)
+        assertEquals(0.525f, alphas.body, 1e-6f)
+        assertEquals(0.63f, alphas.core, 1e-6f)
+    }
+
+    @Test
+    fun videoDisplayGeometryMatchesIosResizeAspectFit() {
+        val portraitInTallScreen = VideoDisplayGeometry.fit(
+            containerWidth = 1440f,
+            containerHeight = 3120f,
+            videoAspectRatio = 9f / 16f,
+        )
+        val portraitInShortBox = VideoDisplayGeometry.fit(
+            containerWidth = 1440f,
+            containerHeight = 1000f,
+            videoAspectRatio = 9f / 16f,
+        )
+
+        assertEquals(1440f, portraitInTallScreen.width, 0.01f)
+        assertEquals(2560f, portraitInTallScreen.height, 0.01f)
+        assertEquals(562.5f, portraitInShortBox.width, 0.01f)
+        assertEquals(1000f, portraitInShortBox.height, 0.01f)
     }
 
     @Test

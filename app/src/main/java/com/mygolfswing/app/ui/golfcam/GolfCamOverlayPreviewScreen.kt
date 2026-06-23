@@ -16,6 +16,7 @@ import android.provider.MediaStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -73,14 +74,22 @@ import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
-import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
+import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.max
+import kotlin.math.roundToInt
+
+private data class VideoPlaybackConfig(
+    val frameRate: Double = 30.0,
+    val aspectRatio: Float = 9f / 16f,
+)
 
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
@@ -102,6 +111,13 @@ fun GolfCamOverlayPreviewScreen(
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf(false) }
+    var videoConfig by remember { mutableStateOf(VideoPlaybackConfig()) }
+
+    LaunchedEffect(videoUri) {
+        videoConfig = withContext(Dispatchers.IO) {
+            readVideoPlaybackConfig(context, videoUri)
+        }
+    }
 
     val impactMs = impactTimeMs
     val flightTimeMs = (selection.flightCurve.landingPoint.flightTimeSec * 1000)
@@ -110,7 +126,7 @@ fun GolfCamOverlayPreviewScreen(
     val timing = TrajectoryTiming(
         impactTimeMs = impactMs,
         landingTimeMs = impactMs + flightTimeMs,
-        fps = 30.0,
+        fps = videoConfig.frameRate,
     )
 
     val player = remember {
@@ -133,24 +149,36 @@ fun GolfCamOverlayPreviewScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // 视频播放层（点击切换播放/暂停）
-        AndroidView(
-            factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures { playing = !playing }
-                },
-        )
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val displaySize = VideoDisplayGeometry.fit(
+                containerWidth = maxWidth.value,
+                containerHeight = maxHeight.value,
+                videoAspectRatio = videoConfig.aspectRatio,
+            )
 
-        // 轨迹叠加层
-        TrajectoryAnimationOverlay(
-            bezier = selection.flightCurve.bezierPath,
-            timing = timing,
-            style = selection.style,
-            playing = playing,
-            elapsedMs = elapsedMs,
-        )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(displaySize.width.dp, displaySize.height.dp),
+            ) {
+                AndroidView(
+                    factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures { playing = !playing }
+                        },
+                )
+
+                TrajectoryAnimationOverlay(
+                    bezier = selection.flightCurve.bezierPath,
+                    timing = timing,
+                    style = selection.style,
+                    playing = playing,
+                    elapsedMs = elapsedMs,
+                )
+            }
+        }
 
         // 顶部栏
         Row(
@@ -254,7 +282,7 @@ private suspend fun exportVideoWithTrajectory(
     val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1280
     val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 720
     val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 3000L
-    val fps = 30
+    val fps = timing.fps.roundToInt().coerceIn(1, 120)
 
     val model = TrajectoryMotionModel(
         bezier = selection.flightCurve.bezierPath,
@@ -442,11 +470,12 @@ private fun drawTrajectoryOnCanvas(
     val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.FILL
     }
-    glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlpha)
+    val glowAlphas = TrajectoryOverlayRenderSpec.headGlowAlphas(glowAlpha)
+    glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.outer)
     canvas.drawCircle(headX, headY, headGlowRadius * 1.8f, glowPaint)
-    glowPaint.alpha = (190 * glowAlpha).toInt().coerceIn(0, 255)
+    glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.body)
     canvas.drawCircle(headX, headY, headGlowRadius, glowPaint)
-    glowPaint.color = android.graphics.Color.argb((230 * glowAlpha).toInt().coerceIn(0, 255), 255, 255, 255)
+    glowPaint.color = android.graphics.Color.argb((255 * glowAlphas.core).toInt().coerceIn(0, 255), 255, 255, 255)
     canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
 
     if (style.showDistance) {
@@ -455,9 +484,48 @@ private fun drawTrajectoryOnCanvas(
             elapsedSec = elapsedSec,
             totalDurationSec = timing.totalDurationSec,
             speedLevel = style.speedLevel,
+            frameRate = timing.fps,
         )
         drawDistanceLabelOnCanvas(canvas, headX, headY, displayDist, style.distanceUnit.abbreviation, width, height)
     }
+}
+
+private fun readVideoPlaybackConfig(context: Context, videoUri: Uri): VideoPlaybackConfig {
+    val aspectRatio = runCatching {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, videoUri)
+            val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 9
+            val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 16
+            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+            val width = if (rotation == 90 || rotation == 270) rawHeight else rawWidth
+            val height = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
+            width.toFloat() / height.coerceAtLeast(1).toFloat()
+        } finally {
+            retriever.release()
+        }
+    }.getOrDefault(9f / 16f).coerceAtLeast(0.01f)
+
+    val extractor = MediaExtractor()
+    val frameRate = try {
+        extractor.setDataSource(context, videoUri, null)
+        for (trackIndex in 0 until extractor.trackCount) {
+            val format = extractor.getTrackFormat(trackIndex)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+            if (mime.startsWith("video/") && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                return VideoPlaybackConfig(
+                    frameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE).coerceIn(1, 120).toDouble(),
+                    aspectRatio = aspectRatio,
+                )
+            }
+        }
+        30.0
+    } catch (_: Exception) {
+        30.0
+    } finally {
+        extractor.release()
+    }
+    return VideoPlaybackConfig(frameRate = frameRate, aspectRatio = aspectRatio)
 }
 
 private fun trackColorWithAlpha(argb: Long, alpha: Float): Int {

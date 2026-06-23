@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -45,6 +46,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -62,6 +65,7 @@ import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryStaticOverlay
+import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
@@ -83,6 +87,29 @@ fun UnifiedVideoPreview(
 ) {
     var playing by remember { mutableStateOf(false) }
     var elapsedMs by remember { mutableLongStateOf(0L) }
+    var videoAspectRatio by remember { mutableFloatStateOf(9f / 16f) }
+
+    DisposableEffect(player) {
+        @Suppress("DEPRECATION")
+        fun updateAspect(videoSize: VideoSize) {
+            if (videoSize.width > 0 && videoSize.height > 0) {
+                val rawAspect = (videoSize.width * videoSize.pixelWidthHeightRatio) / videoSize.height
+                videoAspectRatio = if (videoSize.unappliedRotationDegrees == 90 || videoSize.unappliedRotationDegrees == 270) {
+                    1f / rawAspect.coerceAtLeast(0.01f)
+                } else {
+                    rawAspect.coerceAtLeast(0.01f)
+                }
+            }
+        }
+        updateAspect(player.videoSize)
+        val listener = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                updateAspect(videoSize)
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
 
     LaunchedEffect(playing) {
         if (playing) player.play() else player.pause()
@@ -95,100 +122,111 @@ fun UnifiedVideoPreview(
         }
     }
 
-    // 圆角卡片容器
     Box(
         modifier = modifier
             .fillMaxSize()
             .clip(RoundedCornerShape(14.dp))
             .background(Color.White),
     ) {
-        // 视频层（点击播放/暂停）
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    this.player = player
-                    useController = false
-                }
-            },
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures { playing = !playing }
-                },
-        )
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            val displaySize = VideoDisplayGeometry.fit(
+                containerWidth = maxWidth.value,
+                containerHeight = maxHeight.value,
+                videoAspectRatio = videoAspectRatio,
+            )
 
-        // 步骤叠加层
-        when (currentStep) {
-            GolfCamStep.IMPACT_POSITION -> ImpactPositionOverlay(
-                state = state,
-                onPositionChange = onImpactPositionChange,
-            )
-            GolfCamStep.LANDING -> LandingOverlay(
-                state = state,
-                onLandingChange = onLandingChange,
-            )
-            GolfCamStep.FLIGHT_CURVE -> FlightCurveOverlay(
-                state = state,
-                onFlightCurveChange = onFlightCurveChange,
-            )
-            GolfCamStep.TRACK_STYLE -> {
-                val bezier = state.flightCurve?.bezierPath
-                val trackStyle = state.trackStyle?.style
-                if (bezier != null && trackStyle != null) {
-                    val timing = state.impactFrame?.let { impact ->
-                        val flightTimeMs = ((state.flightCurve?.landingPoint?.flightTimeSec ?: 3.0) * 1000)
-                            .toLong()
-                            .coerceAtLeast(500L)
-                        TrajectoryTiming(
-                            impactTimeMs = impact.timeMs,
-                            landingTimeMs = impact.timeMs + flightTimeMs,
-                            fps = 30.0,
-                        )
-                    }
-                    if (timing != null) {
-                        TrajectoryAnimationOverlay(
-                            bezier = bezier,
-                            timing = timing,
-                            style = trackStyle,
-                            playing = playing,
-                            elapsedMs = elapsedMs.coerceAtLeast(0L),
-                        )
-                    } else {
-                        TrajectoryStaticOverlay(bezier = bezier, style = trackStyle)
-                    }
-                } else if (bezier != null) {
-                    TrajectoryStaticOverlay(
-                        bezier = bezier,
-                        style = com.mygolfswing.app.ui.golfcam.model.TrackStyle(),
+            Box(
+                modifier = Modifier.size(displaySize.width.dp, displaySize.height.dp),
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            this.player = player
+                            useController = false
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures { playing = !playing }
+                        },
+                )
+
+                when (currentStep) {
+                    GolfCamStep.IMPACT_POSITION -> ImpactPositionOverlay(
+                        state = state,
+                        onPositionChange = onImpactPositionChange,
                     )
+                    GolfCamStep.LANDING -> LandingOverlay(
+                        state = state,
+                        onLandingChange = onLandingChange,
+                    )
+                    GolfCamStep.FLIGHT_CURVE -> FlightCurveOverlay(
+                        state = state,
+                        onFlightCurveChange = onFlightCurveChange,
+                    )
+                    GolfCamStep.TRACK_STYLE -> {
+                        val bezier = state.flightCurve?.bezierPath
+                        val trackStyle = state.trackStyle?.style
+                        if (bezier != null && trackStyle != null) {
+                            val timing = state.impactFrame?.let { impact ->
+                                val flightTimeMs = ((state.flightCurve?.landingPoint?.flightTimeSec ?: 3.0) * 1000)
+                                    .toLong()
+                                    .coerceAtLeast(500L)
+                                TrajectoryTiming(
+                                    impactTimeMs = impact.timeMs,
+                                    landingTimeMs = impact.timeMs + flightTimeMs,
+                                    fps = 30.0,
+                                )
+                            }
+                            if (timing != null) {
+                                TrajectoryAnimationOverlay(
+                                    bezier = bezier,
+                                    timing = timing,
+                                    style = trackStyle,
+                                    playing = playing,
+                                    elapsedMs = elapsedMs.coerceAtLeast(0L),
+                                )
+                            } else {
+                                TrajectoryStaticOverlay(bezier = bezier, style = trackStyle)
+                            }
+                        } else if (bezier != null) {
+                            TrajectoryStaticOverlay(
+                                bezier = bezier,
+                                style = com.mygolfswing.app.ui.golfcam.model.TrackStyle(),
+                            )
+                        }
+                    }
+                    GolfCamStep.IMPACT_FRAME -> {
+                        if (candidateFrames.isNotEmpty()) {
+                            CandidateFrameBadges(
+                                candidates = candidateFrames,
+                                currentFrameIndex = state.impactFrame?.frameIndex ?: -1,
+                                onSelect = onCandidateFrameSelected,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(start = 10.dp, top = 10.dp),
+                            )
+                        }
+                    }
+                    else -> { /* TRIM 无视频叠加，TRIM 显示播放控件 */ }
                 }
-            }
-            GolfCamStep.IMPACT_FRAME -> {
-                if (candidateFrames.isNotEmpty()) {
-                    CandidateFrameBadges(
-                        candidates = candidateFrames,
-                        currentFrameIndex = state.impactFrame?.frameIndex ?: -1,
-                        onSelect = onCandidateFrameSelected,
+
+                if (currentStep == GolfCamStep.TRIM) {
+                    VideoTransportControls(
+                        playing = playing,
+                        onPrev = { player.seekTo((player.currentPosition - 3000L).coerceAtLeast(0L)) },
+                        onPlayPause = { playing = !playing },
+                        onNext = { player.seekTo(player.currentPosition + 3000L) },
                         modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(start = 10.dp, top = 10.dp),
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 12.dp),
                     )
                 }
             }
-            else -> { /* TRIM 无视频叠加，TRIM 显示播放控件 */ }
-        }
-
-        // 播放控制栏（TRIM 步骤显示，其他步骤隐藏）
-        if (currentStep == GolfCamStep.TRIM) {
-            VideoTransportControls(
-                playing = playing,
-                onPrev = { player.seekTo((player.currentPosition - 3000L).coerceAtLeast(0L)) },
-                onPlayPause = { playing = !playing },
-                onNext = { player.seekTo(player.currentPosition + 3000L) },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp),
-            )
         }
     }
 }

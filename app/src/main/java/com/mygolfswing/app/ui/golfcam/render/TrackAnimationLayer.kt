@@ -58,7 +58,6 @@ fun TrajectoryStaticOverlay(
 ) {
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
-    val alphaMultiplier = style.trackAlphaMultiplier()
 
     Canvas(modifier = modifier.fillMaxSize()) {
         drawTrajectoryPath(
@@ -67,8 +66,7 @@ fun TrajectoryStaticOverlay(
             tailProgress = 0f,
             gradientColors = gradientColors,
             baseStrokeWidth = baseWidth,
-            taperPower = style.effectiveTaperPower(),
-            alphaMultiplier = alphaMultiplier,
+            style = style,
         )
         drawHeadGlow(
             bezier = bezier,
@@ -132,8 +130,7 @@ fun TrajectoryAnimationOverlay(
             tailProgress = tailProgress,
             gradientColors = gradientColors,
             baseStrokeWidth = baseWidth,
-            taperPower = style.effectiveTaperPower(),
-            alphaMultiplier = style.trackAlphaMultiplier(),
+            style = style,
         )
         if (headProgress > 0f && headProgress < 1f) {
             drawHeadGlow(
@@ -170,41 +167,80 @@ private fun DrawScope.drawTrajectoryPath(
     tailProgress: Float,
     gradientColors: List<Color>,
     baseStrokeWidth: Float,
-    taperPower: Float,
-    alphaMultiplier: Float,
+    style: TrackStyle,
     steps: Int = 120,
 ) {
     if (headProgress <= 0f) return
+    val tuning = style.renderTuning
+    if (!tuning.showBodyBand && !tuning.showHighlightCore && !tuning.showOuterGlow) return
 
     val effectiveColors = if (gradientColors.size < 2) {
         listOf(gradientColors.firstOrNull() ?: Color.White, Color.White)
     } else gradientColors
+    val bandAlpha = style.trackBandAlpha()
+    val taperPower = style.effectiveTaperPower()
 
-    for (i in 0 until steps) {
-        val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
-        val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
-        if (t1 <= tailProgress || t0 >= headProgress) continue
+    fun drawSegmentPass(widthMultiplier: Float, alphaFor: (tailFade: Float, globalProgress: Float) -> Float) {
+        for (i in 0 until steps) {
+            val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
+            val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
+            if (t1 <= tailProgress || t0 >= headProgress) continue
 
-        val localProgress = (t0 - tailProgress) / max(headProgress - tailProgress, 1e-6f)
-        val colorProgress = t0.coerceIn(0f, 1f)
-        val taper = (1f - colorProgress).toDouble().pow(taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
-        val strokeWidth = baseStrokeWidth * taper
+            val localProgress = (t0 - tailProgress) / max(headProgress - tailProgress, 1e-6f)
+            val colorProgress = t0.coerceIn(0f, 1f)
+            val taper = (1f - colorProgress).toDouble().pow(taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
+            val strokeWidth = baseStrokeWidth * taper * widthMultiplier
 
-        val colorIdx = (colorProgress * (effectiveColors.size - 1)).toInt().coerceIn(0, effectiveColors.size - 2)
-        val colorFrac = colorProgress * (effectiveColors.size - 1) - colorIdx
-        val segColor = lerpColor(effectiveColors[colorIdx], effectiveColors[colorIdx + 1], colorFrac)
+            val colorIdx = (colorProgress * (effectiveColors.size - 1)).toInt().coerceIn(0, effectiveColors.size - 2)
+            val colorFrac = colorProgress * (effectiveColors.size - 1) - colorIdx
+            val segColor = lerpColor(effectiveColors[colorIdx], effectiveColors[colorIdx + 1], colorFrac)
+            val tailFade = localProgress.coerceIn(0f, 1f)
+            val alpha = alphaFor(tailFade, colorProgress).coerceIn(0f, 1f)
+            if (alpha <= 0.001f) continue
 
-        val alpha = ((localProgress * 1.2f).coerceIn(0f, 1f) * alphaMultiplier).coerceIn(0f, 1f)
-        val p0 = bezier.point(t0)
-        val p1 = bezier.point(t1)
+            val p0 = bezier.point(t0)
+            val p1 = bezier.point(t1)
+            drawLine(
+                color = segColor.copy(alpha = alpha),
+                start = Offset(p0.x * size.width, p0.y * size.height),
+                end = Offset(p1.x * size.width, p1.y * size.height),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Butt,
+            )
+        }
+    }
 
-        drawLine(
-            color = segColor.copy(alpha = alpha),
-            start = Offset(p0.x * size.width, p0.y * size.height),
-            end = Offset(p1.x * size.width, p1.y * size.height),
-            strokeWidth = strokeWidth,
-            cap = StrokeCap.Butt,
-        )
+    if (tuning.showOuterGlow) {
+        val glowAlpha = (style.colorAlpha * style.glowOpacity * tuning.outerGlowMultiplier)
+            .toFloat()
+            .coerceIn(0f, 0.70f)
+        val glowWidth = 1.35f + tuning.glowBlurMultiplier.coerceIn(0.25f, 1.20f)
+        drawSegmentPass(widthMultiplier = glowWidth) { tailFade, _ ->
+            glowAlpha * (0.10f + 0.30f * tailFade.toDouble().pow(1.55).toFloat())
+        }
+    }
+
+    if (tuning.showBodyBand) {
+        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
+            bandAlpha * (0.02f + 0.20f * tailFade.toDouble().pow(1.55).toFloat())
+        }
+        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
+            bandAlpha * (tuning.bodyAlphaBase + tuning.bodyAlphaScale * tailFade.toDouble().pow(1.60).toFloat())
+        }
+    }
+
+    if (tuning.showHighlightCore) {
+        drawSegmentPass(widthMultiplier = tuning.highlightWidthRatio.coerceIn(0.30f, 0.85f)) { tailFade, progress ->
+            val weight = highlightWeight(progress, tuning.highlightStart, tuning.highlightPeak, tuning.highlightEnd, tuning.highlightFalloffPower)
+            if (weight <= 0.001f || tailFade <= 0.001f) {
+                0f
+            } else {
+                minOf(
+                    tuning.highlightAlphaMax,
+                    bandAlpha * tuning.highlightStrength * (0.14f + 0.62f * weight),
+                ) * weight * tailFade.toDouble().pow(1.60).toFloat()
+            }
+        }
     }
 }
 
@@ -266,14 +302,26 @@ private fun lerpColor(a: Color, b: Color, t: Float): Color {
     )
 }
 
-private fun TrackStyle.trackAlphaMultiplier(): Float {
-    if (!renderTuning.showBodyBand && !renderTuning.showHighlightCore) return 0f
-    val base = (colorAlpha * colorPreset.bandAlpha * renderTuning.bandAlphaMultiplier).toFloat()
-    val visibilityMultiplier = if (renderTuning.showBodyBand) 1f else renderTuning.highlightAlphaMax
-    return (base * visibilityMultiplier).coerceIn(0f, 1f)
-}
+private fun TrackStyle.trackBandAlpha(): Float =
+    (colorAlpha * colorPreset.bandAlpha * renderTuning.bandAlphaMultiplier).toFloat().coerceIn(0f, 1f)
 
 private fun TrackStyle.effectiveTaperPower(): Float =
     renderTuning.widthTaperPower.takeIf { it > 0f } ?: taperPower
+
+private fun highlightWeight(progress: Float, start: Float, peak: Float, end: Float, falloffPower: Float): Float {
+    if (progress < start || progress > end) return 0f
+    return if (progress <= peak) {
+        smoothStep(start, peak, progress)
+    } else {
+        val t = smoothStep(peak, end, progress)
+        (1f - t).coerceIn(0f, 1f).toDouble().pow(falloffPower.toDouble()).toFloat()
+    }
+}
+
+private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
+    if (kotlin.math.abs(edge1 - edge0) <= 0.0001f) return if (value >= edge1) 1f else 0f
+    val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
 
 private fun Double.pow(exp: Double): Double = Math.pow(this, exp)

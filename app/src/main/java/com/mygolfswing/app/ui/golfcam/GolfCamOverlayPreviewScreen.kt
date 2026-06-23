@@ -404,7 +404,8 @@ private fun drawTrajectoryOnCanvas(
     if (headProgress <= 0f) return
 
     val tailProgress = (headProgress - (style.tailHalfLife / 100.0 / timing.totalDurationSec).toFloat() * 3f).coerceAtLeast(0f)
-    val alphaMultiplier = trackAlphaMultiplier(style)
+    val tuning = style.renderTuning
+    val bandAlpha = trackBandAlpha(style)
     val baseStrokeWidth = 8f * (style.widthPct / 50.0).toFloat()
     val taperPower = style.renderTuning.widthTaperPower.takeIf { it > 0f } ?: style.taperPower
 
@@ -414,22 +415,57 @@ private fun drawTrajectoryOnCanvas(
     }
 
     val steps = 120
-    for (i in 0 until steps) {
-        val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
-        val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
-        if (t1 <= tailProgress || t0 >= headProgress) continue
+    fun drawSegmentPass(widthMultiplier: Float, alphaFor: (tailFade: Float, globalProgress: Float) -> Float) {
+        for (i in 0 until steps) {
+            val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
+            val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
+            if (t1 <= tailProgress || t0 >= headProgress) continue
 
-        val p0 = model.bezier.point(t0)
-        val p1 = model.bezier.point(t1)
-        val colorProgress = t0.coerceIn(0f, 1f)
-        val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
+            val p0 = model.bezier.point(t0)
+            val p1 = model.bezier.point(t1)
+            val colorProgress = t0.coerceIn(0f, 1f)
+            val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
+            val alpha = (alphaFor(localProgress.coerceIn(0f, 1f), colorProgress) * 255f).toInt().coerceIn(0, 255)
+            if (alpha <= 0) continue
+            val taper = Math.pow((1f - colorProgress).toDouble(), taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
 
-        val alpha = (localProgress * 255 * 1.2f * alphaMultiplier).toInt().coerceIn(0, 255)
-        val taper = Math.pow((1f - colorProgress).toDouble(), taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
+            paint.color = interpolateTrackColor(style.colorPreset.gradientColors, colorProgress, alpha)
+            paint.strokeWidth = baseStrokeWidth * taper * widthMultiplier
+            canvas.drawLine(p0.x * width, p0.y * height, p1.x * width, p1.y * height, paint)
+        }
+    }
 
-        paint.color = interpolateTrackColor(style.colorPreset.gradientColors, colorProgress, alpha)
-        paint.strokeWidth = baseStrokeWidth * taper
-        canvas.drawLine(p0.x * width, p0.y * height, p1.x * width, p1.y * height, paint)
+    if (tuning.showOuterGlow) {
+        val glowAlpha = (style.colorAlpha * style.glowOpacity * tuning.outerGlowMultiplier)
+            .toFloat()
+            .coerceIn(0f, 0.70f)
+        val glowWidth = 1.35f + tuning.glowBlurMultiplier.coerceIn(0.25f, 1.20f)
+        drawSegmentPass(widthMultiplier = glowWidth) { tailFade, _ ->
+            glowAlpha * (0.10f + 0.30f * Math.pow(tailFade.toDouble(), 1.55).toFloat())
+        }
+    }
+
+    if (tuning.showBodyBand) {
+        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
+            bandAlpha * (0.02f + 0.20f * Math.pow(tailFade.toDouble(), 1.55).toFloat())
+        }
+        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
+            bandAlpha * (tuning.bodyAlphaBase + tuning.bodyAlphaScale * Math.pow(tailFade.toDouble(), 1.60).toFloat())
+        }
+    }
+
+    if (tuning.showHighlightCore) {
+        drawSegmentPass(widthMultiplier = tuning.highlightWidthRatio.coerceIn(0.30f, 0.85f)) { tailFade, progress ->
+            val weight = highlightWeight(progress, tuning.highlightStart, tuning.highlightPeak, tuning.highlightEnd, tuning.highlightFalloffPower)
+            if (weight <= 0.001f || tailFade <= 0.001f) {
+                0f
+            } else {
+                minOf(
+                    tuning.highlightAlphaMax,
+                    bandAlpha * tuning.highlightStrength * (0.14f + 0.62f * weight),
+                ) * weight * Math.pow(tailFade.toDouble(), 1.60).toFloat()
+            }
+        }
     }
 
     val head = model.bezier.point(headProgress)
@@ -458,12 +494,8 @@ private fun drawTrajectoryOnCanvas(
     }
 }
 
-private fun trackAlphaMultiplier(style: TrackStyle): Float {
-    if (!style.renderTuning.showBodyBand && !style.renderTuning.showHighlightCore) return 0f
-    val base = (style.colorAlpha * style.colorPreset.bandAlpha * style.renderTuning.bandAlphaMultiplier).toFloat()
-    val visibilityMultiplier = if (style.renderTuning.showBodyBand) 1f else style.renderTuning.highlightAlphaMax
-    return (base * visibilityMultiplier).coerceIn(0f, 1f)
-}
+private fun trackBandAlpha(style: TrackStyle): Float =
+    (style.colorAlpha * style.colorPreset.bandAlpha * style.renderTuning.bandAlphaMultiplier).toFloat().coerceIn(0f, 1f)
 
 private fun interpolateTrackColor(colors: List<Long>, progress: Float, alpha: Int): Int {
     val effectiveColors = if (colors.isEmpty()) listOf(0xFFFFFFFF) else colors
@@ -483,6 +515,22 @@ private fun interpolateTrackColor(colors: List<Long>, progress: Float, alpha: In
         return (av + (bv - av) * fraction).toInt().coerceIn(0, 255)
     }
     return android.graphics.Color.argb(alpha, channel(16), channel(8), channel(0))
+}
+
+private fun highlightWeight(progress: Float, start: Float, peak: Float, end: Float, falloffPower: Float): Float {
+    if (progress < start || progress > end) return 0f
+    return if (progress <= peak) {
+        smoothStep(start, peak, progress)
+    } else {
+        val t = smoothStep(peak, end, progress)
+        Math.pow((1f - t).coerceIn(0f, 1f).toDouble(), falloffPower.toDouble()).toFloat()
+    }
+}
+
+private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
+    if (kotlin.math.abs(edge1 - edge0) <= 0.0001f) return if (value >= edge1) 1f else 0f
+    val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
 }
 
 private fun drawDistanceLabelOnCanvas(

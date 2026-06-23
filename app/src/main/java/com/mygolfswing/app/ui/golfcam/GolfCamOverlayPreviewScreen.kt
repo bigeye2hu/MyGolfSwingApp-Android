@@ -422,7 +422,7 @@ private fun drawTrajectoryOnCanvas(
         strokeCap = android.graphics.Paint.Cap.BUTT
     }
 
-    val steps = 120
+    val steps = GolfCamTrailGeometry.SEGMENT_COUNT
     fun drawSegmentPass(widthMultiplier: Float, alphaFor: (tailFade: Float, globalProgress: Float) -> Float) {
         for (i in 0 until steps) {
             val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)

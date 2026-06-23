@@ -175,7 +175,7 @@ private fun DrawScope.drawTrajectoryPath(
     tailProgress: Float,
     gradientColors: List<Color>,
     style: TrackStyle,
-    steps: Int = 120,
+    steps: Int = GolfCamTrailGeometry.SEGMENT_COUNT,
 ) {
     if (headProgress <= 0f) return
     val tuning = style.renderTuning

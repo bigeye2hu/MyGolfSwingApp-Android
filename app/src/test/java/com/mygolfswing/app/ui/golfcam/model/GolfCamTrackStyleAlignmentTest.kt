@@ -12,6 +12,11 @@ import kotlin.math.abs
 class GolfCamTrackStyleAlignmentTest {
 
     @Test
+    fun trajectorySegmentCountMatchesIosTrailV3Config() {
+        assertEquals(360, GolfCamTrailGeometry.SEGMENT_COUNT)
+    }
+
+    @Test
     fun bezierArcProgressMapsThroughArcLengthTable() {
         val bezier = BezierPath(
             p0 = NormalizedPoint(0.05f, 0.85f),

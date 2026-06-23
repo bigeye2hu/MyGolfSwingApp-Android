@@ -918,6 +918,8 @@ data class TrackStyle(
 )
 
 object GolfCamTrailGeometry {
+    const val SEGMENT_COUNT = 360
+
     private const val TRAIL_WIDTH_HEAD_RATIO = 0.00085f
     private const val TAIL_WIDTH_MIN_RATIO = 0.0040f
     private const val TAIL_WIDTH_MAX_RATIO = 0.0095f

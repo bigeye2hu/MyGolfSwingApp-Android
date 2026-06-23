@@ -134,6 +134,15 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun frameTimelineUsesActualVideoFrameRateForEditingSteps() {
+        assertEquals(18, GolfCamFrameTimeline.frameIndexAt(relativeSeconds = 0.30, frameRate = 60.0))
+        assertEquals(9, GolfCamFrameTimeline.frameIndexAt(relativeSeconds = 0.30, frameRate = 30.0))
+        assertEquals(1250L, GolfCamFrameTimeline.timeMsForFrame(trimStartMs = 1000L, frameIndex = 15, frameRate = 60.0))
+        assertEquals(540, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 60.0))
+        assertEquals(270, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 30.0))
+    }
+
+    @Test
     fun visibleTailStartProgressMatchesIosTailPercentRules() {
         assertEquals(
             0.0,

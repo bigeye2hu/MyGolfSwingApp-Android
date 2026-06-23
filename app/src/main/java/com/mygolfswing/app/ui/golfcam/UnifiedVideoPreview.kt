@@ -79,6 +79,7 @@ fun UnifiedVideoPreview(
     currentStep: GolfCamStep,
     state: GolfCamWorkflowState,
     modifier: Modifier = Modifier,
+    videoFrameRate: Double = 30.0,
     candidateFrames: List<CandidateImpactFrame> = emptyList(),
     onCandidateFrameSelected: ((CandidateImpactFrame) -> Unit)? = null,
     onImpactPositionChange: ((Float, Float) -> Unit)? = null,
@@ -179,7 +180,7 @@ fun UnifiedVideoPreview(
                                 TrajectoryTiming(
                                     impactTimeMs = impact.timeMs,
                                     landingTimeMs = impact.timeMs + flightTimeMs,
-                                    fps = 30.0,
+                                    fps = videoFrameRate,
                                 )
                             }
                             if (timing != null) {

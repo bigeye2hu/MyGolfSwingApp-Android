@@ -47,10 +47,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
 import com.mygolfswing.app.ui.golfcam.model.FlightCurveSelection
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.ImpactPositionSelection
@@ -83,9 +85,12 @@ fun FlightPathUnifiedContainer(
     // FlightCurve 帧导航状态
     var flightCurveFrameIndex by remember { mutableIntStateOf(0) }
     var flightCurveTotalFrames by remember { mutableIntStateOf(0) }
+    var flightCurveFrameRate by remember { mutableStateOf<Double?>(null) }
     var durationMs by remember { mutableLongStateOf(0L) }
+    var videoFrameRate by remember { mutableStateOf(30.0) }
     // 音频检测候选帧
     var candidateFrames by remember { mutableStateOf<List<CandidateImpactFrame>>(emptyList()) }
+    var candidateFrameRate by remember { mutableStateOf<Double?>(null) }
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -97,37 +102,52 @@ fun FlightPathUnifiedContainer(
 
     DisposableEffect(Unit) { onDispose { player.release() } }
 
-    LaunchedEffect(player) {
-        player.addListener(object : Player.Listener {
+    DisposableEffect(player) {
+        fun updateFrameRate() {
+            val frameRate = player.videoFormat?.frameRate ?: return
+            if (frameRate > 1f) {
+                videoFrameRate = frameRate.coerceIn(1f, 120f).toDouble()
+            }
+        }
+        updateFrameRate()
+        val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_READY && durationMs <= 0L) {
                     durationMs = player.duration.coerceAtLeast(1L)
                 }
+                updateFrameRate()
             }
-        })
-        if (player.playbackState == Player.STATE_READY && durationMs <= 0L) {
-            durationMs = player.duration.coerceAtLeast(1L)
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                updateFrameRate()
+            }
         }
+        player.addListener(listener)
+        if (player.playbackState == Player.STATE_READY) {
+            durationMs = player.duration.coerceAtLeast(1L)
+            updateFrameRate()
+        }
+        onDispose { player.removeListener(listener) }
     }
 
-    // 裁剪完成后触发音频检测（仅跑一次）
-    LaunchedEffect(state.trimResult) {
+    // 裁剪完成后触发音频检测，候选帧索引按真实视频帧率换算。
+    LaunchedEffect(state.trimResult, videoFrameRate) {
         val trim = state.trimResult ?: return@LaunchedEffect
-        if (candidateFrames.isNotEmpty()) return@LaunchedEffect
+        if (candidateFrames.isNotEmpty() && candidateFrameRate == videoFrameRate) return@LaunchedEffect
         val startSec = trim.startMs / 1000.0
         val endSec = trim.endMs / 1000.0
-        val fps = 30.0
         val rawCandidates = AudioImpactDetector.detect(context, videoUri, startSec, endSec)
         candidateFrames = rawCandidates
             .mapIndexed { _, raw ->
                 val relTime = raw.timeSec - startSec
                 CandidateImpactFrame(
-                    frameIndex = (relTime * fps).toInt().coerceAtLeast(0),
+                    frameIndex = GolfCamFrameTimeline.frameIndexAt(relTime, videoFrameRate),
                     confidence = raw.confidence,
                     timeSec = relTime,
                 )
             }
             .sortedByDescending { it.confidence }
+        candidateFrameRate = videoFrameRate
     }
 
     Box(
@@ -162,6 +182,7 @@ fun FlightPathUnifiedContainer(
                     player = player,
                     currentStep = currentStep,
                     state = state,
+                    videoFrameRate = videoFrameRate,
                     candidateFrames = candidateFrames,
                     onCandidateFrameSelected = { candidate ->
                         val trim = state.trimResult
@@ -231,18 +252,19 @@ fun FlightPathUnifiedContainer(
                     )
                     GolfCamStep.FLIGHT_CURVE -> {
                         val trimStartMs = state.trimResult?.startMs ?: 0L
-                        val fps = 30.0
+                        val fps = videoFrameRate
                         fun seekCurveFrame(frameIndex: Int) {
-                            val target = trimStartMs + (frameIndex / fps * 1000).toLong()
+                            val target = GolfCamFrameTimeline.timeMsForFrame(trimStartMs, frameIndex, fps)
                             player.seekTo(target.coerceAtLeast(0L))
                             player.pause()
                         }
                         // 进入曲线步骤时初始化帧数
-                        LaunchedEffect(durationMs, state.impactFrame) {
-                            if (durationMs > 0 && flightCurveTotalFrames == 0) {
-                                flightCurveTotalFrames = (durationMs / 1000.0 * fps).toInt()
-                                    .coerceAtLeast(1)
-                                flightCurveFrameIndex = state.impactFrame?.frameIndex ?: 0
+                        LaunchedEffect(durationMs, state.impactFrame, fps) {
+                            if (durationMs > 0 && flightCurveFrameRate != fps) {
+                                flightCurveTotalFrames = GolfCamFrameTimeline.totalFrames(durationMs, fps)
+                                flightCurveFrameIndex = (state.impactFrame?.frameIndex ?: flightCurveFrameIndex)
+                                    .coerceIn(0, (flightCurveTotalFrames - 1).coerceAtLeast(0))
+                                flightCurveFrameRate = fps
                                 seekCurveFrame(flightCurveFrameIndex)
                             }
                         }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.filled.SocialDistance
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -48,6 +50,7 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
+import com.mygolfswing.app.ui.golfcam.model.TrajectoryPresetKind
 import com.mygolfswing.app.ui.golfcam.model.defaultTrackColorPresets
 
 // ── 样式类别 ──────────────────────────────────────────────────
@@ -57,12 +60,13 @@ private enum class StyleCategory(val label: String, val icon: ImageVector) {
     WIDTH("宽度", Icons.Filled.LinearScale),
     SPEED("速度", Icons.Filled.Speed),
     TAIL("拖尾", Icons.Filled.Air),
+    TRAJECTORY("弹道", Icons.Filled.ShowChart),
     DISTANCE("距离", Icons.Filled.SocialDistance),
 }
 
 /**
  * 步骤 6：轨迹样式调整（对齐 iOS TrackStyleStepTool）。
- * 颜色 / 宽度 / 速度 / 拖尾 / 距离 分类 Tab。
+ * 颜色 / 宽度 / 速度 / 拖尾 / 弹道 / 距离 分类 Tab。
  */
 @Composable
 fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelection) -> Unit) {
@@ -80,13 +84,13 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         // ── 类别选择 Tab 行 ──
-        Row(
+        LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            StyleCategory.entries.forEach { category ->
+            items(StyleCategory.entries) { category ->
                 val isSelected = category == selectedCategory
                 Column(
                     modifier = Modifier
@@ -151,9 +155,68 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
                     displayText = "%.0f".format(style.tailHalfLife),
                     onChange = { style = style.copy(tailHalfLife = it.toDouble()) },
                 )
+                StyleCategory.TRAJECTORY -> TrajectoryPresetContent(style = style, onChange = { style = it })
                 StyleCategory.DISTANCE -> DistanceContent(style = style, onChange = { style = it })
             }
         }
+    }
+}
+
+@Composable
+private fun TrajectoryPresetContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("弹道算法", color = DSColors.shadowGray, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            Text(
+                style.trajectoryPreset.displayName,
+                color = DSColors.inkGreen,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(TrajectoryPresetKind.entries) { preset ->
+                val selected = preset == style.trajectoryPreset
+                Column(
+                    modifier = Modifier
+                        .width(112.dp)
+                        .height(54.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selected) DSColors.fairway else DSColors.mistGreen.copy(alpha = 0.65f))
+                        .border(
+                            width = if (selected) 0.dp else 1.dp,
+                            color = DSColors.fairway.copy(alpha = 0.24f),
+                            shape = RoundedCornerShape(12.dp),
+                        )
+                        .clickable { onChange(style.copy(trajectoryPreset = preset)) }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        preset.displayName,
+                        color = if (selected) Color.White else DSColors.inkGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        trajectoryPresetSubtitle(preset),
+                        color = if (selected) Color.White.copy(alpha = 0.8f) else DSColors.shadowGray,
+                        fontSize = 9.sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun trajectoryPresetSubtitle(preset: TrajectoryPresetKind): String {
+    return when (preset) {
+        TrajectoryPresetKind.STANDARD -> "均衡飞行节奏"
+        TrajectoryPresetKind.HIGH_ARC -> "顶点更高更柔"
+        TrajectoryPresetKind.LOW_PIERCING -> "低平穿透更快"
+        TrajectoryPresetKind.SOFT_LANDING -> "短杆柔和落地"
+        TrajectoryPresetKind.GOLF_CAM_LIKE -> "学习 GolfCam 节奏"
     }
 }
 

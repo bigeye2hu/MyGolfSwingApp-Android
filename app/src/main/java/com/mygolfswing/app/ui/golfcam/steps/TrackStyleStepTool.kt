@@ -98,6 +98,7 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
                     if (matchedPreset != null) {
                         style.copy(
                             colorPreset = matchedPreset,
+                            colorHex = style.colorHex ?: matchedPreset.bandOuterColor(),
                             glowOpacity = matchedPreset.glowAlpha.toDouble(),
                         )
                     } else {
@@ -315,6 +316,7 @@ private fun ColorContent(
                             onChange(
                                 style.copy(
                                     colorPreset = preset,
+                                    colorHex = preset.bandOuterColor(),
                                     glowOpacity = preset.glowAlpha.toDouble(),
                                 ),
                             )

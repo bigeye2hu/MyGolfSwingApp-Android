@@ -828,7 +828,19 @@ data class TrackColorPreset(
     val glowBlur: Float = 30f,
     val glowAlpha: Float = 0.68f,
     val bandAlpha: Float = 1f,
-)
+) {
+    fun colorAt(progress: Float): Long {
+        val colors = gradientColors.ifEmpty { listOf(0xFFFFFFFF) }
+        if (colors.size == 1) return colors.first()
+        val t = progress.coerceIn(0f, 1f)
+        val scaled = t * (colors.size - 1)
+        val index = scaled.toInt().coerceIn(0, colors.size - 2)
+        val fraction = scaled - index
+        return lerpArgb(colors[index], colors[index + 1], fraction)
+    }
+
+    fun bandOuterColor(): Long = colorAt(0.7f)
+}
 
 val defaultTrackColorPresets = listOf(
     TrackColorPreset("霓虹极光", listOf(0xFFFF6CAE, 0xFFC471F5, 0xFF12C2E9), 30f, 0.70f, 1.00f),
@@ -889,6 +901,7 @@ data class TrackRenderTuning(
 
 data class TrackStyle(
     val colorPreset: TrackColorPreset = defaultTrackColorPresets.getOrElse(2) { defaultTrackColorPresets.first() },
+    val colorHex: Long? = null,
     val colorAlpha: Double = 0.75,
     val glowOpacity: Double = colorPreset.glowAlpha.toDouble(),
     val widthPct: Double = 70.0,
@@ -915,7 +928,9 @@ data class TrackStyle(
     val v4CustomSPeak: Double? = null,
     val effectType: TrackEffectType = TrackEffectType.GRADIENT,
     val renderTuning: TrackRenderTuning = TrackRenderTuning(),
-)
+) {
+    fun primaryColorArgb(): Long = colorHex ?: colorPreset.bandOuterColor()
+}
 
 object GolfCamTrailGeometry {
     const val SEGMENT_COUNT = 360
@@ -948,6 +963,20 @@ object GolfCamTrailGeometry {
         val thinFactor = 1f - tuning.apexThinStrength * apexWeight
         return (2f * halfWidth * thinFactor).coerceAtLeast(0.10f)
     }
+}
+
+private fun lerpArgb(a: Long, b: Long, t: Float): Long {
+    val tc = t.coerceIn(0f, 1f)
+    fun channel(color: Long, shift: Int): Int = ((color ushr shift) and 0xFF).toInt()
+    fun mix(shift: Int): Int {
+        val av = channel(a, shift)
+        val bv = channel(b, shift)
+        return (av + (bv - av) * tc).toInt().coerceIn(0, 255)
+    }
+    return (mix(24).toLong() shl 24) or
+        (mix(16).toLong() shl 16) or
+        (mix(8).toLong() shl 8) or
+        mix(0).toLong()
 }
 
 // ─── 工作流步骤输出（对齐 iOS GolfCamWorkflowState 各步骤）───────────────────────

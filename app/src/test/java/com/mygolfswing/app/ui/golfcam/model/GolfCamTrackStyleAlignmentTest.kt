@@ -17,6 +17,21 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun trackStylePrimaryColorMatchesIosDefaultColorAndBandOuterRules() {
+        val preset = TrackColorPreset(
+            name = "测试色",
+            gradientColors = listOf(0xFF000000, 0xFF646464, 0xFFC8C8C8),
+            glowBlur = 20f,
+            glowAlpha = 0.4f,
+            bandAlpha = 0.8f,
+        )
+
+        assertEquals(0xFF8C8C8C, preset.bandOuterColor())
+        assertEquals(0xFF123456, TrackStyle(colorPreset = preset, colorHex = 0xFF123456).primaryColorArgb())
+        assertEquals(0xFF8C8C8C, TrackStyle(colorPreset = preset).primaryColorArgb())
+    }
+
+    @Test
     fun bezierArcProgressMapsThroughArcLengthTable() {
         val bezier = BezierPath(
             p0 = NormalizedPoint(0.05f, 0.85f),
@@ -206,6 +221,8 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(0xFF55F3D8, parsed.defaultColorHex)
         assertEquals("测试B", style.colorPreset.name)
         assertEquals(0xFF010203, style.colorPreset.gradientColors.first())
+        assertEquals(0xFF55F3D8, style.colorHex)
+        assertEquals(0xFF55F3D8, style.primaryColorArgb())
         assertEquals(1.0, style.colorAlpha, 0.0)
         assertEquals(0.7, style.glowOpacity, 1e-6)
         assertEquals(160.0, style.widthPct, 0.0)
@@ -245,6 +262,8 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(1, parsed.presets.size)
         assertEquals("默认颜色", parsed.defaultStyle.colorPreset.name)
         assertTrue(parsed.defaultStyle.colorPreset.gradientColors.all { it == 0xFF112233 })
+        assertEquals(0xFF112233, parsed.defaultStyle.colorHex)
+        assertEquals(0xFF112233, parsed.defaultStyle.primaryColorArgb())
         assertEquals(0.65, parsed.defaultStyle.colorAlpha, 0.0)
         assertFalse(parsed.defaultStyle.showDistance)
     }

@@ -73,6 +73,7 @@ import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -414,72 +415,18 @@ private fun drawTrajectoryOnCanvas(
         apexProgress = arcTable.apexProgress().toDouble(),
     ).toFloat()
     val tuning = style.renderTuning
-    val bandAlpha = trackBandAlpha(style)
     val apexProgress = arcTable.apexProgress()
 
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.style = android.graphics.Paint.Style.STROKE
-        strokeCap = android.graphics.Paint.Cap.BUTT
-    }
-
-    val steps = GolfCamTrailGeometry.SEGMENT_COUNT
-    fun drawSegmentPass(widthMultiplier: Float, alphaFor: (tailFade: Float, globalProgress: Float) -> Float) {
-        for (i in 0 until steps) {
-            val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
-            val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
-            if (t1 <= tailProgress || t0 >= headProgress) continue
-
-            val p0 = model.bezier.pointAtArcProgress(t0, arcTable)
-            val p1 = model.bezier.pointAtArcProgress(t1, arcTable)
-            val colorProgress = t0.coerceIn(0f, 1f)
-            val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
-            val alpha = (alphaFor(localProgress.coerceIn(0f, 1f), colorProgress) * 255f).toInt().coerceIn(0, 255)
-            if (alpha <= 0) continue
-
-            paint.color = interpolateTrackColor(style.colorPreset.gradientColors, colorProgress, alpha)
-            paint.strokeWidth = GolfCamTrailGeometry.strokeWidth(
-                widthPct = style.widthPct,
-                videoHeight = height,
-                globalProgress = colorProgress,
-                apexProgress = apexProgress,
-                tuning = tuning,
-            ) * widthMultiplier
-            canvas.drawLine(p0.x * width, p0.y * height, p1.x * width, p1.y * height, paint)
-        }
-    }
-
-    if (tuning.showOuterGlow) {
-        val glowAlpha = (style.colorAlpha * style.glowOpacity * tuning.outerGlowMultiplier)
-            .toFloat()
-            .coerceIn(0f, 0.70f)
-        val glowWidth = 1.35f + tuning.glowBlurMultiplier.coerceIn(0.25f, 1.20f)
-        drawSegmentPass(widthMultiplier = glowWidth) { tailFade, _ ->
-            glowAlpha * (0.10f + 0.30f * Math.pow(tailFade.toDouble(), 1.55).toFloat())
-        }
-    }
-
-    if (tuning.showBodyBand) {
-        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
-            bandAlpha * (0.02f + 0.20f * Math.pow(tailFade.toDouble(), 1.55).toFloat())
-        }
-        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
-            bandAlpha * (tuning.bodyAlphaBase + tuning.bodyAlphaScale * Math.pow(tailFade.toDouble(), 1.60).toFloat())
-        }
-    }
-
-    if (tuning.showHighlightCore) {
-        drawSegmentPass(widthMultiplier = tuning.highlightWidthRatio.coerceIn(0.30f, 0.85f)) { tailFade, progress ->
-            val weight = highlightWeight(progress, tuning.highlightStart, tuning.highlightPeak, tuning.highlightEnd, tuning.highlightFalloffPower)
-            if (weight <= 0.001f || tailFade <= 0.001f) {
-                0f
-            } else {
-                minOf(
-                    tuning.highlightAlphaMax,
-                    bandAlpha * tuning.highlightStrength * (0.14f + 0.62f * weight),
-                ) * weight * Math.pow(tailFade.toDouble(), 1.60).toFloat()
-            }
-        }
-    }
+    TrajectoryRibbonRenderer.draw(
+        canvas = canvas,
+        bezier = model.bezier,
+        arcTable = arcTable,
+        headProgress = headProgress,
+        tailProgress = tailProgress,
+        style = style,
+        width = width,
+        height = height,
+    )
 
     val head = model.bezier.pointAtArcProgress(headProgress, arcTable)
     val headX = head.x * width
@@ -492,11 +439,10 @@ private fun drawTrajectoryOnCanvas(
         tuning = tuning,
     ) * 1.25f
     val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
-    val glowColor = interpolateTrackColor(style.colorPreset.gradientColors, 1f, (255 * glowAlpha).toInt().coerceIn(0, 255))
     val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.FILL
     }
-    glowPaint.color = glowColor
+    glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlpha)
     canvas.drawCircle(headX, headY, headGlowRadius * 1.8f, glowPaint)
     glowPaint.alpha = (190 * glowAlpha).toInt().coerceIn(0, 255)
     canvas.drawCircle(headX, headY, headGlowRadius, glowPaint)
@@ -514,43 +460,13 @@ private fun drawTrajectoryOnCanvas(
     }
 }
 
-private fun trackBandAlpha(style: TrackStyle): Float =
-    (style.colorAlpha * style.colorPreset.bandAlpha * style.renderTuning.bandAlphaMultiplier).toFloat().coerceIn(0f, 1f)
-
-private fun interpolateTrackColor(colors: List<Long>, progress: Float, alpha: Int): Int {
-    val effectiveColors = if (colors.isEmpty()) listOf(0xFFFFFFFF) else colors
-    if (effectiveColors.size == 1) {
-        val c = effectiveColors.first()
-        return android.graphics.Color.argb(alpha, ((c ushr 16) and 0xFF).toInt(), ((c ushr 8) and 0xFF).toInt(), (c and 0xFF).toInt())
-    }
-
-    val scaled = progress.coerceIn(0f, 1f) * (effectiveColors.size - 1)
-    val index = scaled.toInt().coerceIn(0, effectiveColors.size - 2)
-    val fraction = scaled - index
-    val a = effectiveColors[index]
-    val b = effectiveColors[index + 1]
-    fun channel(shift: Int): Int {
-        val av = ((a ushr shift) and 0xFF).toInt()
-        val bv = ((b ushr shift) and 0xFF).toInt()
-        return (av + (bv - av) * fraction).toInt().coerceIn(0, 255)
-    }
-    return android.graphics.Color.argb(alpha, channel(16), channel(8), channel(0))
-}
-
-private fun highlightWeight(progress: Float, start: Float, peak: Float, end: Float, falloffPower: Float): Float {
-    if (progress < start || progress > end) return 0f
-    return if (progress <= peak) {
-        smoothStep(start, peak, progress)
-    } else {
-        val t = smoothStep(peak, end, progress)
-        Math.pow((1f - t).coerceIn(0f, 1f).toDouble(), falloffPower.toDouble()).toFloat()
-    }
-}
-
-private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
-    if (kotlin.math.abs(edge1 - edge0) <= 0.0001f) return if (value >= edge1) 1f else 0f
-    val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
+private fun trackColorWithAlpha(argb: Long, alpha: Float): Int {
+    return android.graphics.Color.argb(
+        (alpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255),
+        ((argb ushr 16) and 0xFF).toInt(),
+        ((argb ushr 8) and 0xFF).toInt(),
+        (argb and 0xFF).toInt(),
+    )
 }
 
 private fun drawDistanceLabelOnCanvas(

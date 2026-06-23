@@ -85,6 +85,7 @@ object TrackStyleCloudConfigLoader {
 
         val defaultStyle = TrackStyle(
             colorPreset = defaultPreset,
+            colorHex = defaultColorHex,
             colorAlpha = defaultOpacity.coerceIn(0.0, 1.0),
             glowOpacity = defaultPreset.glowAlpha.toDouble(),
             widthPct = (styleDefaults?.double("widthPct") ?: 70.0).coerceIn(5.0, 160.0),

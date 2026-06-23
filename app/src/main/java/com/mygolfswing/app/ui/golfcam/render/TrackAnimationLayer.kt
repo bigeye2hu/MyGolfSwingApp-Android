@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -57,7 +58,6 @@ fun TrajectoryStaticOverlay(
     style: TrackStyle,
     modifier: Modifier = Modifier,
 ) {
-    val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
     Canvas(modifier = modifier.fillMaxSize()) {
@@ -66,14 +66,13 @@ fun TrajectoryStaticOverlay(
             arcTable = arcTable,
             headProgress = 1f,
             tailProgress = 0f,
-            gradientColors = gradientColors,
             style = style,
         )
         drawHeadGlow(
             bezier = bezier,
             arcTable = arcTable,
             headProgress = 1f,
-            color = gradientColors.last(),
+            color = Color(style.primaryColorArgb()),
             radius = style.headGlowRadius(videoHeight = size.height, headProgress = 1f, apexProgress = arcTable.apexProgress()),
             alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
         )
@@ -106,7 +105,6 @@ fun TrajectoryAnimationOverlay(
         )
     }
 
-    val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val totalDurSec = timing.totalDurationSec
     val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
@@ -134,7 +132,6 @@ fun TrajectoryAnimationOverlay(
             arcTable = arcTable,
             headProgress = headProgress,
             tailProgress = tailProgress,
-            gradientColors = gradientColors,
             style = style,
         )
         if (headProgress > 0f && headProgress < 1f) {
@@ -142,7 +139,7 @@ fun TrajectoryAnimationOverlay(
                 bezier = bezier,
                 arcTable = arcTable,
                 headProgress = headProgress,
-                color = gradientColors.last(),
+                color = Color(style.primaryColorArgb()),
                 radius = style.headGlowRadius(videoHeight = size.height, headProgress = headProgress, apexProgress = arcTable.apexProgress()),
                 alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
             )
@@ -173,86 +170,20 @@ private fun DrawScope.drawTrajectoryPath(
     arcTable: ArcLengthTable,
     headProgress: Float,
     tailProgress: Float,
-    gradientColors: List<Color>,
     style: TrackStyle,
-    steps: Int = GolfCamTrailGeometry.SEGMENT_COUNT,
 ) {
     if (headProgress <= 0f) return
-    val tuning = style.renderTuning
-    if (!tuning.showBodyBand && !tuning.showHighlightCore && !tuning.showOuterGlow) return
-
-    val effectiveColors = if (gradientColors.size < 2) {
-        listOf(gradientColors.firstOrNull() ?: Color.White, Color.White)
-    } else gradientColors
-    val bandAlpha = style.trackBandAlpha()
-    val apexProgress = arcTable.apexProgress()
-
-    fun drawSegmentPass(widthMultiplier: Float, alphaFor: (tailFade: Float, globalProgress: Float) -> Float) {
-        for (i in 0 until steps) {
-            val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
-            val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
-            if (t1 <= tailProgress || t0 >= headProgress) continue
-
-            val localProgress = (t0 - tailProgress) / max(headProgress - tailProgress, 1e-6f)
-            val colorProgress = t0.coerceIn(0f, 1f)
-            val strokeWidth = GolfCamTrailGeometry.strokeWidth(
-                widthPct = style.widthPct,
-                videoHeight = size.height,
-                globalProgress = colorProgress,
-                apexProgress = apexProgress,
-                tuning = tuning,
-            ) * widthMultiplier
-
-            val colorIdx = (colorProgress * (effectiveColors.size - 1)).toInt().coerceIn(0, effectiveColors.size - 2)
-            val colorFrac = colorProgress * (effectiveColors.size - 1) - colorIdx
-            val segColor = lerpColor(effectiveColors[colorIdx], effectiveColors[colorIdx + 1], colorFrac)
-            val tailFade = localProgress.coerceIn(0f, 1f)
-            val alpha = alphaFor(tailFade, colorProgress).coerceIn(0f, 1f)
-            if (alpha <= 0.001f) continue
-
-            val p0 = bezier.pointAtArcProgress(t0, arcTable)
-            val p1 = bezier.pointAtArcProgress(t1, arcTable)
-            drawLine(
-                color = segColor.copy(alpha = alpha),
-                start = Offset(p0.x * size.width, p0.y * size.height),
-                end = Offset(p1.x * size.width, p1.y * size.height),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Butt,
-            )
-        }
-    }
-
-    if (tuning.showOuterGlow) {
-        val glowAlpha = (style.colorAlpha * style.glowOpacity * tuning.outerGlowMultiplier)
-            .toFloat()
-            .coerceIn(0f, 0.70f)
-        val glowWidth = 1.35f + tuning.glowBlurMultiplier.coerceIn(0.25f, 1.20f)
-        drawSegmentPass(widthMultiplier = glowWidth) { tailFade, _ ->
-            glowAlpha * (0.10f + 0.30f * tailFade.toDouble().pow(1.55).toFloat())
-        }
-    }
-
-    if (tuning.showBodyBand) {
-        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
-            bandAlpha * (0.02f + 0.20f * tailFade.toDouble().pow(1.55).toFloat())
-        }
-        drawSegmentPass(widthMultiplier = 1f) { tailFade, _ ->
-            bandAlpha * (tuning.bodyAlphaBase + tuning.bodyAlphaScale * tailFade.toDouble().pow(1.60).toFloat())
-        }
-    }
-
-    if (tuning.showHighlightCore) {
-        drawSegmentPass(widthMultiplier = tuning.highlightWidthRatio.coerceIn(0.30f, 0.85f)) { tailFade, progress ->
-            val weight = highlightWeight(progress, tuning.highlightStart, tuning.highlightPeak, tuning.highlightEnd, tuning.highlightFalloffPower)
-            if (weight <= 0.001f || tailFade <= 0.001f) {
-                0f
-            } else {
-                minOf(
-                    tuning.highlightAlphaMax,
-                    bandAlpha * tuning.highlightStrength * (0.14f + 0.62f * weight),
-                ) * weight * tailFade.toDouble().pow(1.60).toFloat()
-            }
-        }
+    drawIntoCanvas { canvas ->
+        TrajectoryRibbonRenderer.draw(
+            canvas = canvas.nativeCanvas,
+            bezier = bezier,
+            arcTable = arcTable,
+            headProgress = headProgress,
+            tailProgress = tailProgress,
+            style = style,
+            width = size.width,
+            height = size.height,
+        )
     }
 }
 

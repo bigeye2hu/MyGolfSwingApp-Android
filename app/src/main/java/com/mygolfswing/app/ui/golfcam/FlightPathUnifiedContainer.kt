@@ -216,10 +216,17 @@ fun FlightPathUnifiedContainer(
                     )
                     GolfCamStep.IMPACT_POSITION -> ImpactPositionStepTool(state = state)
                     GolfCamStep.LANDING -> LandingStepTool(
+                        videoUri = videoUri,
                         state = state,
                         onFlightTimeChange = { sec ->
                             state.landing = state.landing?.copy(flightTimeSec = sec)
                                 ?: LandingOutput(0.5f, 0.5f, sec)
+                            val impactMs = state.impactFrame?.timeMs ?: state.trimResult?.startMs ?: 0L
+                            val clipEndMs = state.trimResult?.endMs ?: durationMs
+                            val safeEndMs = (clipEndMs - 33L).coerceAtLeast(0L)
+                            val targetMs = (impactMs + (sec * 1000).toLong()).coerceAtMost(safeEndMs)
+                            player.seekTo(targetMs.coerceAtLeast(0L))
+                            player.pause()
                         },
                     )
                     GolfCamStep.FLIGHT_CURVE -> {

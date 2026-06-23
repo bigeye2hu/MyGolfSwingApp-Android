@@ -363,8 +363,8 @@ private fun LandingOverlay(
     onLandingChange: ((Float, Float) -> Unit)?,
 ) {
     val landing = state.landing
-    val nx = landing?.normalizedX ?: 0.85f
-    val ny = landing?.normalizedY ?: 0.78f
+    val nx = landing?.normalizedX ?: 0.5f
+    val ny = landing?.normalizedY ?: 0.5f
 
     Canvas(
         modifier = Modifier

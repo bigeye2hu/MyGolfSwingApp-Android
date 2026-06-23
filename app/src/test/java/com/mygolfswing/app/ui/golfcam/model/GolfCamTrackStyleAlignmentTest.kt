@@ -2,6 +2,8 @@ package com.mygolfswing.app.ui.golfcam.model
 
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
+import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
+import com.mygolfswing.app.ui.golfcam.render.DistanceLabelTextMetrics
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -209,6 +211,40 @@ class GolfCamTrackStyleAlignmentTest {
                 elapsedSec = timing.totalDurationSec,
             )?.distance,
         )
+    }
+
+    @Test
+    fun distanceLabelRenderSpecMatchesIosOffsetAndStackedTextRules() {
+        val height = 1080f
+        val metrics = DistanceLabelTextMetrics(
+            unitWidth = 30f,
+            unitHeight = 12f,
+            valueWidth = 42f,
+            valueHeight = 26f,
+        )
+        val flyingLeft = DistanceLabelRenderSpec.layout(
+            headX = 500f,
+            headY = 400f,
+            videoHeight = height,
+            isFlyingLeft = true,
+            metrics = metrics,
+        )
+        val flyingRight = DistanceLabelRenderSpec.layout(
+            headX = 500f,
+            headY = 400f,
+            videoHeight = height,
+            isFlyingLeft = false,
+            metrics = metrics,
+        )
+
+        assertEquals(11f, DistanceLabelRenderSpec.unitFontPx(height), 0.0f)
+        assertEquals(24f, DistanceLabelRenderSpec.valueFontPx(height), 0.0f)
+        assertEquals(37.8f, height * DistanceLabelRenderSpec.OFFSET_RATIO, 0.001f)
+        assertEquals((500f - 37.8f) - metrics.unitWidth / 2f, flyingLeft.unitLeft, 0.001f)
+        assertEquals((500f + 37.8f) - metrics.unitWidth / 2f, flyingRight.unitLeft, 0.001f)
+        assertEquals(flyingLeft.unitTop + metrics.unitHeight + 2f, flyingLeft.valueTop, 0.001f)
+        assertTrue(DistanceLabelRenderSpec.isFlyingLeft(currentX = 10f, previousX = 20f))
+        assertFalse(DistanceLabelRenderSpec.isFlyingLeft(currentX = 20f, previousX = 10f))
     }
 
     @Test

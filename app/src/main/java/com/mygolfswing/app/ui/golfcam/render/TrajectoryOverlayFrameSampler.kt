@@ -14,6 +14,7 @@ internal data class TrajectoryOverlayFrameSnapshot(
     val tailProgress: Float,
     val apexProgress: Float,
     val headPoint: NormalizedPoint,
+    val isFlyingLeft: Boolean,
     val distance: Int?,
 )
 
@@ -58,11 +59,22 @@ internal object TrajectoryOverlayFrameSampler {
             null
         }
 
+        val headPoint = bezier.pointAtArcProgress(headProgress, arcTable)
+        val previousPoint = if (headProgress > 0.01f) {
+            bezier.pointAtArcProgress((headProgress - 0.01f).coerceAtLeast(0f), arcTable)
+        } else {
+            null
+        }
+
         return TrajectoryOverlayFrameSnapshot(
             headProgress = headProgress,
             tailProgress = tailProgress,
             apexProgress = apexProgress,
-            headPoint = bezier.pointAtArcProgress(headProgress, arcTable),
+            headPoint = headPoint,
+            isFlyingLeft = DistanceLabelRenderSpec.isFlyingLeft(
+                currentX = headPoint.x,
+                previousX = previousPoint?.x,
+            ),
             distance = distance,
         )
     }

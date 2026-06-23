@@ -30,7 +30,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
@@ -72,6 +72,8 @@ import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
+import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
+import com.mygolfswing.app.ui.golfcam.render.DistanceLabelTextMetrics
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
@@ -188,7 +190,7 @@ fun GolfCamOverlayPreviewScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Filled.ArrowBack, null, tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
             }
             Text("预览", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(start = 4.dp))
         }
@@ -470,7 +472,15 @@ private fun drawTrajectoryOnCanvas(
     canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
 
     snapshot.distance?.let { displayDist ->
-        drawDistanceLabelOnCanvas(canvas, headX, headY, displayDist, style.distanceUnit.abbreviation, width, height)
+        drawDistanceLabelOnCanvas(
+            canvas = canvas,
+            x = headX,
+            y = headY,
+            isFlyingLeft = snapshot.isFlyingLeft,
+            distance = displayDist,
+            unit = style.distanceUnit.abbreviation,
+            height = height,
+        )
     }
 }
 
@@ -525,35 +535,47 @@ private fun drawDistanceLabelOnCanvas(
     canvas: AndroidCanvas,
     x: Float,
     y: Float,
+    isFlyingLeft: Boolean,
     distance: Int,
     unit: String,
-    width: Float,
     height: Float,
 ) {
     if (distance <= 0) return
 
-    val scale = max(width, height) / 720f
-    val text = "$distance$unit"
-    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+    val unitPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
-        textSize = 13f * scale.coerceAtLeast(1f)
+        textSize = DistanceLabelRenderSpec.unitFontPx(height)
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
     }
-    val metrics = textPaint.fontMetrics
-    val textWidth = textPaint.measureText(text)
-    val textHeight = metrics.descent - metrics.ascent
-    val paddingX = 6f * scale
-    val paddingY = 4f * scale
-    val labelWidth = textWidth + paddingX * 2f
-    val labelHeight = textHeight + paddingY * 2f
-    val left = (x - labelWidth / 2f).coerceIn(0f, (width - labelWidth).coerceAtLeast(0f))
-    val top = (y - labelHeight - 16f * scale).coerceIn(0f, (height - labelHeight).coerceAtLeast(0f))
-
-    val bgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.argb(115, 0, 0, 0)
-        style = android.graphics.Paint.Style.FILL
+    val valuePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textSize = DistanceLabelRenderSpec.valueFontPx(height)
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
     }
-    val rect = android.graphics.RectF(left, top, left + labelWidth, top + labelHeight)
-    canvas.drawRoundRect(rect, 6f * scale, 6f * scale, bgPaint)
-    canvas.drawText(text, left + paddingX, top + paddingY - metrics.ascent, textPaint)
+    val unitMetrics = unitPaint.fontMetrics
+    val valueText = distance.toString()
+    val valueMetrics = valuePaint.fontMetrics
+    val layout = DistanceLabelRenderSpec.layout(
+        headX = x,
+        headY = y,
+        videoHeight = height,
+        isFlyingLeft = isFlyingLeft,
+        metrics = DistanceLabelTextMetrics(
+            unitWidth = unitPaint.measureText(unit),
+            unitHeight = unitMetrics.descent - unitMetrics.ascent,
+            valueWidth = valuePaint.measureText(valueText),
+            valueHeight = valueMetrics.descent - valueMetrics.ascent,
+        ),
+    )
+    val shadowOffset = DistanceLabelRenderSpec.shadowOffsetPx(height)
+    val shadowAlpha = (DistanceLabelRenderSpec.SHADOW_ALPHA * 255f).toInt().coerceIn(0, 255)
+    unitPaint.color = android.graphics.Color.argb(shadowAlpha, 0, 0, 0)
+    valuePaint.color = android.graphics.Color.argb(shadowAlpha, 0, 0, 0)
+    canvas.drawText(unit, layout.unitLeft + shadowOffset, layout.unitTop - unitMetrics.ascent + shadowOffset, unitPaint)
+    canvas.drawText(valueText, layout.valueLeft + shadowOffset, layout.valueTop - valueMetrics.ascent + shadowOffset, valuePaint)
+
+    unitPaint.color = android.graphics.Color.WHITE
+    valuePaint.color = android.graphics.Color.WHITE
+    canvas.drawText(unit, layout.unitLeft, layout.unitTop - unitMetrics.ascent, unitPaint)
+    canvas.drawText(valueText, layout.valueLeft, layout.valueTop - valueMetrics.ascent, valuePaint)
 }

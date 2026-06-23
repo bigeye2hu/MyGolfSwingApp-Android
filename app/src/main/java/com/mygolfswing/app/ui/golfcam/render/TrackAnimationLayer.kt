@@ -7,6 +7,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -114,6 +115,7 @@ fun TrajectoryAnimationOverlay(
             frame.distance?.let { displayDist ->
                 drawDistanceLabel(
                     headPoint = frame.headPoint,
+                    isFlyingLeft = frame.isFlyingLeft,
                     distance = displayDist,
                     unit = style.distanceUnit.abbreviation,
                     textMeasurer = textMeasurer,
@@ -163,37 +165,48 @@ private fun DrawScope.drawHeadGlow(
 
 private fun DrawScope.drawDistanceLabel(
     headPoint: NormalizedPoint,
+    isFlyingLeft: Boolean,
     distance: Int,
     unit: String,
     textMeasurer: TextMeasurer,
 ) {
     if (distance <= 0) return
     val center = Offset(headPoint.x * size.width, headPoint.y * size.height)
-
-    val text = "$distance$unit"
-    val style = TextStyle(
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Bold,
+    val scale = DistanceLabelRenderSpec.scale(size.height)
+    val shadow = Shadow(
+        color = Color.Black.copy(alpha = DistanceLabelRenderSpec.SHADOW_ALPHA),
+        offset = Offset(DistanceLabelRenderSpec.shadowOffsetPx(size.height), DistanceLabelRenderSpec.shadowOffsetPx(size.height)),
+        blurRadius = 3f * scale,
+    )
+    val unitStyle = TextStyle(
+        fontSize = DistanceLabelRenderSpec.unitFontPx(size.height).toSp(),
+        fontWeight = FontWeight.SemiBold,
         color = Color.White,
+        shadow = shadow,
     )
-    val measured = textMeasurer.measure(text, style)
-    val labelWidth = measured.size.width + 12f
-    val labelHeight = measured.size.height + 8f
-    val offsetX = (center.x - measured.size.width / 2f)
-        .coerceIn(6f, (size.width - measured.size.width - 6f).coerceAtLeast(6f))
-    val offsetY = (center.y - measured.size.height - 16f)
-        .coerceIn(4f, (size.height - measured.size.height - 4f).coerceAtLeast(4f))
-
-    drawRoundRect(
-        color = Color.Black.copy(alpha = 0.45f),
-        topLeft = Offset(offsetX - 6f, offsetY - 4f),
-        size = androidx.compose.ui.geometry.Size(
-            labelWidth.toFloat(),
-            labelHeight.toFloat(),
+    val valueStyle = TextStyle(
+        fontSize = DistanceLabelRenderSpec.valueFontPx(size.height).toSp(),
+        fontWeight = FontWeight.Normal,
+        color = Color.White,
+        shadow = shadow,
+    )
+    val unitMeasured = textMeasurer.measure(unit, unitStyle)
+    val valueText = distance.toString()
+    val valueMeasured = textMeasurer.measure(valueText, valueStyle)
+    val layout = DistanceLabelRenderSpec.layout(
+        headX = center.x,
+        headY = center.y,
+        videoHeight = size.height,
+        isFlyingLeft = isFlyingLeft,
+        metrics = DistanceLabelTextMetrics(
+            unitWidth = unitMeasured.size.width.toFloat(),
+            unitHeight = unitMeasured.size.height.toFloat(),
+            valueWidth = valueMeasured.size.width.toFloat(),
+            valueHeight = valueMeasured.size.height.toFloat(),
         ),
-        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f),
     )
-    drawText(measured, topLeft = Offset(offsetX, offsetY))
+    drawText(unitMeasured, topLeft = Offset(layout.unitLeft, layout.unitTop))
+    drawText(valueMeasured, topLeft = Offset(layout.valueLeft, layout.valueTop))
 }
 
 private fun TrackStyle.headGlowRadius(videoHeight: Float, headProgress: Float, apexProgress: Float): Float =

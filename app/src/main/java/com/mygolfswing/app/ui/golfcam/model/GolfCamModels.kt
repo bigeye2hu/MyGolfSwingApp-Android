@@ -910,7 +910,7 @@ data class TrackStyle(
     val colorHex: Long? = null,
     val colorAlpha: Double = 0.75,
     val glowOpacity: Double = colorPreset.glowAlpha.toDouble(),
-    val widthPct: Double = 70.0,
+    val widthPct: Double = 40.0,
     val taperPower: Float = 1.8f,
     val tailHalfLife: Double = 70.0,  // 5~100，对齐 iOS StyleControlRange
     val minTail: Float = 0.12f,

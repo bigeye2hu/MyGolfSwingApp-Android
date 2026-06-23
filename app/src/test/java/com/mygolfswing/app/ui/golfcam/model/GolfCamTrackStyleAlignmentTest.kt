@@ -78,6 +78,24 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun trackStyleProductionDefaultsUseIosV5AndCloudFallbackWidth() {
+        val style = TrackStyle()
+        val fallback = TrackStyleCloudConfigLoader.localFallback().defaultStyle
+        val parsedMissingDefaults = TrackStyleCloudConfigLoader.parse(JsonObject(emptyMap())).defaultStyle
+
+        assertEquals(TrajectoryAlgorithmKind.GOLF_CAM_LIKE, style.activeTrajectoryAlgorithm)
+        assertEquals(TrajectoryAlgorithmKind.GOLF_CAM_LIKE, fallback.activeTrajectoryAlgorithm)
+        assertEquals(TrajectoryAlgorithmKind.GOLF_CAM_LIKE, parsedMissingDefaults.activeTrajectoryAlgorithm)
+        assertEquals(40.0, style.widthPct, 0.0)
+        assertEquals(40.0, fallback.widthPct, 0.0)
+        assertEquals(40.0, parsedMissingDefaults.widthPct, 0.0)
+        assertEquals(0xFF55F3D8, fallback.colorHex)
+        assertEquals(0.75, fallback.colorAlpha, 0.0)
+        assertFalse(fallback.showDistance)
+        assertEquals(DistanceUnit.YARDS, fallback.distanceUnit)
+    }
+
+    @Test
     fun bezierArcProgressMapsThroughArcLengthTable() {
         val bezier = BezierPath(
             p0 = NormalizedPoint(0.05f, 0.85f),

@@ -88,7 +88,7 @@ object TrackStyleCloudConfigLoader {
             colorHex = defaultColorHex,
             colorAlpha = defaultOpacity.coerceIn(0.0, 1.0),
             glowOpacity = defaultPreset.glowAlpha.toDouble(),
-            widthPct = (styleDefaults?.double("widthPct") ?: 70.0).coerceIn(5.0, 160.0),
+            widthPct = (styleDefaults?.double("widthPct") ?: 40.0).coerceIn(5.0, 160.0),
             tailHalfLife = (styleDefaults?.double("tailHalfLife") ?: 70.0).coerceIn(5.0, 100.0),
             showDistance = styleDefaults?.boolean("showDistance") ?: false,
             totalDistance = (styleDefaults?.double("totalDistance") ?: 150.0).coerceIn(0.0, 1000.0),

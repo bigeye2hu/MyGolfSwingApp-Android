@@ -57,7 +57,6 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleCloudConfigLoader
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
-import com.mygolfswing.app.ui.golfcam.model.defaultTrackColorPresets
 
 // ── 样式类别 ──────────────────────────────────────────────────
 
@@ -82,8 +81,9 @@ private enum class StyleCategory(val label: String, val icon: ImageVector) {
 fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelection) -> Unit) {
     val flightCurve = state.flightCurve ?: return
     val prev = state.trackStyle?.style
-    var style by remember { mutableStateOf(prev ?: TrackStyle()) }
-    var colorPresets by remember { mutableStateOf(defaultTrackColorPresets) }
+    val fallbackConfig = remember { TrackStyleCloudConfigLoader.localFallback() }
+    var style by remember { mutableStateOf(prev ?: fallbackConfig.defaultStyle) }
+    var colorPresets by remember { mutableStateOf(fallbackConfig.presets) }
     var selectedCategory by remember { mutableStateOf(StyleCategory.COLOR) }
 
     LaunchedEffect(Unit) {

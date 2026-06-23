@@ -6,6 +6,7 @@ import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelTextMetrics
 import com.mygolfswing.app.ui.golfcam.render.GolfCamCurveSpec
+import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -93,6 +94,40 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(0.75, fallback.colorAlpha, 0.0)
         assertFalse(fallback.showDistance)
         assertEquals(DistanceUnit.YARDS, fallback.distanceUnit)
+    }
+
+    @Test
+    fun ribbonRendererConsumesCloudPresetBandAlphaWithColorOpacityAndTuning() {
+        val preset = TrackColorPreset(
+            name = "半透明轨迹",
+            gradientColors = listOf(0xFF102030, 0xFF405060, 0xFF708090),
+            glowAlpha = 0.5f,
+            bandAlpha = 0.5f,
+        )
+        val style = TrackStyle(
+            colorPreset = preset,
+            colorHex = 0xFF405060,
+            colorAlpha = 0.8,
+            renderTuning = TrackRenderTuning(bandAlphaMultiplier = 1.25f),
+        )
+
+        assertEquals(0.5f, style.colorPreset.bandAlpha, 0f)
+        assertEquals(0.5f, style.glowOpacity.toFloat(), 0f)
+        assertEquals(0.5f, TrajectoryRibbonRenderer.bodyBandAlpha(style), 1e-6f)
+        assertEquals(
+            0.5f,
+            TrajectoryRibbonRenderer.bodyBandAlpha(
+                style.copy(colorAlpha = 1.0, renderTuning = TrackRenderTuning()),
+            ),
+            1e-6f,
+        )
+        assertEquals(
+            1.0f,
+            TrajectoryRibbonRenderer.bodyBandAlpha(
+                style.copy(colorAlpha = 1.0, renderTuning = TrackRenderTuning(bandAlphaMultiplier = 3f)),
+            ),
+            1e-6f,
+        )
     }
 
     @Test

@@ -45,11 +45,18 @@ internal object TrajectoryRibbonRenderer {
             drawGlow(canvas, edges, baseColor, baseOpacity, style, tuning)
         }
         if (tuning.showBodyBand) {
-            drawBodyBand(canvas, edges, baseColor, baseOpacity, style, tuning)
+            drawBodyBand(canvas, edges, baseColor, style, tuning)
         }
         if (tuning.showHighlightCore) {
-            drawHighlight(canvas, edges, baseColor, baseOpacity, tuning)
+            drawHighlight(canvas, edges, baseColor, style, tuning)
         }
+    }
+
+    internal fun bodyBandAlpha(style: TrackStyle, tuning: TrackRenderTuning = style.renderTuning): Float {
+        val baseColor = style.primaryColorArgb()
+        val baseOpacity = (style.colorAlpha * alphaOf(baseColor)).toFloat().coerceIn(0f, 1f)
+        val presetBandAlpha = style.colorPreset.bandAlpha.coerceIn(0f, 1f)
+        return (baseOpacity * presetBandAlpha * tuning.bandAlphaMultiplier).coerceIn(0f, 1f)
     }
 
     private fun buildSamples(
@@ -159,11 +166,10 @@ internal object TrajectoryRibbonRenderer {
         canvas: Canvas,
         edges: RibbonEdges,
         baseColor: Long,
-        baseOpacity: Float,
         style: TrackStyle,
         tuning: TrackRenderTuning,
     ) {
-        val bandAlpha = (baseOpacity * tuning.bandAlphaMultiplier).coerceIn(0f, 1f)
+        val bandAlpha = bodyBandAlpha(style, tuning)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.style = Paint.Style.FILL
         }
@@ -188,12 +194,13 @@ internal object TrajectoryRibbonRenderer {
         canvas: Canvas,
         edges: RibbonEdges,
         baseColor: Long,
-        baseOpacity: Float,
+        style: TrackStyle,
         tuning: TrackRenderTuning,
     ) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.style = Paint.Style.FILL
         }
+        val bandAlpha = bodyBandAlpha(style, tuning)
         val last = max(1, edges.left.lastIndex)
         forEachSegment(edges) { index, path ->
             val progress = (edges.left[index - 1].progress + edges.left[index].progress) * 0.5f
@@ -203,7 +210,7 @@ internal object TrajectoryRibbonRenderer {
 
             val alpha = minOf(
                 tuning.highlightAlphaMax,
-                baseOpacity * tuning.bandAlphaMultiplier * tuning.highlightStrength * (0.14f + 0.62f * weight),
+                bandAlpha * tuning.highlightStrength * (0.14f + 0.62f * weight),
             ) * weight * tailFade
             paint.color = colorWithAlpha(baseColor, alpha.coerceIn(0f, 1f))
             canvas.drawPath(path, paint)

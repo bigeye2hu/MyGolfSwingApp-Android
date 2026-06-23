@@ -142,8 +142,8 @@ object TrackStyleCloudConfigLoader {
             name = obj.string("name")?.takeIf { it.isNotBlank() } ?: "颜色",
             gradientColors = colors,
             glowBlur = obj.float("glowBlur") ?: 30f,
-            glowAlpha = obj.float("glowAlpha") ?: 0.68f,
-            bandAlpha = obj.float("bandAlpha") ?: 1f,
+            glowAlpha = (obj.float("glowAlpha") ?: 0.68f).coerceIn(0f, 1f),
+            bandAlpha = (obj.float("bandAlpha") ?: 1f).coerceIn(0f, 1f),
         )
     }
 

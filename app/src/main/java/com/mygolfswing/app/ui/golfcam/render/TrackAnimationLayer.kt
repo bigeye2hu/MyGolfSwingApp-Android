@@ -186,8 +186,8 @@ private fun DrawScope.drawTrajectoryPath(
         if (t1 <= tailProgress || t0 >= headProgress) continue
 
         val localProgress = (t0 - tailProgress) / max(headProgress - tailProgress, 1e-6f)
-        val colorProgress = t0 / max(headProgress, 1e-6f)
-        val taper = (localProgress).toDouble().pow(taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
+        val colorProgress = t0.coerceIn(0f, 1f)
+        val taper = (1f - colorProgress).toDouble().pow(taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
         val strokeWidth = baseStrokeWidth * taper
 
         val colorIdx = (colorProgress * (effectiveColors.size - 1)).toInt().coerceIn(0, effectiveColors.size - 2)
@@ -203,7 +203,7 @@ private fun DrawScope.drawTrajectoryPath(
             start = Offset(p0.x * size.width, p0.y * size.height),
             end = Offset(p1.x * size.width, p1.y * size.height),
             strokeWidth = strokeWidth,
-            cap = StrokeCap.Round,
+            cap = StrokeCap.Butt,
         )
     }
 }

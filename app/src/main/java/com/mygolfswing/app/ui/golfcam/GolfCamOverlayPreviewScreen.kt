@@ -410,7 +410,7 @@ private fun drawTrajectoryOnCanvas(
 
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.STROKE
-        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeCap = android.graphics.Paint.Cap.BUTT
     }
 
     val steps = 120
@@ -421,11 +421,11 @@ private fun drawTrajectoryOnCanvas(
 
         val p0 = model.bezier.point(t0)
         val p1 = model.bezier.point(t1)
-        val colorProgress = t0 / headProgress.coerceAtLeast(0.001f)
+        val colorProgress = t0.coerceIn(0f, 1f)
         val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
 
         val alpha = (localProgress * 255 * 1.2f * alphaMultiplier).toInt().coerceIn(0, 255)
-        val taper = Math.pow(localProgress.coerceIn(0f, 1f).toDouble(), taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
+        val taper = Math.pow((1f - colorProgress).toDouble(), taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
 
         paint.color = interpolateTrackColor(style.colorPreset.gradientColors, colorProgress, alpha)
         paint.strokeWidth = baseStrokeWidth * taper

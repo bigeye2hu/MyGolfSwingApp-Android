@@ -408,18 +408,24 @@ private fun FlightCurveOverlay(
     val impact = state.impactPosition ?: return
     val landing = state.landing ?: return
     val prev = state.flightCurve
+    val defaults = remember(impact, landing) {
+        suggestedGolfCamControlPoints(
+            start = NormalizedPoint(impact.normalizedX, impact.normalizedY),
+            end = NormalizedPoint(landing.normalizedX, landing.normalizedY),
+        )
+    }
 
-    var cp1x by remember {
-        mutableStateOf(prev?.controlPoint1?.x ?: (impact.normalizedX + (landing.normalizedX - impact.normalizedX) * 0.3f))
+    var cp1x by remember(prev, impact, landing) {
+        mutableStateOf(prev?.controlPoint1?.x ?: defaults.first.x)
     }
-    var cp1y by remember {
-        mutableStateOf(prev?.controlPoint1?.y ?: (impact.normalizedY - 0.28f).coerceIn(0.02f, 0.98f))
+    var cp1y by remember(prev, impact, landing) {
+        mutableStateOf(prev?.controlPoint1?.y ?: defaults.first.y)
     }
-    var cp2x by remember {
-        mutableStateOf(prev?.controlPoint2?.x ?: (impact.normalizedX + (landing.normalizedX - impact.normalizedX) * 0.7f))
+    var cp2x by remember(prev, impact, landing) {
+        mutableStateOf(prev?.controlPoint2?.x ?: defaults.second.x)
     }
-    var cp2y by remember {
-        mutableStateOf(prev?.controlPoint2?.y ?: (impact.normalizedY - 0.22f).coerceIn(0.02f, 0.98f))
+    var cp2y by remember(prev, impact, landing) {
+        mutableStateOf(prev?.controlPoint2?.y ?: defaults.second.y)
     }
     var dragging by remember { mutableStateOf<Int?>(null) }
 
@@ -470,6 +476,45 @@ private fun FlightCurveOverlay(
         drawCircle(DSColors.fairway.copy(alpha = 0.25f), 26f, p2)
         drawCircle(DSColors.fairway, 14f, p2)
     }
+}
+
+private fun suggestedGolfCamControlPoints(
+    start: NormalizedPoint,
+    end: NormalizedPoint,
+): Pair<NormalizedPoint, NormalizedPoint> {
+    val dx = end.x - start.x
+    val horizontal = abs(dx)
+    if (horizontal < 0.01f) {
+        val lift = 0.14f
+        return clampPoint(NormalizedPoint(start.x, start.y - lift * 0.55f)) to
+            clampPoint(NormalizedPoint(start.x, minOf(start.y, end.y) - lift))
+    }
+
+    val p1X = 0.08f
+    val p2X = 0.32f
+    val p1Y = 0.56f
+    val baseLift = 0.26f
+    val xLift = 0.26f
+    val topReference = minOf(start.y, end.y)
+    val lift = maxOf(baseLift, baseLift + horizontal * xLift)
+    val handleY = maxOf(0.04f, topReference - lift)
+
+    val p2 = NormalizedPoint(
+        x = start.x + dx * p2X,
+        y = handleY,
+    )
+    val p1 = NormalizedPoint(
+        x = start.x + dx * p1X,
+        y = start.y + (handleY - start.y) * p1Y,
+    )
+    return clampPoint(p1) to clampPoint(p2)
+}
+
+private fun clampPoint(point: NormalizedPoint): NormalizedPoint {
+    return NormalizedPoint(
+        x = point.x.coerceIn(0.02f, 0.98f),
+        y = point.y.coerceIn(0.02f, 0.98f),
+    )
 }
 
 // ─── 候选帧徽章浮层（对齐 iOS candidateFrameButton）──────────────────────────

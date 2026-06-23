@@ -1,44 +1,75 @@
 package com.mygolfswing.app.ui.golfcam.steps
 
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.ceil
+import kotlin.math.max
+import kotlin.math.min
+
+private const val FPS = 30.0
+private const val MAX_CURVE_THUMBS = 60
 
 /**
  * 步骤 5：飞行曲线调整（对齐 iOS FlightCurveStepTool）。
- * 显示 P1/P2 坐标 + 帧导航 + 提示文字，交互在上方视频画面进行。
+ * 视频画面负责拖动 P1/P2；工具区负责帧定位、缩略图浏览和击球帧快速回跳。
  */
 @Composable
 fun FlightCurveStepTool(
+    videoUri: Uri,
+    trimStartMs: Long,
     state: GolfCamWorkflowState,
     currentFrameIndex: Int = 0,
     totalFrames: Int = 0,
+    onFrameSelected: ((Int) -> Unit)? = null,
+    onImpactFrame: (() -> Unit)? = null,
     onPrevFrame: (() -> Unit)? = null,
     onNextFrame: (() -> Unit)? = null,
 ) {
@@ -48,128 +79,244 @@ fun FlightCurveStepTool(
     val p1y = (cp1?.second ?: 0.3f) * 100f
     val p2x = (cp2?.first ?: 0.7f) * 100f
     val p2y = (cp2?.second ?: 0.2f) * 100f
+    val currentSec = currentFrameIndex / FPS
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // ── 信息行：帧信息 | P1 坐标 | P2 坐标 ──
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 帧信息
             Column(horizontalAlignment = Alignment.Start) {
-                if (totalFrames > 0) {
-                    Text(
-                        "帧 ${currentFrameIndex + 1}/$totalFrames",
-                        color = DSColors.inkGreen,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                } else {
-                    Text("飞行曲线", color = DSColors.inkGreen, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-
-            // P1 坐标
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(DSColors.fairway),
-                )
-                Text("P1 ", color = DSColors.inkGreen, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 Text(
-                    "(%.0f%%,%.0f%%)".format(p1x, p1y),
+                    if (totalFrames > 0) "帧 ${currentFrameIndex + 1}/$totalFrames" else "飞行曲线",
+                    color = DSColors.inkGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    "%.2fs".format(currentSec),
                     color = DSColors.shadowGray,
-                    fontSize = 9.sp,
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                 )
             }
 
-            // P2 坐标
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(DSColors.fairway),
-                )
-                Text("P2 ", color = DSColors.inkGreen, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    "(%.0f%%,%.0f%%)".format(p2x, p2y),
-                    color = DSColors.shadowGray,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                )
-            }
+            ControlPointReadout(label = "P1", xPct = p1x, yPct = p1y)
+            ControlPointReadout(label = "P2", xPct = p2x, yPct = p2y)
         }
 
-        // ── 帧导航行：[上一帧] ...滑块区... [下一帧] ──
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 上一帧按钮
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = currentFrameIndex > 0) { onPrevFrame?.invoke() }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            ) {
-                Icon(
-                    Icons.Filled.ChevronLeft,
-                    null,
-                    tint = if (currentFrameIndex > 0) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.4f),
-                    modifier = Modifier.size(16.dp),
-                )
-                Text(
-                    "上一帧",
-                    color = if (currentFrameIndex > 0) DSColors.shadowGray else DSColors.shadowGray.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                )
-            }
+            FrameStepButton(
+                enabled = currentFrameIndex > 0,
+                icon = Icons.Filled.ChevronLeft,
+                label = "上一帧",
+                onClick = { onPrevFrame?.invoke() },
+            )
 
-            // 中间：提示
+            CurveThumbnailTimeline(
+                videoUri = videoUri,
+                trimStartMs = trimStartMs,
+                currentFrameIndex = currentFrameIndex,
+                totalFrames = totalFrames,
+                onFrameSelected = { onFrameSelected?.invoke(it) },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 6.dp),
+            )
+
+            FrameStepButton(
+                enabled = totalFrames == 0 || currentFrameIndex < totalFrames - 1,
+                icon = Icons.Filled.ChevronRight,
+                label = "下一帧",
+                onClick = { onNextFrame?.invoke() },
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.TouchApp, null, tint = DSColors.fairway, modifier = Modifier.size(12.dp))
+            Text("滑动查看球飞行轨迹，调整曲线匹配实际弹道", color = DSColors.shadowGray, fontSize = 11.sp)
+            Spacer(modifier = Modifier.weight(1f))
             Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(DSColors.fairway.copy(alpha = 0.15f))
+                    .clickable { onImpactFrame?.invoke() }
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Icon(Icons.Filled.TouchApp, null, tint = DSColors.fairway, modifier = Modifier.size(12.dp))
-                Text("拖动控制点调整球路弧度", color = DSColors.shadowGray, fontSize = 11.sp)
-            }
-
-            // 下一帧按钮
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = totalFrames == 0 || currentFrameIndex < totalFrames - 1) { onNextFrame?.invoke() }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            ) {
-                Icon(
-                    Icons.Filled.ChevronRight,
-                    null,
-                    tint = if (totalFrames == 0 || currentFrameIndex < totalFrames - 1) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.4f),
-                    modifier = Modifier.size(16.dp),
-                )
-                Text(
-                    "下一帧",
-                    color = if (totalFrames == 0 || currentFrameIndex < totalFrames - 1) DSColors.shadowGray else DSColors.shadowGray.copy(alpha = 0.4f),
-                    fontSize = 10.sp,
-                )
+                Icon(Icons.Filled.Bolt, null, tint = DSColors.fairway, modifier = Modifier.size(12.dp))
+                Text("击球帧", color = DSColors.fairway, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
+}
+
+@Composable
+private fun ControlPointReadout(label: String, xPct: Float, yPct: Float) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(Color.White)
+                .background(DSColors.fairway.copy(alpha = 0.34f)),
+        )
+        Text(label, color = DSColors.inkGreen, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        Text(
+            "(%.0f%%,%.0f%%)".format(xPct, yPct),
+            color = DSColors.shadowGray,
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+@Composable
+private fun FrameStepButton(
+    enabled: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(50.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 4.dp),
+    ) {
+        Icon(
+            icon,
+            null,
+            tint = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.4f),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            label,
+            color = if (enabled) DSColors.shadowGray else DSColors.shadowGray.copy(alpha = 0.4f),
+            fontSize = 9.sp,
+        )
+    }
+}
+
+@Composable
+private fun CurveThumbnailTimeline(
+    videoUri: Uri,
+    trimStartMs: Long,
+    currentFrameIndex: Int,
+    totalFrames: Int,
+    onFrameSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val frameStep = max(1, ceil(totalFrames / MAX_CURVE_THUMBS.toDouble()).toInt())
+    var thumbnails by remember(videoUri, trimStartMs, totalFrames, frameStep) {
+        mutableStateOf<List<CurveThumb>>(emptyList())
+    }
+
+    LaunchedEffect(videoUri, trimStartMs, totalFrames, frameStep) {
+        if (totalFrames <= 0) return@LaunchedEffect
+        thumbnails = withContext(Dispatchers.IO) {
+            loadCurveThumbnails(context, videoUri, trimStartMs, totalFrames, frameStep)
+        }
+    }
+
+    LazyRow(
+        modifier = modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(Color(0xFF2F2F2F)),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        items(thumbnails) { thumb ->
+            val selected = kotlin.math.abs(thumb.frameIndex - currentFrameIndex) < frameStep
+            Box(
+                modifier = Modifier
+                    .width(32.dp)
+                    .fillMaxHeight()
+                    .clickable { onFrameSelected(thumb.frameIndex) },
+            ) {
+                if (thumb.bitmap != null) {
+                    Image(
+                        bitmap = thumb.bitmap,
+                        contentDescription = null,
+                        modifier = Modifier.matchParentSize(),
+                        contentScale = ContentScale.Crop,
+                        alpha = if (selected) 1f else 0.72f,
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(Color(0xFF3A3A3A)),
+                    )
+                }
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(DSColors.fairway),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class CurveThumb(val frameIndex: Int, val bitmap: ImageBitmap?)
+
+private fun loadCurveThumbnails(
+    context: android.content.Context,
+    videoUri: Uri,
+    trimStartMs: Long,
+    totalFrames: Int,
+    frameStep: Int,
+): List<CurveThumb> {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(context, videoUri)
+        val frames = buildList {
+            var frame = 0
+            while (frame < totalFrames) {
+                add(frame)
+                frame += frameStep
+            }
+        }
+        frames.map { frameIndex ->
+            val timeMs = trimStartMs + (frameIndex / FPS * 1000).toLong()
+            val bitmap = retriever.getFrameAtTime(timeMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+                ?.toCurveBitmap()
+            CurveThumb(frameIndex = min(frameIndex, totalFrames - 1), bitmap = bitmap)
+        }
+    } catch (_: Throwable) {
+        emptyList()
+    } finally {
+        retriever.release()
+    }
+}
+
+private fun Bitmap.toCurveBitmap(): ImageBitmap {
+    val scaled = Bitmap.createScaledBitmap(this, 64, 90, true)
+    if (scaled !== this) recycle()
+    return scaled.asImageBitmap()
 }

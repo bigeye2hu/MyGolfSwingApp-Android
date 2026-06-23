@@ -230,31 +230,47 @@ fun FlightPathUnifiedContainer(
                         },
                     )
                     GolfCamStep.FLIGHT_CURVE -> {
+                        val trimStartMs = state.trimResult?.startMs ?: 0L
+                        val fps = 30.0
+                        fun seekCurveFrame(frameIndex: Int) {
+                            val target = trimStartMs + (frameIndex / fps * 1000).toLong()
+                            player.seekTo(target.coerceAtLeast(0L))
+                            player.pause()
+                        }
                         // 进入曲线步骤时初始化帧数
                         LaunchedEffect(durationMs, state.impactFrame) {
                             if (durationMs > 0 && flightCurveTotalFrames == 0) {
-                                val fps = 30.0
                                 flightCurveTotalFrames = (durationMs / 1000.0 * fps).toInt()
                                     .coerceAtLeast(1)
                                 flightCurveFrameIndex = state.impactFrame?.frameIndex ?: 0
+                                seekCurveFrame(flightCurveFrameIndex)
                             }
                         }
                         FlightCurveStepTool(
+                            videoUri = videoUri,
+                            trimStartMs = trimStartMs,
                             state = state,
                             currentFrameIndex = flightCurveFrameIndex,
                             totalFrames = flightCurveTotalFrames,
+                            onFrameSelected = { frameIndex ->
+                                flightCurveFrameIndex = frameIndex.coerceIn(0, (flightCurveTotalFrames - 1).coerceAtLeast(0))
+                                seekCurveFrame(flightCurveFrameIndex)
+                            },
+                            onImpactFrame = {
+                                flightCurveFrameIndex = (state.impactFrame?.frameIndex ?: 0)
+                                    .coerceIn(0, (flightCurveTotalFrames - 1).coerceAtLeast(0))
+                                seekCurveFrame(flightCurveFrameIndex)
+                            },
                             onPrevFrame = {
                                 if (flightCurveFrameIndex > 0) {
                                     flightCurveFrameIndex--
-                                    val fps = 30.0
-                                    player.seekTo((flightCurveFrameIndex / fps * 1000).toLong())
+                                    seekCurveFrame(flightCurveFrameIndex)
                                 }
                             },
                             onNextFrame = {
                                 if (flightCurveFrameIndex < flightCurveTotalFrames - 1) {
                                     flightCurveFrameIndex++
-                                    val fps = 30.0
-                                    player.seekTo((flightCurveFrameIndex / fps * 1000).toLong())
+                                    seekCurveFrame(flightCurveFrameIndex)
                                 }
                             },
                         )

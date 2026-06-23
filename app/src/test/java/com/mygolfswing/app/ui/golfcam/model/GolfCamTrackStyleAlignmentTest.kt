@@ -64,6 +64,50 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun visibleTailStartProgressMatchesIosTailPercentRules() {
+        assertEquals(
+            0.0,
+            GolfCamSpeedConfig.visibleTailStartProgress(
+                headProgress = 0.8,
+                tailHalfLife = 100.0,
+                activeAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE,
+                apexProgress = 0.6,
+            ),
+            1e-9,
+        )
+        assertEquals(
+            0.20,
+            GolfCamSpeedConfig.visibleTailStartProgress(
+                headProgress = 0.90,
+                tailHalfLife = 70.0,
+                activeAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE,
+                apexProgress = 0.6,
+            ),
+            1e-9,
+        )
+        assertEquals(
+            0.60,
+            GolfCamSpeedConfig.visibleTailStartProgress(
+                headProgress = 0.80,
+                tailHalfLife = 20.0,
+                activeAlgorithm = TrajectoryAlgorithmKind.CURRENT_V5,
+                apexProgress = 0.6,
+            ),
+            1e-9,
+        )
+        assertEquals(
+            0.24,
+            GolfCamSpeedConfig.visibleTailStartProgress(
+                headProgress = 0.40,
+                tailHalfLife = 5.0,
+                activeAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE,
+                apexProgress = 0.6,
+            ),
+            1e-9,
+        )
+    }
+
+    @Test
     fun cloudConfigConsumesDefaultsPresetsAndRenderTuningWithIosClamps() {
         val config = JsonObject(
             mapOf(

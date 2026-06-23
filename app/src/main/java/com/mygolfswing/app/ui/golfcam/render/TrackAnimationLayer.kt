@@ -119,10 +119,13 @@ fun TrajectoryAnimationOverlay(
         model.progressAtTime(elapsedSec)
     }.toFloat().coerceIn(0f, 1f)
 
-    val tailProgress = remember(headProgress, style.tailHalfLife, totalDurSec) {
-        // tailHalfLife 范围 5~100，映射为占总时长的百分比
-        val halfLifeProgress = (style.tailHalfLife / 100.0 / totalDurSec).toFloat()
-        max(0f, headProgress - halfLifeProgress * 3f)
+    val tailProgress = remember(headProgress, style.tailHalfLife, style.activeTrajectoryAlgorithm, arcTable) {
+        GolfCamSpeedConfig.visibleTailStartProgress(
+            headProgress = headProgress.toDouble(),
+            tailHalfLife = style.tailHalfLife,
+            activeAlgorithm = style.activeTrajectoryAlgorithm,
+            apexProgress = arcTable.apexProgress().toDouble(),
+        ).toFloat()
     }
 
     val textMeasurer = rememberTextMeasurer()

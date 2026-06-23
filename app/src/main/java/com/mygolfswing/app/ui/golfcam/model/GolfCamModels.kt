@@ -301,6 +301,11 @@ class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
         }
         return minU
     }
+
+    fun apexProgress(): Float {
+        if (totalLength <= 0f) return 0.6f
+        return (arcLengthAtU(apexU()) / totalLength).coerceIn(0.05f, 0.95f)
+    }
 }
 
 // ─── V5 运动模型（对齐 iOS TrajectoryMotionModel）──────────────────────────────
@@ -775,6 +780,43 @@ object GolfCamSpeedConfig {
         val final = totalDistance.roundToInt()
         if (p >= 1.0) return max(0, final)
         return max(0, min(final, (totalDistance * p).toInt()))
+    }
+
+    fun visibleTailStartProgress(
+        headProgress: Double,
+        tailHalfLife: Double,
+        activeAlgorithm: TrajectoryAlgorithmKind,
+        apexProgress: Double,
+    ): Double {
+        val head = headProgress.coerceIn(0.0, 1.0)
+        val rawTailPercent = (tailHalfLife / 100.0).coerceIn(0.0, 1.0)
+        if (rawTailPercent >= 0.995) return 0.0
+
+        if (activeAlgorithm != TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+            val tailLength = min(head, rawTailPercent)
+            return max(0.0, head - tailLength)
+        }
+
+        val apex = apexProgress.coerceIn(0.05, 0.95)
+        val visualTailPercent = rawTailPercent.coerceIn(0.16, 0.42)
+        val requestedTailStart = max(0.0, head - rawTailPercent)
+
+        if (head <= apex) {
+            val movingTail = max(0.0, head - visualTailPercent)
+            val warmupLength = max(0.22, min(0.36, apex * 0.42))
+            val warmup = (head / warmupLength).coerceIn(0.0, 1.0)
+            val smoothWarmup = warmup * warmup * (3.0 - 2.0 * warmup)
+            val golfCamTailStart = movingTail * smoothWarmup
+            return min(golfCamTailStart, requestedTailStart)
+        }
+
+        val preApexStart = max(0.0, apex - visualTailPercent)
+        val descent = ((head - apex) / max(1.0 - apex, 0.001)).coerceIn(0.0, 1.0)
+        val transition = (descent / 1.12).coerceIn(0.0, 1.0)
+        val smoothTransition = transition * transition * (3.0 - 2.0 * transition)
+        val landingStart = max(0.0, apex - visualTailPercent * 0.42)
+        val golfCamTailStart = preApexStart + (landingStart - preApexStart) * smoothTransition
+        return min(golfCamTailStart, requestedTailStart)
     }
 }
 

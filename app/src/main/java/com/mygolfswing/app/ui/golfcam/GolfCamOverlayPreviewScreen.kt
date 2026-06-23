@@ -406,7 +406,12 @@ private fun drawTrajectoryOnCanvas(
         .coerceIn(0f, 1f)
     if (headProgress <= 0f) return
 
-    val tailProgress = (headProgress - (style.tailHalfLife / 100.0 / timing.totalDurationSec).toFloat() * 3f).coerceAtLeast(0f)
+    val tailProgress = GolfCamSpeedConfig.visibleTailStartProgress(
+        headProgress = headProgress.toDouble(),
+        tailHalfLife = style.tailHalfLife,
+        activeAlgorithm = style.activeTrajectoryAlgorithm,
+        apexProgress = arcTable.apexProgress().toDouble(),
+    ).toFloat()
     val tuning = style.renderTuning
     val bandAlpha = trackBandAlpha(style)
     val baseStrokeWidth = 8f * (style.widthPct / 50.0).toFloat()

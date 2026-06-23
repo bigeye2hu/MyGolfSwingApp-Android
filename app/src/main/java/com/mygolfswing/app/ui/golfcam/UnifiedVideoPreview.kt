@@ -38,7 +38,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -63,6 +62,7 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
+import com.mygolfswing.app.ui.golfcam.render.GolfCamCurveSpec
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryStaticOverlay
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
@@ -452,7 +452,7 @@ private fun FlightCurveOverlay(
     val landing = state.landing ?: return
     val prev = state.flightCurve
     val defaults = remember(impact, landing) {
-        suggestedGolfCamControlPoints(
+        GolfCamCurveSpec.suggestedControlPoints(
             start = NormalizedPoint(impact.normalizedX, impact.normalizedY),
             end = NormalizedPoint(landing.normalizedX, landing.normalizedY),
         )
@@ -517,61 +517,22 @@ private fun FlightCurveOverlay(
     }
 }
 
-private fun suggestedGolfCamControlPoints(
-    start: NormalizedPoint,
-    end: NormalizedPoint,
-): Pair<NormalizedPoint, NormalizedPoint> {
-    val dx = end.x - start.x
-    val horizontal = abs(dx)
-    if (horizontal < 0.01f) {
-        val lift = 0.14f
-        return clampPoint(NormalizedPoint(start.x, start.y - lift * 0.55f)) to
-            clampPoint(NormalizedPoint(start.x, minOf(start.y, end.y) - lift))
-    }
-
-    val p1X = 0.08f
-    val p2X = 0.32f
-    val p1Y = 0.56f
-    val baseLift = 0.07f
-    val xLift = 0.20f
-    val topReference = minOf(start.y, end.y)
-    val lift = maxOf(baseLift, baseLift + horizontal * xLift)
-    val handleY = maxOf(0.04f, topReference - lift)
-
-    val p2 = NormalizedPoint(
-        x = start.x + dx * p2X,
-        y = handleY,
-    )
-    val p1 = NormalizedPoint(
-        x = start.x + dx * p1X,
-        y = start.y + (handleY - start.y) * p1Y,
-    )
-    return clampPoint(p1) to clampPoint(p2)
-}
-
-private fun clampPoint(point: NormalizedPoint): NormalizedPoint {
-    return NormalizedPoint(
-        x = point.x.coerceIn(0.02f, 0.98f),
-        y = point.y.coerceIn(-0.5f, 1.2f),
-    )
-}
-
 private fun DrawScope.drawGolfCamCurveStroke(
     p0: Offset,
     p1: Offset,
     p2: Offset,
     p3: Offset,
-    segments: Int = 180,
+    segments: Int = GolfCamCurveSpec.SEGMENTS,
 ) {
     for (index in 0 until segments) {
         val start = cubicPoint(index.toFloat() / segments, p0, p1, p2, p3)
         val end = cubicPoint((index + 1).toFloat() / segments, p0, p1, p2, p3)
         drawLine(
-            color = Color.Black.copy(alpha = 0.14f),
+            color = Color.Black.copy(alpha = GolfCamCurveSpec.SHADOW_ALPHA),
             start = start,
             end = end,
-            strokeWidth = foregroundCurveWidth(index, segments) + 1.1f,
-            cap = StrokeCap.Butt,
+            strokeWidth = GolfCamCurveSpec.foregroundWidth(index, segments) + GolfCamCurveSpec.SHADOW_WIDTH_ADD,
+            cap = GolfCamCurveSpec.STROKE_CAP,
         )
     }
 
@@ -579,47 +540,13 @@ private fun DrawScope.drawGolfCamCurveStroke(
         val start = cubicPoint(index.toFloat() / segments, p0, p1, p2, p3)
         val end = cubicPoint((index + 1).toFloat() / segments, p0, p1, p2, p3)
         drawLine(
-            color = curveSegmentColor(index, segments),
+            color = GolfCamCurveSpec.segmentColor(index, segments),
             start = start,
             end = end,
-            strokeWidth = foregroundCurveWidth(index, segments),
-            cap = StrokeCap.Butt,
+            strokeWidth = GolfCamCurveSpec.foregroundWidth(index, segments),
+            cap = GolfCamCurveSpec.STROKE_CAP,
         )
     }
-}
-
-private fun foregroundCurveWidth(index: Int, segments: Int): Float {
-    val t = index.toFloat() / maxOf(1, segments - 1)
-    val launchFullness = Math.pow((1f - t).toDouble(), 1.05).toFloat()
-    return 1.15f + launchFullness * 5.35f
-}
-
-private fun curveSegmentColor(index: Int, segments: Int): Color {
-    val t = index.toDouble() / maxOf(1, segments - 1)
-    val brightness = Math.pow(t, 0.85)
-    val opacity = 0.24 + brightness * 0.72
-    val color = if (t < 0.42) {
-        interpolateRgb(Rgb(0.08, 0.23, 0.18), Rgb(0.25, 0.62, 0.49), t / 0.42)
-    } else {
-        interpolateRgb(Rgb(0.25, 0.62, 0.49), Rgb(0.55, 0.96, 0.82), (t - 0.42) / 0.58)
-    }
-    return Color(
-        red = color.r.toFloat(),
-        green = color.g.toFloat(),
-        blue = color.b.toFloat(),
-        alpha = opacity.toFloat(),
-    )
-}
-
-private data class Rgb(val r: Double, val g: Double, val b: Double)
-
-private fun interpolateRgb(a: Rgb, b: Rgb, amount: Double): Rgb {
-    val t = amount.coerceIn(0.0, 1.0)
-    return Rgb(
-        r = a.r + (b.r - a.r) * t,
-        g = a.g + (b.g - a.g) * t,
-        b = a.b + (b.b - a.b) * t,
-    )
 }
 
 private fun cubicPoint(t: Float, p0: Offset, p1: Offset, p2: Offset, p3: Offset): Offset {

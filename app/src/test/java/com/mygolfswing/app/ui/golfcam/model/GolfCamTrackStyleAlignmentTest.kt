@@ -1,9 +1,11 @@
 package com.mygolfswing.app.ui.golfcam.model
 
+import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelTextMetrics
+import com.mygolfswing.app.ui.golfcam.render.GolfCamCurveSpec
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -19,6 +21,45 @@ class GolfCamTrackStyleAlignmentTest {
     @Test
     fun trajectorySegmentCountMatchesIosTrailV3Config() {
         assertEquals(360, GolfCamTrailGeometry.SEGMENT_COUNT)
+    }
+
+    @Test
+    fun flightCurveDefaultsMatchIosGolfCamLikeControlPointSpec() {
+        val (p1, p2) = GolfCamCurveSpec.suggestedControlPoints(
+            start = NormalizedPoint(0.10f, 0.80f),
+            end = NormalizedPoint(0.90f, 0.62f),
+        )
+
+        assertEquals(0.164f, p1.x, 1e-6f)
+        assertEquals(0.5704f, p1.y, 1e-6f)
+        assertEquals(0.356f, p2.x, 1e-6f)
+        assertEquals(0.39f, p2.y, 1e-6f)
+    }
+
+    @Test
+    fun flightCurveClampAndStrokeMatchIosGolfCamCurveStrokeSpec() {
+        val clamped = GolfCamCurveSpec.clampPoint(NormalizedPoint(-1f, -2f))
+        val last = GolfCamCurveSpec.SEGMENTS - 1
+        val startColor = GolfCamCurveSpec.segmentColor(0)
+        val endColor = GolfCamCurveSpec.segmentColor(last)
+
+        assertEquals(0.02f, clamped.x, 0f)
+        assertEquals(-0.5f, clamped.y, 0f)
+        assertEquals(180, GolfCamCurveSpec.SEGMENTS)
+        assertEquals(StrokeCap.Butt, GolfCamCurveSpec.STROKE_CAP)
+        assertEquals(0.14f, GolfCamCurveSpec.SHADOW_ALPHA, 0f)
+        assertEquals(1.1f, GolfCamCurveSpec.SHADOW_WIDTH_ADD, 0f)
+        assertEquals(6.50f, GolfCamCurveSpec.foregroundWidth(0), 0.001f)
+        assertEquals(1.15f, GolfCamCurveSpec.foregroundWidth(last), 0.001f)
+        assertTrue(GolfCamCurveSpec.foregroundWidth(0) > GolfCamCurveSpec.foregroundWidth(last))
+        assertEquals(0.08f, startColor.red, 0.003f)
+        assertEquals(0.23f, startColor.green, 0.003f)
+        assertEquals(0.18f, startColor.blue, 0.003f)
+        assertEquals(0.24f, startColor.alpha, 0.003f)
+        assertEquals(0.55f, endColor.red, 0.003f)
+        assertEquals(0.96f, endColor.green, 0.003f)
+        assertEquals(0.82f, endColor.blue, 0.003f)
+        assertEquals(0.96f, endColor.alpha, 0.003f)
     }
 
     @Test

@@ -48,13 +48,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
 
-private const val FPS = 30.0
 private const val MAX_CURVE_THUMBS = 60
 
 /**
@@ -68,18 +68,20 @@ fun FlightCurveStepTool(
     state: GolfCamWorkflowState,
     currentFrameIndex: Int = 0,
     totalFrames: Int = 0,
+    frameRate: Double = 30.0,
     onFrameSelected: ((Int) -> Unit)? = null,
     onImpactFrame: (() -> Unit)? = null,
     onPrevFrame: (() -> Unit)? = null,
     onNextFrame: (() -> Unit)? = null,
 ) {
+    val safeFrameRate = GolfCamFrameTimeline.safeFrameRate(frameRate)
     val cp1 = state.flightCurveControlPoint1
     val cp2 = state.flightCurveControlPoint2
     val p1x = (cp1?.first ?: 0.3f) * 100f
     val p1y = (cp1?.second ?: 0.3f) * 100f
     val p2x = (cp2?.first ?: 0.7f) * 100f
     val p2y = (cp2?.second ?: 0.2f) * 100f
-    val currentSec = currentFrameIndex / FPS
+    val currentSec = currentFrameIndex / safeFrameRate
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -127,6 +129,7 @@ fun FlightCurveStepTool(
                 trimStartMs = trimStartMs,
                 currentFrameIndex = currentFrameIndex,
                 totalFrames = totalFrames,
+                frameRate = safeFrameRate,
                 onFrameSelected = { onFrameSelected?.invoke(it) },
                 modifier = Modifier
                     .weight(1f)
@@ -224,19 +227,20 @@ private fun CurveThumbnailTimeline(
     trimStartMs: Long,
     currentFrameIndex: Int,
     totalFrames: Int,
+    frameRate: Double,
     onFrameSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val frameStep = max(1, ceil(totalFrames / MAX_CURVE_THUMBS.toDouble()).toInt())
-    var thumbnails by remember(videoUri, trimStartMs, totalFrames, frameStep) {
+    var thumbnails by remember(videoUri, trimStartMs, totalFrames, frameStep, frameRate) {
         mutableStateOf<List<CurveThumb>>(emptyList())
     }
 
-    LaunchedEffect(videoUri, trimStartMs, totalFrames, frameStep) {
+    LaunchedEffect(videoUri, trimStartMs, totalFrames, frameStep, frameRate) {
         if (totalFrames <= 0) return@LaunchedEffect
         thumbnails = withContext(Dispatchers.IO) {
-            loadCurveThumbnails(context, videoUri, trimStartMs, totalFrames, frameStep)
+            loadCurveThumbnails(context, videoUri, trimStartMs, totalFrames, frameStep, frameRate)
         }
     }
 
@@ -291,8 +295,10 @@ private fun loadCurveThumbnails(
     trimStartMs: Long,
     totalFrames: Int,
     frameStep: Int,
+    frameRate: Double,
 ): List<CurveThumb> {
     val retriever = MediaMetadataRetriever()
+    val safeFrameRate = GolfCamFrameTimeline.safeFrameRate(frameRate)
     return try {
         retriever.setDataSource(context, videoUri)
         val frames = buildList {
@@ -303,7 +309,7 @@ private fun loadCurveThumbnails(
             }
         }
         frames.map { frameIndex ->
-            val timeMs = trimStartMs + (frameIndex / FPS * 1000).toLong()
+            val timeMs = GolfCamFrameTimeline.timeMsForFrame(trimStartMs, frameIndex, safeFrameRate)
             val bitmap = retriever.getFrameAtTime(timeMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
                 ?.toCurveBitmap()
             CurveThumb(frameIndex = min(frameIndex, totalFrames - 1), bitmap = bitmap)

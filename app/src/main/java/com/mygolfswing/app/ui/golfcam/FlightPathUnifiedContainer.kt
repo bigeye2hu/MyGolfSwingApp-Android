@@ -274,6 +274,7 @@ fun FlightPathUnifiedContainer(
                             state = state,
                             currentFrameIndex = flightCurveFrameIndex,
                             totalFrames = flightCurveTotalFrames,
+                            frameRate = fps,
                             onFrameSelected = { frameIndex ->
                                 flightCurveFrameIndex = frameIndex.coerceIn(0, (flightCurveTotalFrames - 1).coerceAtLeast(0))
                                 seekCurveFrame(flightCurveFrameIndex)

@@ -55,6 +55,7 @@ import com.mygolfswing.app.ui.golfcam.model.DistanceUnit
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
+import com.mygolfswing.app.ui.golfcam.model.TrackStyleCloudConfigLoader
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryPresetKind
 import com.mygolfswing.app.ui.golfcam.model.defaultTrackColorPresets
@@ -83,7 +84,28 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
     val flightCurve = state.flightCurve ?: return
     val prev = state.trackStyle?.style
     var style by remember { mutableStateOf(prev ?: TrackStyle()) }
+    var colorPresets by remember { mutableStateOf(defaultTrackColorPresets) }
     var selectedCategory by remember { mutableStateOf(StyleCategory.COLOR) }
+
+    LaunchedEffect(Unit) {
+        TrackStyleCloudConfigLoader.fetch()
+            .onSuccess { config ->
+                colorPresets = config.presets
+                style = if (prev == null) {
+                    config.defaultStyle
+                } else {
+                    val matchedPreset = config.presets.firstOrNull { it.name == style.colorPreset.name }
+                    if (matchedPreset != null) {
+                        style.copy(
+                            colorPreset = matchedPreset,
+                            glowOpacity = matchedPreset.glowAlpha.toDouble(),
+                        )
+                    } else {
+                        style
+                    }
+                }
+            }
+    }
 
     LaunchedEffect(style) {
         onResult(TrackStyleSelection(style = style, flightCurve = flightCurve))
@@ -145,7 +167,7 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
                 .padding(top = 10.dp),
         ) {
             when (selectedCategory) {
-                StyleCategory.COLOR -> ColorContent(style = style, onChange = { style = it })
+                StyleCategory.COLOR -> ColorContent(style = style, presets = colorPresets, onChange = { style = it })
                 StyleCategory.WIDTH -> SliderContent(
                     label = "细  ←  轨迹宽度  →  粗",
                     value = style.widthPct.toFloat(),
@@ -250,7 +272,11 @@ private fun trajectoryPresetSubtitle(preset: TrajectoryPresetKind): String {
 // ── 颜色内容 ────────────────────────────────────────────────
 
 @Composable
-private fun ColorContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
+private fun ColorContent(
+    style: TrackStyle,
+    presets: List<com.mygolfswing.app.ui.golfcam.model.TrackColorPreset>,
+    onChange: (TrackStyle) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         // 不透明度滑块
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -273,7 +299,7 @@ private fun ColorContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
 
         // 颜色预设圆点
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(defaultTrackColorPresets) { preset ->
+            items(presets) { preset ->
                 val selected = preset.name == style.colorPreset.name
                 Box(
                     contentAlignment = Alignment.Center,

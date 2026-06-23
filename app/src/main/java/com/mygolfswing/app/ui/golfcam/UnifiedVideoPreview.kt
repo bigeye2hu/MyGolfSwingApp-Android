@@ -1,18 +1,22 @@
 package com.mygolfswing.app.ui.golfcam
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -36,6 +40,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.exoplayer.ExoPlayer
@@ -262,37 +268,90 @@ private fun ImpactPositionOverlay(
     onPositionChange: ((Float, Float) -> Unit)?,
 ) {
     val pos = state.impactPosition
-    val nx = pos?.normalizedX ?: 0.35f
-    val ny = pos?.normalizedY ?: 0.75f
+    var nx by remember(pos) { mutableFloatStateOf(pos?.normalizedX ?: 0.5f) }
+    var ny by remember(pos) { mutableFloatStateOf(pos?.normalizedY ?: 0.5f) }
+    var isDragging by remember { mutableStateOf(false) }
 
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    onPositionChange?.invoke(
-                        (offset.x / size.width).coerceIn(0.02f, 0.98f),
-                        (offset.y / size.height).coerceIn(0.02f, 0.98f),
+    LaunchedEffect(Unit) {
+        if (pos == null) onPositionChange?.invoke(nx, ny)
+    }
+
+    val impactMarkPainter = androidx.compose.ui.res.painterResource(
+        id = com.mygolfswing.app.R.drawable.impact_mark,
+    )
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val wPx = with(density) { maxWidth.toPx() }
+        val hPx = with(density) { maxHeight.toPx() }
+        val dragRadiusPx = with(density) { 50.dp.toPx() }
+        val markerSizeDp = 28.dp
+        val markerHalfPx = with(density) { (markerSizeDp / 2).toPx() }
+
+        // 双击全局跳位
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = { offset ->
+                            nx = (offset.x / wPx).coerceIn(0.02f, 0.98f)
+                            ny = (offset.y / hPx).coerceIn(0.02f, 0.98f)
+                            onPositionChange?.invoke(nx, ny)
+                        },
                     )
                 }
+                .pointerInput(nx, ny) {
+                    var hitDrag = false
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            val markerX = nx * wPx
+                            val markerY = ny * hPx
+                            val dx = offset.x - markerX
+                            val dy = offset.y - markerY
+                            hitDrag = (dx * dx + dy * dy) <= dragRadiusPx * dragRadiusPx
+                            isDragging = hitDrag
+                        },
+                        onDrag = { change, _ ->
+                            if (hitDrag) {
+                                change.consume()
+                                nx = (change.position.x / wPx).coerceIn(0.02f, 0.98f)
+                                ny = (change.position.y / hPx).coerceIn(0.02f, 0.98f)
+                                onPositionChange?.invoke(nx, ny)
+                            }
+                        },
+                        onDragEnd = { isDragging = false; hitDrag = false },
+                        onDragCancel = { isDragging = false; hitDrag = false },
+                    )
+                },
+        )
+
+        // 拖动时的外圈（对齐 iOS 白色圆环）
+        if (isDragging) {
+            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                drawCircle(
+                    color = Color.White,
+                    radius = with(density) { 18.dp.toPx() },
+                    center = Offset(nx * size.width, ny * size.height),
+                    style = Stroke(2.5f),
+                )
             }
-            .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
-                    onPositionChange?.invoke(
-                        (change.position.x / size.width).coerceIn(0.02f, 0.98f),
-                        (change.position.y / size.height).coerceIn(0.02f, 0.98f),
+        }
+
+        // ImpactMark 图标（白色，24dp，居中，带阴影效果）
+        androidx.compose.foundation.Image(
+            painter = impactMarkPainter,
+            contentDescription = "击球点",
+            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White),
+            modifier = Modifier
+                .size(markerSizeDp)
+                .offset {
+                    IntOffset(
+                        x = (nx * wPx - markerHalfPx).toInt(),
+                        y = (ny * hPx - markerHalfPx).toInt(),
                     )
-                }
-            },
-    ) {
-        val cx = nx * size.width
-        val cy = ny * size.height
-        val r = 28f
-        drawCircle(color = Color.White.copy(alpha = 0.18f), radius = r * 1.8f, center = Offset(cx, cy), style = Stroke(1.5f))
-        drawCircle(color = DSColors.fairway, radius = r, center = Offset(cx, cy), style = Stroke(2.8f))
-        drawLine(Color.White, Offset(cx - r * 1.7f, cy), Offset(cx + r * 1.7f, cy), strokeWidth = 1.5f)
-        drawLine(Color.White, Offset(cx, cy - r * 1.7f), Offset(cx, cy + r * 1.7f), strokeWidth = 1.5f)
-        drawCircle(color = DSColors.fairway, radius = 5f, center = Offset(cx, cy))
+                },
+        )
     }
 }
 

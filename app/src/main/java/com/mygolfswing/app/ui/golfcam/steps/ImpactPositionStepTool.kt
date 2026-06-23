@@ -1,27 +1,25 @@
 package com.mygolfswing.app.ui.golfcam.steps
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.R
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 
@@ -62,10 +60,10 @@ fun ImpactPositionStepTool(state: GolfCamWorkflowState = GolfCamWorkflowState())
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Icon(
-                    Icons.Filled.GpsFixed,
+                Image(
+                    painter = painterResource(id = R.drawable.impact_mark),
                     contentDescription = null,
-                    tint = DSColors.fairway,
+                    colorFilter = ColorFilter.tint(DSColors.fairway),
                     modifier = Modifier.size(16.dp),
                 )
                 Text(
@@ -97,7 +95,7 @@ fun ImpactPositionStepTool(state: GolfCamWorkflowState = GolfCamWorkflowState())
         ) {
             Icon(Icons.Filled.TouchApp, null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
             Text(
-                "拖动或点击画面移动击球标记到球的位置",
+                "拖动或双击画面移动击球标记到球的位置",
                 color = DSColors.shadowGray,
                 fontSize = 12.sp,
             )

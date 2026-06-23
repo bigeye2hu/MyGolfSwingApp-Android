@@ -423,6 +423,7 @@ private fun StepBottomBar(
     onNext: () -> Unit,
     onComplete: () -> Unit,
 ) {
+    val canContinue = state.canContinueFrom(currentStep)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -488,12 +489,12 @@ private fun StepBottomBar(
                 .weight(1f)
                 .clip(RoundedCornerShape(24.dp))
                 .background(
-                    if (currentStep.isLast && !state.isComplete)
+                    if (!canContinue)
                         DSColors.fairway.copy(alpha = 0.4f)
                     else
                         DSColors.fairway,
                 )
-                .clickable(enabled = !currentStep.isLast || state.isComplete) {
+                .clickable(enabled = canContinue) {
                     if (currentStep.isLast) onComplete() else onNext()
                 }
                 .padding(vertical = 12.dp),
@@ -506,5 +507,16 @@ private fun StepBottomBar(
                 fontWeight = FontWeight.Bold,
             )
         }
+    }
+}
+
+private fun GolfCamWorkflowState.canContinueFrom(step: GolfCamStep): Boolean {
+    return when (step) {
+        GolfCamStep.TRIM -> trimResult != null
+        GolfCamStep.IMPACT_FRAME -> impactFrame != null
+        GolfCamStep.IMPACT_POSITION -> impactPosition != null
+        GolfCamStep.LANDING -> landing != null
+        GolfCamStep.FLIGHT_CURVE -> flightCurve != null
+        GolfCamStep.TRACK_STYLE -> trackStyle != null
     }
 }

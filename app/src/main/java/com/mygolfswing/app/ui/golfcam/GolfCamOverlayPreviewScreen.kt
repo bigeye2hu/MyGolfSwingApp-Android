@@ -99,9 +99,12 @@ fun GolfCamOverlayPreviewScreen(
     var exportDone by remember { mutableStateOf(false) }
 
     val impactMs = impactTimeMs
+    val flightTimeMs = (selection.flightCurve.landingPoint.flightTimeSec * 1000)
+        .toLong()
+        .coerceAtLeast(500L)
     val timing = TrajectoryTiming(
         impactTimeMs = impactMs,
-        landingTimeMs = impactMs + 3000L,
+        landingTimeMs = impactMs + flightTimeMs,
         fps = 30.0,
     )
 
@@ -390,7 +393,11 @@ private fun drawTrajectoryOnCanvas(
     height: Float,
     timing: TrajectoryTiming,
 ) {
-    val headProgress = model.progressAtTime(elapsedSec).toFloat().coerceIn(0f, 1f)
+    val motionProgress = model.progressAtTime(elapsedSec)
+    val headProgress = com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
+        .progress(motionProgress, style.speedLevel)
+        .toFloat()
+        .coerceIn(0f, 1f)
     if (headProgress <= 0f) return
 
     val tailProgress = (headProgress - (style.tailHalfLife / 100.0 / timing.totalDurationSec).toFloat() * 3f).coerceAtLeast(0f)

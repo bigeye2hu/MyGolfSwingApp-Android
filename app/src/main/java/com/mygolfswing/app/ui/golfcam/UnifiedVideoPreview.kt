@@ -135,9 +135,12 @@ fun UnifiedVideoPreview(
                 val trackStyle = state.trackStyle?.style
                 if (bezier != null && trackStyle != null) {
                     val timing = state.impactFrame?.let { impact ->
+                        val flightTimeMs = ((state.flightCurve?.landingPoint?.flightTimeSec ?: 3.0) * 1000)
+                            .toLong()
+                            .coerceAtLeast(500L)
                         TrajectoryTiming(
                             impactTimeMs = impact.timeMs,
-                            landingTimeMs = impact.timeMs + 3000L,
+                            landingTimeMs = impact.timeMs + flightTimeMs,
                             fps = 30.0,
                         )
                     }

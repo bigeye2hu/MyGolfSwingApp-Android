@@ -101,7 +101,10 @@ fun TrajectoryAnimationOverlay(
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
     val totalDurSec = timing.totalDurationSec
 
-    val headProgress = model.progressAtTime(elapsedMs / 1000.0).toFloat()
+    val motionProgress = model.progressAtTime(elapsedMs / 1000.0)
+    val headProgress = GolfCamSpeedConfig
+        .progress(motionProgress, style.speedLevel)
+        .toFloat()
 
     val tailProgress = remember(headProgress, style.tailHalfLife, totalDurSec) {
         // tailHalfLife 范围 5~100，映射为占总时长的百分比

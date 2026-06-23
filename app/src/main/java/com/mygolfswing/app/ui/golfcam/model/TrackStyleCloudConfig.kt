@@ -91,7 +91,7 @@ object TrackStyleCloudConfigLoader {
             widthPct = (styleDefaults?.double("widthPct") ?: 40.0).coerceIn(5.0, 160.0),
             tailHalfLife = (styleDefaults?.double("tailHalfLife") ?: 70.0).coerceIn(5.0, 100.0),
             showDistance = styleDefaults?.boolean("showDistance") ?: false,
-            totalDistance = (styleDefaults?.double("totalDistance") ?: 150.0).coerceIn(0.0, 1000.0),
+            totalDistance = GolfCamDistanceConfig.clamp(styleDefaults?.double("totalDistance") ?: 150.0),
             distanceUnit = if (styleDefaults?.string("distanceUnit") == "meters") {
                 DistanceUnit.METERS
             } else {

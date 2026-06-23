@@ -828,6 +828,31 @@ object GolfCamSpeedConfig {
 
 // ─── 轨迹样式（对齐 iOS TrackStyle）──────────────────────────────────────────────
 
+object GolfCamDistanceConfig {
+    const val MIN_DISTANCE = 0.0
+    const val MAX_DISTANCE = 1000.0
+    const val MAX_INPUT_DIGITS = 4
+
+    fun clamp(distance: Double): Double = distance.coerceIn(MIN_DISTANCE, MAX_DISTANCE)
+
+    fun inputText(raw: String): String {
+        val digits = raw.filter { it.isDigit() }.take(MAX_INPUT_DIGITS)
+        val value = digits.toDoubleOrNull() ?: return digits
+        return clamp(value).toInt().toString()
+    }
+
+    fun displayText(distance: Double): String = clamp(distance).toInt().toString()
+
+    fun convert(distance: Double, from: DistanceUnit, to: DistanceUnit): Double {
+        val converted = when {
+            from == to -> distance
+            from == DistanceUnit.YARDS && to == DistanceUnit.METERS -> distance * 0.9144
+            else -> distance / 0.9144
+        }
+        return clamp(converted)
+    }
+}
+
 data class TrackColorPreset(
     val name: String,
     val gradientColors: List<Long>,

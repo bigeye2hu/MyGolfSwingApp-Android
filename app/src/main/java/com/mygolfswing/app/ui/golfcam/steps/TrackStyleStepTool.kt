@@ -51,7 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
-import com.mygolfswing.app.ui.golfcam.model.DistanceUnit
+import com.mygolfswing.app.ui.golfcam.model.GolfCamDistanceConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
@@ -296,13 +296,13 @@ private fun SliderContent(
 @Composable
 private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
     var distanceText by remember(style.totalDistance) {
-        mutableStateOf(style.totalDistance.toInt().toString())
+        mutableStateOf(GolfCamDistanceConfig.displayText(style.totalDistance))
     }
 
     fun commitDistance() {
         val value = distanceText.toDoubleOrNull()
         if (value != null) {
-            onChange(style.copy(totalDistance = value.coerceIn(0.0, 999.0)))
+            onChange(style.copy(totalDistance = GolfCamDistanceConfig.clamp(value)))
         }
     }
 
@@ -342,7 +342,7 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                     TextField(
                         value = distanceText,
                         onValueChange = { text ->
-                            distanceText = text.filter { it.isDigit() }.take(3)
+                            distanceText = GolfCamDistanceConfig.inputText(text)
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -382,12 +382,12 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                         .background(DSColors.mistGreen.copy(alpha = 0.55f))
                         .clickable {
                             val nextUnit = style.distanceUnit.toggle()
-                            val converted = if (nextUnit == DistanceUnit.YARDS) {
-                                style.totalDistance / 0.9144
-                            } else {
-                                style.totalDistance * 0.9144
-                            }
-                            distanceText = converted.toInt().toString()
+                            val converted = GolfCamDistanceConfig.convert(
+                                distance = style.totalDistance,
+                                from = style.distanceUnit,
+                                to = nextUnit,
+                            )
+                            distanceText = GolfCamDistanceConfig.displayText(converted)
                             onChange(
                                 style.copy(
                                     distanceUnit = nextUnit,

@@ -203,6 +203,18 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun distanceConfigMatchesIosCloudAndUiRange() {
+        assertEquals(0.0, GolfCamDistanceConfig.clamp(-10.0), 0.0)
+        assertEquals(1000.0, GolfCamDistanceConfig.clamp(1200.0), 0.0)
+        assertEquals("1000", GolfCamDistanceConfig.inputText("10000"))
+        assertEquals("150", GolfCamDistanceConfig.inputText("150yd"))
+        assertEquals("", GolfCamDistanceConfig.inputText(""))
+        assertEquals("1000", GolfCamDistanceConfig.displayText(1000.9))
+        assertEquals(91.44, GolfCamDistanceConfig.convert(100.0, DistanceUnit.YARDS, DistanceUnit.METERS), 1e-6)
+        assertEquals(1000.0, GolfCamDistanceConfig.convert(1000.0, DistanceUnit.METERS, DistanceUnit.YARDS), 0.0)
+    }
+
+    @Test
     fun headGlowAlphaSpecIsSharedByPreviewAndExport() {
         val alphas = TrajectoryOverlayRenderSpec.headGlowAlphas(0.7f)
 

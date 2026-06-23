@@ -343,7 +343,28 @@ data class TrackStyle(
 
 data class TrimResult(val startMs: Long, val endMs: Long)
 
-data class ImpactFrameSelection(val frameIndex: Int, val timeMs: Long)
+/** 音频检测原始候选（绝对时间） */
+data class ImpactCandidate(
+    val timeSec: Double,
+    val confidence: Float,  // 0-1，相对最高分归一化
+) {
+    val confidencePercent: Int get() = (confidence * 100).toInt()
+}
+
+/** UI 层候选帧（相对裁剪片段的帧索引） */
+data class CandidateImpactFrame(
+    val frameIndex: Int,
+    val confidence: Float,
+    val timeSec: Double,
+) {
+    val confidencePercent: Int get() = (confidence * 100).toInt()
+}
+
+data class ImpactFrameSelection(
+    val frameIndex: Int,
+    val timeMs: Long,
+    val candidateFrames: List<CandidateImpactFrame> = emptyList(),
+)
 
 data class ImpactPositionSelection(val normalizedX: Float, val normalizedY: Float)
 

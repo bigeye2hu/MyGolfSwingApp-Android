@@ -2,6 +2,7 @@ package com.mygolfswing.app.ui.golfcam
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +41,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Text
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
+import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
 import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
@@ -60,6 +68,8 @@ fun UnifiedVideoPreview(
     currentStep: GolfCamStep,
     state: GolfCamWorkflowState,
     modifier: Modifier = Modifier,
+    candidateFrames: List<CandidateImpactFrame> = emptyList(),
+    onCandidateFrameSelected: ((CandidateImpactFrame) -> Unit)? = null,
     onImpactPositionChange: ((Float, Float) -> Unit)? = null,
     onLandingChange: ((Float, Float) -> Unit)? = null,
     onFlightCurveChange: ((NormalizedPoint, NormalizedPoint) -> Unit)? = null,
@@ -143,7 +153,19 @@ fun UnifiedVideoPreview(
                     )
                 }
             }
-            else -> { /* TRIM / IMPACT_FRAME 无视频叠加，但 TRIM 显示播放控件 */ }
+            GolfCamStep.IMPACT_FRAME -> {
+                if (candidateFrames.isNotEmpty()) {
+                    CandidateFrameBadges(
+                        candidates = candidateFrames,
+                        currentFrameIndex = state.impactFrame?.frameIndex ?: -1,
+                        onSelect = onCandidateFrameSelected,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 10.dp, top = 10.dp),
+                    )
+                }
+            }
+            else -> { /* TRIM 无视频叠加，TRIM 显示播放控件 */ }
         }
 
         // 播放控制栏（TRIM 步骤显示，其他步骤隐藏）
@@ -388,5 +410,71 @@ private fun FlightCurveOverlay(
         drawCircle(DSColors.fairway, 14f, p1)
         drawCircle(DSColors.fairway.copy(alpha = 0.25f), 26f, p2)
         drawCircle(DSColors.fairway, 14f, p2)
+    }
+}
+
+// ─── 候选帧徽章浮层（对齐 iOS candidateFrameButton）──────────────────────────
+
+@Composable
+private fun CandidateFrameBadges(
+    candidates: List<CandidateImpactFrame>,
+    currentFrameIndex: Int,
+    onSelect: ((CandidateImpactFrame) -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        candidates.take(3).forEachIndexed { idx, candidate ->
+            val rank = idx + 1
+            val isPrimary = rank == 1
+            val isSelected = currentFrameIndex == candidate.frameIndex
+
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.70f))
+                    .then(
+                        if (isSelected) Modifier.border(
+                            width = 2.5.dp,
+                            color = Color(0xFFFFD700),
+                            shape = CircleShape,
+                        ) else Modifier.border(
+                            width = 1.5.dp,
+                            color = Color.Gray.copy(alpha = 0.50f),
+                            shape = CircleShape,
+                        ),
+                    )
+                    .clickable { onSelect?.invoke(candidate) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "#$rank",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (isPrimary && isSelected) {
+                            Text("★", color = Color(0xFFFFD700), fontSize = 9.sp)
+                        }
+                    }
+                    Text(
+                        "${candidate.confidencePercent}%",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 8.sp,
+                    )
+                }
+            }
+        }
     }
 }

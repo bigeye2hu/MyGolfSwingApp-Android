@@ -49,6 +49,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
 import com.mygolfswing.app.ui.golfcam.model.FlightCurveSelection
 import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
@@ -83,6 +84,8 @@ fun FlightPathUnifiedContainer(
     var flightCurveFrameIndex by remember { mutableIntStateOf(0) }
     var flightCurveTotalFrames by remember { mutableIntStateOf(0) }
     var durationMs by remember { mutableLongStateOf(0L) }
+    // 音频检测候选帧
+    var candidateFrames by remember { mutableStateOf<List<CandidateImpactFrame>>(emptyList()) }
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -105,6 +108,26 @@ fun FlightPathUnifiedContainer(
         if (player.playbackState == Player.STATE_READY && durationMs <= 0L) {
             durationMs = player.duration.coerceAtLeast(1L)
         }
+    }
+
+    // 裁剪完成后触发音频检测（仅跑一次）
+    LaunchedEffect(state.trimResult) {
+        val trim = state.trimResult ?: return@LaunchedEffect
+        if (candidateFrames.isNotEmpty()) return@LaunchedEffect
+        val startSec = trim.startMs / 1000.0
+        val endSec = trim.endMs / 1000.0
+        val fps = 30.0
+        val rawCandidates = AudioImpactDetector.detect(context, videoUri, startSec, endSec)
+        candidateFrames = rawCandidates
+            .mapIndexed { _, raw ->
+                val relTime = raw.timeSec - startSec
+                CandidateImpactFrame(
+                    frameIndex = (relTime * fps).toInt().coerceAtLeast(0),
+                    confidence = raw.confidence,
+                    timeSec = relTime,
+                )
+            }
+            .sortedByDescending { it.confidence }
     }
 
     Box(
@@ -139,6 +162,18 @@ fun FlightPathUnifiedContainer(
                     player = player,
                     currentStep = currentStep,
                     state = state,
+                    candidateFrames = candidateFrames,
+                    onCandidateFrameSelected = { candidate ->
+                        val trim = state.trimResult
+                        val startMs = trim?.startMs ?: 0L
+                        val timeMs = startMs + (candidate.timeSec * 1000).toLong()
+                        player.seekTo(timeMs)
+                        player.pause()
+                        state.impactFrame = state.impactFrame?.copy(
+                            frameIndex = candidate.frameIndex,
+                            timeMs = timeMs,
+                        )
+                    },
                     onImpactPositionChange = { nx, ny ->
                         state.impactPosition = ImpactPositionSelection(nx, ny)
                     },
@@ -173,8 +208,10 @@ fun FlightPathUnifiedContainer(
                     )
                     GolfCamStep.IMPACT_FRAME -> ImpactFrameStepTool(
                         player = player,
+                        videoUri = videoUri,
                         durationMs = durationMs,
                         state = state,
+                        candidateFrames = candidateFrames,
                         onResult = { state.impactFrame = it },
                     )
                     GolfCamStep.IMPACT_POSITION -> ImpactPositionStepTool(state = state)

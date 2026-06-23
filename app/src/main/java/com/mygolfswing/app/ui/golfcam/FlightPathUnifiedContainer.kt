@@ -19,11 +19,15 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -38,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +97,7 @@ fun FlightPathUnifiedContainer(
     // 音频检测候选帧
     var candidateFrames by remember { mutableStateOf<List<CandidateImpactFrame>>(emptyList()) }
     var candidateFrameRate by remember { mutableStateOf<Double?>(null) }
+    var showHelp by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -160,6 +167,7 @@ fun FlightPathUnifiedContainer(
             StepNavBar(
                 currentStep = currentStep,
                 onBack = onCancel,
+                onHelp = { showHelp = true },
             )
 
             // ── 步骤进度指示器 ──
@@ -321,6 +329,13 @@ fun FlightPathUnifiedContainer(
                 onComplete = { state.trackStyle?.let { onComplete(it) } },
             )
         }
+
+        if (showHelp) {
+            StepHelpPopCard(
+                step = currentStep,
+                onDismiss = { showHelp = false },
+            )
+        }
     }
 }
 
@@ -330,13 +345,15 @@ fun FlightPathUnifiedContainer(
 private fun StepNavBar(
     currentStep: GolfCamStep,
     onBack: () -> Unit,
+    onHelp: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DSColors.warmWhite)
+            .shadow(10.dp, ambientColor = DSColors.deepGreen.copy(alpha = 0.05f), spotColor = DSColors.deepGreen.copy(alpha = 0.05f))
+            .background(DSColors.cardWhite)
             .statusBarsPadding()
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
@@ -355,11 +372,11 @@ private fun StepNavBar(
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.Center,
         )
-        IconButton(onClick = { /* 提示信息 */ }) {
+        IconButton(onClick = onHelp) {
             Icon(
                 Icons.Filled.Info,
                 contentDescription = "帮助",
-                tint = DSColors.shadowGray,
+                tint = DSColors.inkGreen,
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -375,13 +392,12 @@ private fun StepBadgeRow(
     onStepTap: (GolfCamStep) -> Unit,
 ) {
     val steps = GolfCamStep.values()
-    // 圆圈高度 32dp，连接线需对齐到圆圈中心 = top 15dp（32/2 - 1）
-    val circleSize = 32.dp
+    val circleSize = 28.dp
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(DSColors.warmWhite)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .background(DSColors.cardWhite)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Top,
     ) {
         steps.forEachIndexed { index, step ->
@@ -392,7 +408,7 @@ private fun StepBadgeRow(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .weight(1f, fill = false)
+                    .width(44.dp)
                     .clickable { onStepTap(step) },
             ) {
                 Box(
@@ -401,7 +417,7 @@ private fun StepBadgeRow(
                         .clip(CircleShape)
                         .background(
                             when {
-                                isActive -> DSColors.fairway.copy(alpha = 0.18f)
+                                isActive -> DSColors.fairway.copy(alpha = 0.16f)
                                 isDone -> DSColors.fairway
                                 else -> DSColors.mistGreen
                             },
@@ -423,27 +439,30 @@ private fun StepBadgeRow(
                             step.icon,
                             contentDescription = null,
                             tint = DSColors.fairway,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(12.dp),
                         )
                         else -> Text(
                             text = "${step.index + 1}",
                             color = DSColors.shadowGray,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = step.shortTitle,
-                    color = if (isActive) DSColors.fairway else DSColors.shadowGray,
-                    fontSize = 9.sp,
-                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                    color = when {
+                        isActive -> DSColors.inkGreen
+                        isDone -> DSColors.fairway
+                        else -> DSColors.shadowGray
+                    },
+                    fontSize = 10.sp,
+                    fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                     textAlign = TextAlign.Center,
                 )
             }
 
-            // 连接线（最后一步不画）：padding top = circleSize/2 - 1dp 对齐圆圈中心
             if (index < steps.size - 1) {
                 Box(
                     modifier = Modifier
@@ -471,88 +490,163 @@ private fun StepBottomBar(
     onComplete: () -> Unit,
 ) {
     val canContinue = state.canContinueFrom(currentStep)
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White)
+            .shadow(14.dp, ambientColor = DSColors.deepGreen.copy(alpha = 0.08f), spotColor = DSColors.deepGreen.copy(alpha = 0.08f))
+            .background(DSColors.cardWhite)
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(top = 1.dp),
     ) {
-        // 左侧按钮（重新选择 / 上一步）
         Box(
             modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(DSColors.mistGreen)
-                .clickable { onLeftAction() }
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(DSColors.mistGreen.copy(alpha = 0.7f)),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            FooterActionButton(
+                text = if (currentStep.isFirst) "重新选择" else "上一步",
+                icon = if (currentStep.isFirst) Icons.Filled.Refresh else Icons.AutoMirrored.Filled.ArrowBack,
+                enabled = true,
+                primary = false,
+                onClick = onLeftAction,
+            )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (!currentStep.isFirst) {
-                    Text(
-                        "< 上一步",
-                        color = DSColors.inkGreen,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                } else {
-                    Text(
-                        "↺ 重新选择",
-                        color = DSColors.inkGreen,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+                Text(
+                    "${currentStep.index + 1} / 6",
+                    color = DSColors.inkGreen,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    currentStep.title,
+                    color = DSColors.shadowGray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Normal,
+                )
+            }
+
+            FooterActionButton(
+                text = if (currentStep.isLast) "完成" else "下一步",
+                icon = if (currentStep.isLast) Icons.Filled.Check else Icons.AutoMirrored.Filled.ArrowForward,
+                enabled = canContinue,
+                primary = true,
+                onClick = {
+                    if (currentStep.isLast) onComplete() else onNext()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FooterActionButton(
+    text: String,
+    icon: ImageVector,
+    enabled: Boolean,
+    primary: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(10.dp)
+    val background = if (primary && enabled) {
+        Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen))
+    } else {
+        Brush.linearGradient(listOf(DSColors.mistGreen, DSColors.mistGreen))
+    }
+    val contentColor = when {
+        primary && enabled -> Color.White
+        primary -> DSColors.shadowGray
+        else -> DSColors.inkGreen
+    }
+    Row(
+        modifier = Modifier
+            .width(118.dp)
+            .height(44.dp)
+            .clip(shape)
+            .background(background)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (!primary) {
+            Icon(icon, null, tint = contentColor.copy(alpha = if (enabled) 1f else 0.45f), modifier = Modifier.size(15.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        Text(
+            text,
+            color = contentColor.copy(alpha = if (enabled) 1f else 0.55f),
+            fontSize = 14.sp,
+            fontWeight = if (primary) FontWeight.SemiBold else FontWeight.Medium,
+        )
+        if (primary) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(icon, null, tint = contentColor.copy(alpha = if (enabled) 1f else 0.55f), modifier = Modifier.size(15.dp))
+        }
+    }
+}
+
+@Composable
+private fun StepHelpPopCard(
+    step: GolfCamStep,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 40.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFF2C2C2E))
+                .clickable { }
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(step.icon, null, tint = DSColors.fairway, modifier = Modifier.size(18.dp))
+                Text(step.title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .clickable { onDismiss() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Close, null, tint = Color.White.copy(alpha = 0.68f), modifier = Modifier.size(13.dp))
                 }
             }
-        }
-
-        // 中间步骤信息
-        Column(
-            modifier = Modifier.weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "${currentStep.index + 1}/6",
-                color = DSColors.shadowGray,
-                fontSize = 11.sp,
-            )
-            Text(
-                currentStep.title,
-                color = DSColors.inkGreen,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-
-        // 右侧按钮（下一步 / 完成）
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(
-                    if (!canContinue)
-                        DSColors.fairway.copy(alpha = 0.4f)
-                    else
-                        DSColors.fairway,
-                )
-                .clickable(enabled = canContinue) {
-                    if (currentStep.isLast) onComplete() else onNext()
+            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                step.helpItems().forEach { item ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 6.dp)
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(DSColors.fairway.copy(alpha = 0.8f)),
+                        )
+                        Text(item, color = Color(0xFFD1D1D6), fontSize = 13.sp, lineHeight = 18.sp)
+                    }
                 }
-                .padding(vertical = 12.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                if (currentStep.isLast) "完成 ✓" else "下一步 →",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            }
         }
     }
 }
@@ -566,4 +660,13 @@ private fun GolfCamWorkflowState.canContinueFrom(step: GolfCamStep): Boolean {
         GolfCamStep.FLIGHT_CURVE -> flightCurve != null
         GolfCamStep.TRACK_STYLE -> trackStyle != null
     }
+}
+
+private fun GolfCamStep.helpItems(): List<String> = when (this) {
+    GolfCamStep.TRIM -> listOf("拖动两端手柄选择有效片段", "建议保留从挥杆准备到球落地的完整过程")
+    GolfCamStep.IMPACT_FRAME -> listOf("拖动缩略图时间轴定位", "使用左右按钮微调", "系统会自动检测候选击球帧")
+    GolfCamStep.IMPACT_POSITION -> listOf("拖动标记点到球的位置", "尽量精确标记球的中心")
+    GolfCamStep.LANDING -> listOf("拖动时间轴设置飞行时间", "在画面中标记落点位置", "预览曲线会实时更新")
+    GolfCamStep.FLIGHT_CURVE -> listOf("拖动 P1/P2 控制点调整曲线形状", "预览线会实时显示", "点击击球帧可快速回到击球时刻")
+    GolfCamStep.TRACK_STYLE -> listOf("选择颜色方案", "调整宽度、速度与拖尾长度", "距离标签会同步到预览和导出")
 }

@@ -827,6 +827,8 @@ data class TrackRenderTuning(
     val fillGlowMultiplier: Float = 0.22f,
     val highlightWidthRatio: Float = 0.50f,
     val highlightAlphaMax: Float = 0.90f,
+    val highlightWhiteLiftBase: Float = 0.00f,
+    val highlightWhiteLiftScale: Float = 0.00f,
     val highlightStart: Float = 0.00f,
     val highlightEnd: Float = 0.96f,
     val highlightPeak: Float = 0.35f,

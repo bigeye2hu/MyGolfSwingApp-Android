@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
 import com.mygolfswing.app.data.ServiceLocator
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -19,14 +20,47 @@ data class TrackStyleCloudConfig(
 )
 
 object TrackStyleCloudConfigLoader {
-    suspend fun fetch(): Result<TrackStyleCloudConfig> = runCatching {
+    private const val PREFS_NAME = "golf_cam_track_style_config"
+    private const val CACHE_KEY_CONFIG_JSON = "config_json"
+
+    suspend fun fetch(): Result<TrackStyleCloudConfig> {
+        val remote = runCatching {
+            cacheConfig(fetchRemoteConfig())
+        }
+        if (remote.isSuccess) return remote
+
+        val cached = readCachedConfig()
+        if (cached != null) return Result.success(cached)
+
+        return remote
+    }
+
+    private suspend fun fetchRemoteConfig(): JsonObject {
         val response = ServiceLocator.net.cloudApi.videoPlaza(
             JsonObject(mapOf("action" to JsonPrimitive("getTrackStyleConfig"))),
         )
         val success = response["success"]?.jsonPrimitive?.booleanOrNull ?: false
         require(success) { response["error"]?.jsonPrimitive?.contentOrNull ?: "getTrackStyleConfig failed" }
-        val config = response["config"]?.jsonObject ?: error("missing track style config")
-        parse(config)
+        return response["config"]?.jsonObject ?: error("missing track style config")
+    }
+
+    private fun cacheConfig(config: JsonObject): TrackStyleCloudConfig {
+        ServiceLocator.appContext
+            .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString(CACHE_KEY_CONFIG_JSON, config.toString())
+            .apply()
+        return parse(config)
+    }
+
+    private fun readCachedConfig(): TrackStyleCloudConfig? {
+        val raw = ServiceLocator.appContext
+            .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            .getString(CACHE_KEY_CONFIG_JSON, null)
+            ?: return null
+        return runCatching {
+            parse(Json.parseToJsonElement(raw).jsonObject)
+        }.getOrNull()
     }
 
     private fun parse(config: JsonObject): TrackStyleCloudConfig {
@@ -102,6 +136,8 @@ object TrackStyleCloudConfigLoader {
             fillGlowMultiplier = obj.float("fillGlowMultiplier") ?: 0.22f,
             highlightWidthRatio = obj.float("highlightWidthRatio") ?: 0.50f,
             highlightAlphaMax = obj.float("highlightAlphaMax") ?: 0.90f,
+            highlightWhiteLiftBase = obj.float("highlightWhiteLiftBase") ?: 0.00f,
+            highlightWhiteLiftScale = obj.float("highlightWhiteLiftScale") ?: 0.00f,
             highlightStart = obj.float("highlightStart") ?: 0.00f,
             highlightEnd = obj.float("highlightEnd") ?: 0.96f,
             highlightPeak = obj.float("highlightPeak") ?: 0.35f,
@@ -110,6 +146,53 @@ object TrackStyleCloudConfigLoader {
             apexThinStrength = obj.float("apexThinStrength") ?: 0.60f,
             apexThinRadius = obj.float("apexThinRadius") ?: 0.20f,
             highlightFalloffPower = obj.float("highlightFalloffPower") ?: 0.82f,
+        ).clamped()
+    }
+
+    private fun TrackRenderTuning.clamped(): TrackRenderTuning {
+        var start = highlightStart
+        var end = highlightEnd
+        var peak = highlightPeak
+        if (kotlin.math.abs(start - 0.20f) < 0.001f &&
+            kotlin.math.abs(end - 0.60f) < 0.001f &&
+            kotlin.math.abs(peak - 0.42f) < 0.001f
+        ) {
+            start = 0.00f
+            end = 0.96f
+            peak = 0.32f
+        }
+        if (kotlin.math.abs(start - 0.18f) < 0.001f &&
+            kotlin.math.abs(end - 0.96f) < 0.001f
+        ) {
+            start = 0.00f
+        }
+
+        start = start.coerceIn(0.00f, 0.90f)
+        end = end.coerceIn(0.05f, 1.00f)
+        if (end <= start + 0.05f) {
+            end = minOf(1.0f, start + 0.05f)
+        }
+        peak = peak.coerceIn(start, end)
+
+        return copy(
+            bandAlphaMultiplier = bandAlphaMultiplier.coerceIn(0.00f, 1.40f),
+            bodyAlphaBase = bodyAlphaBase.coerceIn(0.00f, 0.16f),
+            bodyAlphaScale = bodyAlphaScale.coerceIn(0.50f, 1.20f),
+            glowBlurMultiplier = glowBlurMultiplier.coerceIn(0.25f, 1.20f),
+            outerGlowMultiplier = outerGlowMultiplier.coerceIn(0.20f, 1.00f),
+            fillGlowMultiplier = fillGlowMultiplier.coerceIn(0.08f, 0.45f),
+            highlightWidthRatio = highlightWidthRatio.coerceIn(0.30f, 0.85f),
+            highlightAlphaMax = highlightAlphaMax.coerceIn(0.00f, 0.90f),
+            highlightWhiteLiftBase = highlightWhiteLiftBase.coerceIn(0.00f, 0.00f),
+            highlightWhiteLiftScale = highlightWhiteLiftScale.coerceIn(0.00f, 0.00f),
+            highlightStart = start,
+            highlightEnd = end,
+            highlightPeak = peak,
+            highlightStrength = highlightStrength.coerceIn(0.00f, 1.60f),
+            widthTaperPower = widthTaperPower.coerceIn(0.70f, 2.20f),
+            apexThinStrength = apexThinStrength.coerceIn(0.00f, 0.85f),
+            apexThinRadius = apexThinRadius.coerceIn(0.04f, 0.35f),
+            highlightFalloffPower = highlightFalloffPower.coerceIn(0.45f, 1.80f),
         )
     }
 

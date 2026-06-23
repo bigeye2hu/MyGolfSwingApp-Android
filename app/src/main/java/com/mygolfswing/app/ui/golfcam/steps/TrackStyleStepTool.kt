@@ -16,13 +16,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SocialDistance
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -30,6 +31,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,9 +46,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.DistanceUnit
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
@@ -60,8 +66,12 @@ private enum class StyleCategory(val label: String, val icon: ImageVector) {
     WIDTH("宽度", Icons.Filled.LinearScale),
     SPEED("速度", Icons.Filled.Speed),
     TAIL("拖尾", Icons.Filled.Air),
-    TRAJECTORY("弹道", Icons.Filled.ShowChart),
     DISTANCE("距离", Icons.Filled.SocialDistance),
+    ;
+
+    companion object {
+        val userVisibleCases = listOf(COLOR, WIDTH, SPEED, TAIL, DISTANCE)
+    }
 }
 
 /**
@@ -87,24 +97,26 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            items(StyleCategory.entries) { category ->
+            items(StyleCategory.userVisibleCases) { category ->
                 val isSelected = category == selectedCategory
                 Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .width(58.dp)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(16.dp))
                         .background(
-                            if (isSelected) DSColors.mistGreen else Color.Transparent,
+                            if (isSelected) DSColors.mistGreen.copy(alpha = 0.72f) else Color.Transparent,
                         )
                         .border(
                             width = if (isSelected) 1.dp else 0.dp,
-                            color = if (isSelected) DSColors.fairway.copy(alpha = 0.3f) else Color.Transparent,
-                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) DSColors.fairway.copy(alpha = 0.28f) else Color.Transparent,
+                            shape = RoundedCornerShape(16.dp),
                         )
                         .clickable { selectedCategory = category }
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
@@ -155,7 +167,6 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
                     displayText = "%.0f".format(style.tailHalfLife),
                     onChange = { style = style.copy(tailHalfLife = it.toDouble()) },
                 )
-                StyleCategory.TRAJECTORY -> TrajectoryPresetContent(style = style, onChange = { style = it })
                 StyleCategory.DISTANCE -> DistanceContent(style = style, onChange = { style = it })
             }
         }
@@ -188,7 +199,23 @@ private fun TrajectoryPresetContent(style: TrackStyle, onChange: (TrackStyle) ->
                             color = DSColors.fairway.copy(alpha = 0.24f),
                             shape = RoundedCornerShape(12.dp),
                         )
-                        .clickable { onChange(style.copy(trajectoryPreset = preset)) }
+                        .clickable {
+                            val params = com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionParameters.preset(preset)
+                            onChange(
+                                style.copy(
+                                    trajectoryPreset = preset,
+                                    motionLaunchBias = params.launchBias,
+                                    motionDrag = params.drag,
+                                    motionLiftHold = params.liftHold,
+                                    motionDescentAcceleration = params.descentAcceleration,
+                                    motionTailBoost = params.tailBoost,
+                                    v4VMin = params.vMin,
+                                    v4VMax = params.vMax,
+                                    v4PLeft = params.pLeft,
+                                    v4PRight = params.pRight,
+                                ),
+                            )
+                        }
                         .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -258,7 +285,14 @@ private fun ColorContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                             if (selected) Modifier.border(2.dp, Color.White, CircleShape)
                             else Modifier.border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape),
                         )
-                        .clickable { onChange(style.copy(colorPreset = preset)) },
+                        .clickable {
+                            onChange(
+                                style.copy(
+                                    colorPreset = preset,
+                                    glowOpacity = preset.glowAlpha.toDouble(),
+                                ),
+                            )
+                        },
                 ) {
                     if (selected) {
                         Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
@@ -308,6 +342,17 @@ private fun SliderContent(
 
 @Composable
 private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
+    var distanceText by remember(style.totalDistance) {
+        mutableStateOf(style.totalDistance.toInt().toString())
+    }
+
+    fun commitDistance() {
+        val value = distanceText.toDoubleOrNull()
+        if (value != null) {
+            onChange(style.copy(totalDistance = value.coerceIn(0.0, 999.0)))
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -327,13 +372,85 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
             )
         }
         if (style.showDistance) {
-            SliderContent(
-                label = "距离 (码)",
-                value = style.totalDistance.toFloat(),
-                range = 10f..400f,
-                displayText = "${style.totalDistance.toInt()}码",
-                onChange = { onChange(style.copy(totalDistance = it.toDouble())) },
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DSColors.mistGreen.copy(alpha = 0.55f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    TextField(
+                        value = distanceText,
+                        onValueChange = { text ->
+                            distanceText = text.filter { it.isDigit() }.take(3)
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            color = DSColors.inkGreen,
+                        ),
+                        modifier = Modifier.width(92.dp),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                        ),
+                    )
+                    Text(
+                        style.distanceUnit.abbreviation,
+                        color = DSColors.fairway,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Button(
+                        onClick = { commitDistance() },
+                        modifier = Modifier.padding(start = 6.dp),
+                    ) {
+                        Text("✓", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DSColors.mistGreen.copy(alpha = 0.55f))
+                        .clickable {
+                            val nextUnit = style.distanceUnit.toggle()
+                            val converted = if (nextUnit == DistanceUnit.YARDS) {
+                                style.totalDistance / 0.9144
+                            } else {
+                                style.totalDistance * 0.9144
+                            }
+                            distanceText = converted.toInt().toString()
+                            onChange(
+                                style.copy(
+                                    distanceUnit = nextUnit,
+                                    totalDistance = converted,
+                                ),
+                            )
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(style.distanceUnit.displayName, color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("↕", color = DSColors.fairway, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text(style.distanceUnit.toggle().displayName, color = DSColors.shadowGray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }

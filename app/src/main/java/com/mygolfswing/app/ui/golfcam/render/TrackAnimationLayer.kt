@@ -38,6 +38,7 @@ import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
+import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 import kotlinx.coroutines.delay
@@ -57,6 +58,7 @@ fun TrajectoryStaticOverlay(
 ) {
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
+    val alphaMultiplier = (style.colorAlpha * style.colorPreset.bandAlpha).toFloat().coerceIn(0f, 1f)
 
     Canvas(modifier = modifier.fillMaxSize()) {
         drawTrajectoryPath(
@@ -66,8 +68,15 @@ fun TrajectoryStaticOverlay(
             gradientColors = gradientColors,
             baseStrokeWidth = baseWidth,
             taperPower = style.taperPower,
+            alphaMultiplier = alphaMultiplier,
         )
-        drawHeadGlow(bezier = bezier, headProgress = 1f, color = gradientColors.last(), radius = baseWidth * 2.5f)
+        drawHeadGlow(
+            bezier = bezier,
+            headProgress = 1f,
+            color = gradientColors.last(),
+            radius = baseWidth * 2.5f,
+            alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
+        )
     }
 }
 
@@ -101,7 +110,12 @@ fun TrajectoryAnimationOverlay(
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
     val totalDurSec = timing.totalDurationSec
 
-    val headProgress = model.progressAtTime(elapsedMs / 1000.0).toFloat()
+    val elapsedSec = elapsedMs / 1000.0
+    val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+        GolfCamSpeedConfig.progress(elapsedSec / totalDurSec, style.speedLevel)
+    } else {
+        model.progressAtTime(elapsedSec)
+    }.toFloat().coerceIn(0f, 1f)
 
     val tailProgress = remember(headProgress, style.tailHalfLife, totalDurSec) {
         // tailHalfLife 范围 5~100，映射为占总时长的百分比
@@ -119,9 +133,16 @@ fun TrajectoryAnimationOverlay(
             gradientColors = gradientColors,
             baseStrokeWidth = baseWidth,
             taperPower = style.taperPower,
+            alphaMultiplier = (style.colorAlpha * style.colorPreset.bandAlpha).toFloat().coerceIn(0f, 1f),
         )
         if (headProgress > 0f && headProgress < 1f) {
-            drawHeadGlow(bezier = bezier, headProgress = headProgress, color = gradientColors.last(), radius = baseWidth * 2.5f)
+            drawHeadGlow(
+                bezier = bezier,
+                headProgress = headProgress,
+                color = gradientColors.last(),
+                radius = baseWidth * 2.5f,
+                alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
+            )
         }
         if (style.showDistance && headProgress > 0f) {
             val displayDist = GolfCamSpeedConfig.displayDistance(
@@ -134,7 +155,7 @@ fun TrajectoryAnimationOverlay(
                 bezier = bezier,
                 headProgress = headProgress,
                 distance = displayDist,
-                unit = style.distanceUnit,
+                unit = style.distanceUnit.abbreviation,
                 textMeasurer = textMeasurer,
             )
         }
@@ -150,6 +171,7 @@ private fun DrawScope.drawTrajectoryPath(
     gradientColors: List<Color>,
     baseStrokeWidth: Float,
     taperPower: Float,
+    alphaMultiplier: Float,
     steps: Int = 120,
 ) {
     if (headProgress <= 0f) return
@@ -172,7 +194,7 @@ private fun DrawScope.drawTrajectoryPath(
         val colorFrac = colorProgress * (effectiveColors.size - 1) - colorIdx
         val segColor = lerpColor(effectiveColors[colorIdx], effectiveColors[colorIdx + 1], colorFrac)
 
-        val alpha = ((localProgress * 1.2f).coerceIn(0f, 1f))
+        val alpha = ((localProgress * 1.2f).coerceIn(0f, 1f) * alphaMultiplier).coerceIn(0f, 1f)
         val p0 = bezier.point(t0)
         val p1 = bezier.point(t1)
 
@@ -191,13 +213,14 @@ private fun DrawScope.drawHeadGlow(
     headProgress: Float,
     color: Color,
     radius: Float,
+    alphaMultiplier: Float,
 ) {
     val pt = bezier.point(headProgress)
     val center = Offset(pt.x * size.width, pt.y * size.height)
 
-    drawCircle(color = color.copy(alpha = 0.35f), radius = radius * 1.8f, center = center)
-    drawCircle(color = color.copy(alpha = 0.75f), radius = radius, center = center)
-    drawCircle(color = Color.White.copy(alpha = 0.9f), radius = radius * 0.4f, center = center)
+    drawCircle(color = color.copy(alpha = 0.35f * alphaMultiplier), radius = radius * 1.8f, center = center)
+    drawCircle(color = color.copy(alpha = 0.75f * alphaMultiplier), radius = radius, center = center)
+    drawCircle(color = Color.White.copy(alpha = 0.9f * alphaMultiplier), radius = radius * 0.4f, center = center)
 }
 
 private fun DrawScope.drawDistanceLabel(

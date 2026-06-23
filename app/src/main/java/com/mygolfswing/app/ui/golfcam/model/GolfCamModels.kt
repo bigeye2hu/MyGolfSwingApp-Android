@@ -88,6 +88,11 @@ data class TrajectoryMotionParameters(
     }
 }
 
+enum class TrajectoryAlgorithmKind(val displayName: String, val subtitle: String) {
+    CURRENT_V5("V4旧算法", "U型尾段偏强"),
+    GOLF_CAM_LIKE("V5新版", "立即出线+轻尾段"),
+}
+
 data class TrajectoryTiming(
     val impactTimeMs: Long,
     val landingTimeMs: Long,
@@ -377,7 +382,17 @@ class TrajectoryMotionModel(
         fun parametersFromStyle(style: TrackStyle, apexProgress: Double? = null): TrajectoryMotionParameters {
             return TrajectoryMotionParameters.preset(style.trajectoryPreset).copy(
                 speedK = style.speedLevel,
-                apexProgress = apexProgress,
+                vMin = style.v4VMin ?: TrajectoryMotionParameters.standard.vMin,
+                vMax = style.v4VMax ?: TrajectoryMotionParameters.standard.vMax,
+                pLeft = style.v4PLeft ?: TrajectoryMotionParameters.standard.pLeft,
+                pRight = style.v4PRight ?: TrajectoryMotionParameters.standard.pRight,
+                apexProgress = style.v4CustomSPeak ?: apexProgress,
+                launchBias = style.motionLaunchBias,
+                drag = style.motionDrag,
+                liftHold = style.motionLiftHold,
+                descentAcceleration = style.motionDescentAcceleration,
+                tailBoost = style.motionTailBoost,
+                anchorTime = style.motionAnchorTime,
                 preset = style.trajectoryPreset,
             )
         }
@@ -713,6 +728,24 @@ object GolfCamSpeedConfig {
         return tau.pow(calibratedGamma(speedLevel)).coerceIn(0.0, 1.0)
     }
 
+    fun previewAnchorProgress(v: Double): Double {
+        val k = clamp(v)
+        if (k < 0.35) {
+            val t = (k - 0.15) / (0.35 - 0.15)
+            return 0.14 + max(0.0, t).pow(1.55) * (0.30 - 0.14)
+        }
+        if (k < 0.45) {
+            val t = (k - 0.35) / (0.45 - 0.35)
+            return 0.30 + t * (0.44 - 0.30)
+        }
+        if (k <= 0.60) {
+            val t = (k - 0.45) / (0.60 - 0.45)
+            return 0.44 + t * (0.62 - 0.44)
+        }
+        val t = (k - 0.60) / (0.75 - 0.60)
+        return 0.62 + max(0.0, t) * (0.78 - 0.62)
+    }
+
     fun displayProgress(
         elapsedSec: Double,
         totalDurationSec: Double,
@@ -743,28 +776,94 @@ object GolfCamSpeedConfig {
 data class TrackColorPreset(
     val name: String,
     val gradientColors: List<Long>,
-    val tailColor: Long = 0xFFFFFFFF,
+    val glowBlur: Float = 30f,
+    val glowAlpha: Float = 0.68f,
+    val bandAlpha: Float = 1f,
 )
 
 val defaultTrackColorPresets = listOf(
-    TrackColorPreset("白色经典", listOf(0xFFFFFFFF, 0xFFE0E0E0), 0xAAFFFFFF),
-    TrackColorPreset("金色", listOf(0xFFFFD700, 0xFFF97316), 0xAAFFD700),
-    TrackColorPreset("青绿", listOf(0xFF52B788, 0xFF38BDF8), 0xAA52B788),
-    TrackColorPreset("热红", listOf(0xFFFF4444, 0xFFFF8800), 0xAAFF4444),
-    TrackColorPreset("紫光", listOf(0xFFAA77FF, 0xFF6644CC), 0xAAAA77FF),
+    TrackColorPreset("霓虹极光", listOf(0xFFFF6CAE, 0xFFC471F5, 0xFF12C2E9), 30f, 0.70f, 1.00f),
+    TrackColorPreset("日落晚霞", listOf(0xFFFF416C, 0xFFFF9A44, 0xFFFFD700), 28f, 0.68f, 1.00f),
+    TrackColorPreset("冰焰双生", listOf(0xFF00C6FF, 0xFF6B73FF, 0xFFFF6CAE), 30f, 0.70f, 1.00f),
+    TrackColorPreset("翡翠丛林", listOf(0xFF11998E, 0xFF38EF7D, 0xFFB7FF5A), 28f, 0.66f, 1.00f),
+    TrackColorPreset("深空星尘", listOf(0xFF4776E6, 0xFF8E54E9, 0xFFF093FB), 30f, 0.68f, 1.00f),
+    TrackColorPreset("熔岩橙", listOf(0xFFF7971E, 0xFFFFD200, 0xFFFF6B00), 28f, 0.66f, 1.00f),
+    TrackColorPreset("玫瑰荧光", listOf(0xFFFF3F91, 0xFFFF5FA8, 0xFFFF8EC3), 28f, 0.68f, 1.00f),
+    TrackColorPreset("湖蓝荧光", listOf(0xFF21B7FF, 0xFF4FD2FF, 0xFF96ECFF), 30f, 0.68f, 1.00f),
+    TrackColorPreset("薄荷绿光", listOf(0xFF43E691, 0xFF63F7AE, 0xFF9AFFD0), 30f, 0.68f, 1.00f),
+    TrackColorPreset("紫莓荧光", listOf(0xFFA855F7, 0xFFC084FC, 0xFFF0ABFC), 30f, 0.68f, 1.00f),
+    TrackColorPreset("杏橙荧光", listOf(0xFFFF9C24, 0xFFFFB742, 0xFFFFD36B), 28f, 0.66f, 1.00f),
+    TrackColorPreset("珊瑚蜜桃", listOf(0xFFFF5E72, 0xFFFF7F6E, 0xFFFFB083), 28f, 0.64f, 1.00f),
+    TrackColorPreset("青蓝薄荷", listOf(0xFF35DFC7, 0xFF55F3D8, 0xFF8FFFF0), 30f, 0.70f, 1.00f),
+    TrackColorPreset("荧光青柠", listOf(0xFFA8DC32, 0xFFC4F94C, 0xFFE2FF83), 28f, 0.60f, 0.94f),
+    TrackColorPreset("金柠荧光", listOf(0xFFFFE143, 0xFFDFFF4E, 0xFFB9FF5A), 30f, 0.66f, 1.00f),
+    TrackColorPreset("珍珠白", listOf(0xFFC3CCC8, 0xFFF0F6F3, 0xFFFFFFFF), 24f, 0.46f, 0.88f),
+)
+
+enum class DistanceUnit(val displayName: String, val abbreviation: String) {
+    YARDS("码", "YDS"),
+    METERS("米", "M");
+
+    fun toggle(): DistanceUnit = if (this == YARDS) METERS else YARDS
+}
+
+enum class TrackEffectType(val displayName: String) {
+    GRADIENT("渐变光带"),
+    PARTICLE("粒子拖尾"),
+    FIRE("火焰能量"),
+    ELECTRIC("电光闪电"),
+}
+
+data class TrackRenderTuning(
+    val showOuterGlow: Boolean = false,
+    val showBodyBand: Boolean = true,
+    val showHighlightCore: Boolean = true,
+    val bandAlphaMultiplier: Float = 1.0f,
+    val bodyAlphaBase: Float = 0.10f,
+    val bodyAlphaScale: Float = 0.98f,
+    val glowBlurMultiplier: Float = 0.82f,
+    val outerGlowMultiplier: Float = 0.62f,
+    val fillGlowMultiplier: Float = 0.22f,
+    val highlightWidthRatio: Float = 0.50f,
+    val highlightAlphaMax: Float = 0.90f,
+    val highlightStart: Float = 0.00f,
+    val highlightEnd: Float = 0.96f,
+    val highlightPeak: Float = 0.35f,
+    val highlightStrength: Float = 1.6f,
+    val widthTaperPower: Float = 1.36f,
+    val apexThinStrength: Float = 0.60f,
+    val apexThinRadius: Float = 0.20f,
+    val highlightFalloffPower: Float = 0.82f,
 )
 
 data class TrackStyle(
-    val colorPreset: TrackColorPreset = defaultTrackColorPresets[0],
-    val colorAlpha: Double = 1.0,
-    val widthPct: Double = 50.0,
+    val colorPreset: TrackColorPreset = defaultTrackColorPresets.getOrElse(2) { defaultTrackColorPresets.first() },
+    val colorAlpha: Double = 0.75,
+    val glowOpacity: Double = colorPreset.glowAlpha.toDouble(),
+    val widthPct: Double = 70.0,
     val taperPower: Float = 1.8f,
-    val tailHalfLife: Double = 40.0,  // 5~100，对齐 iOS StyleControlRange
-    val showDistance: Boolean = true,
+    val tailHalfLife: Double = 70.0,  // 5~100，对齐 iOS StyleControlRange
+    val minTail: Float = 0.12f,
+    val showDistance: Boolean = false,
     val totalDistance: Double = 150.0,
-    val distanceUnit: String = "m",
+    val distanceUnit: DistanceUnit = DistanceUnit.YARDS,
     val speedLevel: Double = GolfCamSpeedConfig.DEFAULT_LEVEL,
+    val activeTrajectoryAlgorithm: TrajectoryAlgorithmKind = TrajectoryAlgorithmKind.GOLF_CAM_LIKE,
+    val compareTrajectoryAlgorithms: Boolean = false,
     val trajectoryPreset: TrajectoryPresetKind = TrajectoryPresetKind.GOLF_CAM_LIKE,
+    val motionLaunchBias: Double = TrajectoryMotionParameters.standard.launchBias,
+    val motionDrag: Double = TrajectoryMotionParameters.standard.drag,
+    val motionLiftHold: Double = TrajectoryMotionParameters.standard.liftHold,
+    val motionDescentAcceleration: Double = TrajectoryMotionParameters.standard.descentAcceleration,
+    val motionTailBoost: Double = TrajectoryMotionParameters.standard.tailBoost,
+    val motionAnchorTime: Double? = null,
+    val v4VMin: Double? = null,
+    val v4VMax: Double? = null,
+    val v4PLeft: Double? = null,
+    val v4PRight: Double? = null,
+    val v4CustomSPeak: Double? = null,
+    val effectType: TrackEffectType = TrackEffectType.GRADIENT,
+    val renderTuning: TrackRenderTuning = TrackRenderTuning(),
 )
 
 // ─── 工作流步骤输出（对齐 iOS GolfCamWorkflowState 各步骤）───────────────────────

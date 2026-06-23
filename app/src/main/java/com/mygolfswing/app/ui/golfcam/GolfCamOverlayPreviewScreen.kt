@@ -67,6 +67,7 @@ import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
+import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
@@ -392,12 +393,18 @@ private fun drawTrajectoryOnCanvas(
     height: Float,
     timing: TrajectoryTiming,
 ) {
-    val headProgress = model.progressAtTime(elapsedSec).toFloat()
+    val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+        com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
+            .progress(elapsedSec / timing.totalDurationSec, style.speedLevel)
+    } else {
+        model.progressAtTime(elapsedSec)
+    }.toFloat()
         .coerceIn(0f, 1f)
     if (headProgress <= 0f) return
 
     val tailProgress = (headProgress - (style.tailHalfLife / 100.0 / timing.totalDurationSec).toFloat() * 3f).coerceAtLeast(0f)
     val gradientColors = style.colorPreset.gradientColors.map { android.graphics.Color.valueOf(it.toInt()) }
+    val alphaMultiplier = (style.colorAlpha * style.colorPreset.bandAlpha).toFloat().coerceIn(0f, 1f)
 
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.STROKE
@@ -422,7 +429,7 @@ private fun drawTrajectoryOnCanvas(
         val r = (((c0 shr 16 and 0xFF) + ((c1 shr 16 and 0xFF) - (c0 shr 16 and 0xFF)) * colorProgress)).toInt().coerceIn(0, 255)
         val g = (((c0 shr 8 and 0xFF) + ((c1 shr 8 and 0xFF) - (c0 shr 8 and 0xFF)) * colorProgress)).toInt().coerceIn(0, 255)
         val b = (((c0 and 0xFF) + ((c1 and 0xFF) - (c0 and 0xFF)) * colorProgress)).toInt().coerceIn(0, 255)
-        val alpha = (localProgress * 255 * 1.2f).toInt().coerceIn(0, 255)
+        val alpha = (localProgress * 255 * 1.2f * alphaMultiplier).toInt().coerceIn(0, 255)
 
         paint.color = android.graphics.Color.argb(alpha, r, g, b)
         canvas.drawLine(p0.x * width, p0.y * height, p1.x * width, p1.y * height, paint)
@@ -433,7 +440,7 @@ private fun drawTrajectoryOnCanvas(
     val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         this.style = android.graphics.Paint.Style.FILL
-        alpha = 220
+        alpha = (220 * style.glowOpacity).toInt().coerceIn(0, 255)
     }
     canvas.drawCircle(head.x * width, head.y * height, 10f, glowPaint)
 }

@@ -32,7 +32,7 @@ object TrackStyleCloudConfigLoader {
         val cached = readCachedConfig()
         if (cached != null) return Result.success(cached)
 
-        return remote
+        return Result.success(localFallback())
     }
 
     private suspend fun fetchRemoteConfig(): JsonObject {
@@ -105,6 +105,29 @@ object TrackStyleCloudConfigLoader {
             presets = presets,
             defaultStyle = defaultStyle,
             defaultColorHex = defaultColorHex,
+        )
+    }
+
+    internal fun localFallback(): TrackStyleCloudConfig {
+        val fallbackColor = 0xFF55F3D8
+        val fallbackPreset = defaultTrackColorPresets.firstOrNull { it.name == "青蓝薄荷" }
+            ?: defaultTrackColorPresets.first()
+        return TrackStyleCloudConfig(
+            presets = defaultTrackColorPresets,
+            defaultColorHex = fallbackColor,
+            defaultStyle = TrackStyle(
+                colorPreset = fallbackPreset,
+                colorHex = fallbackColor,
+                colorAlpha = 0.75,
+                glowOpacity = fallbackPreset.glowAlpha.toDouble(),
+                widthPct = 40.0,
+                tailHalfLife = 70.0,
+                showDistance = false,
+                totalDistance = 150.0,
+                distanceUnit = DistanceUnit.YARDS,
+                speedLevel = GolfCamSpeedConfig.DEFAULT_LEVEL,
+                renderTuning = TrackRenderTuning(),
+            ),
         )
     }
 

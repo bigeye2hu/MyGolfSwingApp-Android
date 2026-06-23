@@ -231,7 +231,7 @@ private fun SheetCard(
             } else {
                 SourceButton(
                     title = "从相册选择",
-                    subtitle = "导入击球视频，进入裁剪、击球点、落点与轨迹样式调整",
+                    subtitle = "导入击球视频，进入 V2 六步轨迹绘制流程",
                     onClick = onPickVideo,
                 )
                 InfoStrip()
@@ -307,7 +307,7 @@ private fun HeroHeader(modifier: Modifier = Modifier) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("创建飞行轨迹", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "按 V1 完整流程完成裁剪、击球帧、落点与分享预览",
+                    "裁剪、击球帧、击球位置、落点、曲线与样式",
                     color = Color.White.copy(alpha = 0.82f),
                     fontSize = 12.sp,
                     lineHeight = 16.sp,

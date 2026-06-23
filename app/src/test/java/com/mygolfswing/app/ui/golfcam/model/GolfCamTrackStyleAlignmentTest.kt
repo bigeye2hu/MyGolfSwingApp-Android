@@ -268,6 +268,24 @@ class GolfCamTrackStyleAlignmentTest {
         assertFalse(parsed.defaultStyle.showDistance)
     }
 
+    @Test
+    fun localTrackStyleFallbackMirrorsCloudProductionDefaults() {
+        val fallback = TrackStyleCloudConfigLoader.localFallback()
+        val style = fallback.defaultStyle
+
+        assertEquals(16, fallback.presets.size)
+        assertEquals(0xFF55F3D8, fallback.defaultColorHex)
+        assertEquals("青蓝薄荷", style.colorPreset.name)
+        assertEquals(0xFF55F3D8, style.colorHex)
+        assertEquals(0.75, style.colorAlpha, 0.0)
+        assertEquals(40.0, style.widthPct, 0.0)
+        assertEquals(GolfCamSpeedConfig.DEFAULT_LEVEL, style.speedLevel, 0.0)
+        assertEquals(70.0, style.tailHalfLife, 0.0)
+        assertFalse(style.showDistance)
+        assertEquals(150.0, style.totalDistance, 0.0)
+        assertEquals(DistanceUnit.YARDS, style.distanceUnit)
+    }
+
     private fun preset(
         name: String,
         start: String,

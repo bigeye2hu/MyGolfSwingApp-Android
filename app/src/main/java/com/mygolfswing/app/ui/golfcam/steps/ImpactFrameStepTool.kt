@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.exoplayer.ExoPlayer
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.ImpactFrameSelection
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +68,6 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private const val FPS = 30.0
 private const val THUMB_CELL_COUNT = 60       // 最多 60 张缩略图
 private val CELL_W: Dp = 32.dp
 private val CELL_H: Dp = 45.dp
@@ -84,12 +84,14 @@ fun ImpactFrameStepTool(
     durationMs: Long,
     state: GolfCamWorkflowState,
     candidateFrames: List<CandidateImpactFrame>,
+    frameRate: Double = 30.0,
     onResult: (ImpactFrameSelection) -> Unit,
 ) {
+    val safeFrameRate = GolfCamFrameTimeline.safeFrameRate(frameRate)
     val startMs = state.trimResult?.startMs ?: 0L
     val endMs = (state.trimResult?.endMs?.takeIf { it > 0L } ?: durationMs).coerceAtLeast(startMs + 1L)
     val trimDurationMs = (endMs - startMs).coerceAtLeast(1L)
-    val totalFrames = (trimDurationMs / 1000.0 * FPS).roundToInt().coerceAtLeast(1)
+    val totalFrames = GolfCamFrameTimeline.totalFrames(trimDurationMs, safeFrameRate)
 
     // 初始帧：优先已保存 → 最高候选 → 中间帧
     val initialFrame = remember(state.impactFrame, candidateFrames) {
@@ -98,17 +100,18 @@ fun ImpactFrameStepTool(
             ?: (totalFrames / 2)
     }
 
-    var currentFrame by remember(durationMs) { mutableIntStateOf(initialFrame) }
+    var currentFrame by remember(durationMs, safeFrameRate) { mutableIntStateOf(initialFrame) }
 
     // step：多少个真实帧 对应 1个缩略图格
     val step = (totalFrames.toFloat() / THUMB_CELL_COUNT).coerceAtLeast(1f)
     val thumbCount = minOf(THUMB_CELL_COUNT, totalFrames)
 
     // 通知父层
-    LaunchedEffect(currentFrame, durationMs) {
+    LaunchedEffect(currentFrame, durationMs, safeFrameRate) {
         if (durationMs > 0L) {
-            val timeMs = startMs + (currentFrame / FPS * 1000).toLong()
-            player.seekTo(timeMs.coerceIn(startMs, endMs))
+            val timeMs = GolfCamFrameTimeline.timeMsForFrame(startMs, currentFrame, safeFrameRate)
+                .coerceIn(startMs, endMs)
+            player.seekTo(timeMs)
             player.pause()
             onResult(ImpactFrameSelection(frameIndex = currentFrame, timeMs = timeMs, candidateFrames = candidateFrames))
         }
@@ -119,8 +122,9 @@ fun ImpactFrameStepTool(
         return
     }
 
-    val elapsedSec = currentFrame / FPS
-    val absFrameIndex = (startMs / 1000.0 * FPS).roundToInt() + currentFrame  // 原始视频帧号
+    val elapsedSec = currentFrame / safeFrameRate
+    val absFrameIndex = GolfCamFrameTimeline.frameIndexAt(startMs / 1000.0, safeFrameRate) + currentFrame
+    val videoTotalFrames = GolfCamFrameTimeline.totalFrames(durationMs, safeFrameRate)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -154,7 +158,7 @@ fun ImpactFrameStepTool(
                             .background(DSColors.fairway, RoundedCornerShape(2.dp)),
                     )
                     Text(
-                        "$absFrameIndex/${(durationMs / 1000.0 * FPS).roundToInt()}",
+                        "$absFrameIndex/$videoTotalFrames",
                         color = DSColors.inkGreen,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -220,9 +224,9 @@ private fun FrameFilmstrip(
     val scope = rememberCoroutineScope()
 
     // 缩略图缓存
-    var thumbnails by remember(videoUri) { mutableStateOf<List<android.graphics.Bitmap?>>(List(thumbCount) { null }) }
+    var thumbnails by remember(videoUri, startMs, thumbCount) { mutableStateOf<List<android.graphics.Bitmap?>>(List(thumbCount) { null }) }
 
-    LaunchedEffect(videoUri, thumbCount, trimDurationMs) {
+    LaunchedEffect(videoUri, startMs, thumbCount, trimDurationMs) {
         if (thumbCount <= 0 || trimDurationMs <= 0) return@LaunchedEffect
         thumbnails = withContext(Dispatchers.IO) {
             val retriever = MediaMetadataRetriever()

@@ -233,6 +233,7 @@ fun FlightPathUnifiedContainer(
                         durationMs = durationMs,
                         state = state,
                         candidateFrames = candidateFrames,
+                        frameRate = videoFrameRate,
                         onResult = { state.impactFrame = it },
                     )
                     GolfCamStep.IMPACT_POSITION -> ImpactPositionStepTool(state = state)

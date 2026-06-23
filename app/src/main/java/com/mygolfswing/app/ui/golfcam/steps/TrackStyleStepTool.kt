@@ -77,7 +77,7 @@ private enum class StyleCategory(val label: String, val icon: ImageVector) {
 
 /**
  * 步骤 6：轨迹样式调整（对齐 iOS TrackStyleStepTool）。
- * 颜色 / 宽度 / 速度 / 拖尾 / 弹道 / 距离 分类 Tab。
+ * 颜色 / 宽度 / 速度 / 拖尾 / 距离 分类 Tab。
  */
 @Composable
 fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelection) -> Unit) {

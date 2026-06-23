@@ -64,6 +64,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
@@ -76,6 +77,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.max
 
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
@@ -394,8 +396,7 @@ private fun drawTrajectoryOnCanvas(
     timing: TrajectoryTiming,
 ) {
     val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
-        com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
-            .progress(elapsedSec / timing.totalDurationSec, style.speedLevel)
+        GolfCamSpeedConfig.progress(elapsedSec / timing.totalDurationSec, style.speedLevel)
     } else {
         model.progressAtTime(elapsedSec)
     }.toFloat()
@@ -403,16 +404,16 @@ private fun drawTrajectoryOnCanvas(
     if (headProgress <= 0f) return
 
     val tailProgress = (headProgress - (style.tailHalfLife / 100.0 / timing.totalDurationSec).toFloat() * 3f).coerceAtLeast(0f)
-    val gradientColors = style.colorPreset.gradientColors.map { android.graphics.Color.valueOf(it.toInt()) }
-    val alphaMultiplier = (style.colorAlpha * style.colorPreset.bandAlpha).toFloat().coerceIn(0f, 1f)
+    val alphaMultiplier = trackAlphaMultiplier(style)
+    val baseStrokeWidth = 8f * (style.widthPct / 50.0).toFloat()
+    val taperPower = style.renderTuning.widthTaperPower.takeIf { it > 0f } ?: style.taperPower
 
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.style = android.graphics.Paint.Style.STROKE
         strokeCap = android.graphics.Paint.Cap.ROUND
-        strokeWidth = 12f * (style.widthPct / 50.0).toFloat()
     }
 
-    val steps = 80
+    val steps = 120
     for (i in 0 until steps) {
         val t0 = tailProgress + (headProgress - tailProgress) * (i.toFloat() / steps)
         val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
@@ -423,24 +424,100 @@ private fun drawTrajectoryOnCanvas(
         val colorProgress = t0 / headProgress.coerceAtLeast(0.001f)
         val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
 
-        // 简单颜色插值（首尾两色）
-        val c0 = style.colorPreset.gradientColors.first()
-        val c1 = style.colorPreset.gradientColors.last()
-        val r = (((c0 shr 16 and 0xFF) + ((c1 shr 16 and 0xFF) - (c0 shr 16 and 0xFF)) * colorProgress)).toInt().coerceIn(0, 255)
-        val g = (((c0 shr 8 and 0xFF) + ((c1 shr 8 and 0xFF) - (c0 shr 8 and 0xFF)) * colorProgress)).toInt().coerceIn(0, 255)
-        val b = (((c0 and 0xFF) + ((c1 and 0xFF) - (c0 and 0xFF)) * colorProgress)).toInt().coerceIn(0, 255)
         val alpha = (localProgress * 255 * 1.2f * alphaMultiplier).toInt().coerceIn(0, 255)
+        val taper = Math.pow(localProgress.coerceIn(0f, 1f).toDouble(), taperPower.toDouble()).toFloat().coerceIn(0.05f, 1f)
 
-        paint.color = android.graphics.Color.argb(alpha, r, g, b)
+        paint.color = interpolateTrackColor(style.colorPreset.gradientColors, colorProgress, alpha)
+        paint.strokeWidth = baseStrokeWidth * taper
         canvas.drawLine(p0.x * width, p0.y * height, p1.x * width, p1.y * height, paint)
     }
 
-    // 球头光晕
     val head = model.bezier.point(headProgress)
+    val headX = head.x * width
+    val headY = head.y * height
+    val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
+    val glowColor = interpolateTrackColor(style.colorPreset.gradientColors, 1f, (255 * glowAlpha).toInt().coerceIn(0, 255))
     val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = android.graphics.Color.WHITE
         this.style = android.graphics.Paint.Style.FILL
-        alpha = (220 * style.glowOpacity).toInt().coerceIn(0, 255)
     }
-    canvas.drawCircle(head.x * width, head.y * height, 10f, glowPaint)
+    glowPaint.color = glowColor
+    canvas.drawCircle(headX, headY, baseStrokeWidth * 2.5f * 1.8f, glowPaint)
+    glowPaint.alpha = (190 * glowAlpha).toInt().coerceIn(0, 255)
+    canvas.drawCircle(headX, headY, baseStrokeWidth * 2.5f, glowPaint)
+    glowPaint.color = android.graphics.Color.argb((230 * glowAlpha).toInt().coerceIn(0, 255), 255, 255, 255)
+    canvas.drawCircle(headX, headY, baseStrokeWidth, glowPaint)
+
+    if (style.showDistance) {
+        val displayDist = GolfCamSpeedConfig.displayDistance(
+            totalDistance = style.totalDistance,
+            elapsedSec = elapsedSec,
+            totalDurationSec = timing.totalDurationSec,
+            speedLevel = style.speedLevel,
+        )
+        drawDistanceLabelOnCanvas(canvas, headX, headY, displayDist, style.distanceUnit.abbreviation, width, height)
+    }
+}
+
+private fun trackAlphaMultiplier(style: TrackStyle): Float {
+    if (!style.renderTuning.showBodyBand && !style.renderTuning.showHighlightCore) return 0f
+    val base = (style.colorAlpha * style.colorPreset.bandAlpha * style.renderTuning.bandAlphaMultiplier).toFloat()
+    val visibilityMultiplier = if (style.renderTuning.showBodyBand) 1f else style.renderTuning.highlightAlphaMax
+    return (base * visibilityMultiplier).coerceIn(0f, 1f)
+}
+
+private fun interpolateTrackColor(colors: List<Long>, progress: Float, alpha: Int): Int {
+    val effectiveColors = if (colors.isEmpty()) listOf(0xFFFFFFFF) else colors
+    if (effectiveColors.size == 1) {
+        val c = effectiveColors.first()
+        return android.graphics.Color.argb(alpha, ((c ushr 16) and 0xFF).toInt(), ((c ushr 8) and 0xFF).toInt(), (c and 0xFF).toInt())
+    }
+
+    val scaled = progress.coerceIn(0f, 1f) * (effectiveColors.size - 1)
+    val index = scaled.toInt().coerceIn(0, effectiveColors.size - 2)
+    val fraction = scaled - index
+    val a = effectiveColors[index]
+    val b = effectiveColors[index + 1]
+    fun channel(shift: Int): Int {
+        val av = ((a ushr shift) and 0xFF).toInt()
+        val bv = ((b ushr shift) and 0xFF).toInt()
+        return (av + (bv - av) * fraction).toInt().coerceIn(0, 255)
+    }
+    return android.graphics.Color.argb(alpha, channel(16), channel(8), channel(0))
+}
+
+private fun drawDistanceLabelOnCanvas(
+    canvas: AndroidCanvas,
+    x: Float,
+    y: Float,
+    distance: Int,
+    unit: String,
+    width: Float,
+    height: Float,
+) {
+    if (distance <= 0) return
+
+    val scale = max(width, height) / 720f
+    val text = "$distance$unit"
+    val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textSize = 13f * scale.coerceAtLeast(1f)
+        typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+    }
+    val metrics = textPaint.fontMetrics
+    val textWidth = textPaint.measureText(text)
+    val textHeight = metrics.descent - metrics.ascent
+    val paddingX = 6f * scale
+    val paddingY = 4f * scale
+    val labelWidth = textWidth + paddingX * 2f
+    val labelHeight = textHeight + paddingY * 2f
+    val left = (x - labelWidth / 2f).coerceIn(0f, (width - labelWidth).coerceAtLeast(0f))
+    val top = (y - labelHeight - 16f * scale).coerceIn(0f, (height - labelHeight).coerceAtLeast(0f))
+
+    val bgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(115, 0, 0, 0)
+        style = android.graphics.Paint.Style.FILL
+    }
+    val rect = android.graphics.RectF(left, top, left + labelWidth, top + labelHeight)
+    canvas.drawRoundRect(rect, 6f * scale, 6f * scale, bgPaint)
+    canvas.drawText(text, left + paddingX, top + paddingY - metrics.ascent, textPaint)
 }

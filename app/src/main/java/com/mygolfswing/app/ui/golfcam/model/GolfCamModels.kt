@@ -5,6 +5,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 // ─── 几何基础 ──────────────────────────────────────────────────────────────────
 
@@ -765,7 +766,7 @@ object GolfCamSpeedConfig {
 
     fun displayDistance(totalDistance: Double, elapsedSec: Double, totalDurationSec: Double, speedLevel: Double): Int {
         val p = displayProgress(elapsedSec, totalDurationSec, speedLevel)
-        val final = totalDistance.toInt()
+        val final = totalDistance.roundToInt()
         if (p >= 1.0) return max(0, final)
         return max(0, min(final, (totalDistance * p).toInt()))
     }

@@ -15,6 +15,7 @@ import kotlinx.serialization.json.jsonPrimitive
 data class TrackStyleCloudConfig(
     val presets: List<TrackColorPreset>,
     val defaultStyle: TrackStyle,
+    val defaultColorHex: Long?,
 )
 
 object TrackStyleCloudConfigLoader {
@@ -29,10 +30,15 @@ object TrackStyleCloudConfigLoader {
     }
 
     private fun parse(config: JsonObject): TrackStyleCloudConfig {
-        val presets = config["presets"]
+        val defaultColorHex = config.string("defaultColorHex")?.hexToArgbLong()
+        val cloudPresets = config["presets"]
             ?.let { it as? JsonArray }
             ?.mapNotNull(::parsePreset)
             ?.takeIf { it.isNotEmpty() }
+        val presets = cloudPresets
+            ?: defaultColorHex?.let {
+                listOf(TrackColorPreset("默认颜色", listOf(it, it, it), 30f, 0.68f, 1f))
+            }
             ?: defaultTrackColorPresets
 
         val defaultPresetName = config.string("defaultPresetName")
@@ -63,6 +69,7 @@ object TrackStyleCloudConfigLoader {
         return TrackStyleCloudConfig(
             presets = presets,
             defaultStyle = defaultStyle,
+            defaultColorHex = defaultColorHex,
         )
     }
 

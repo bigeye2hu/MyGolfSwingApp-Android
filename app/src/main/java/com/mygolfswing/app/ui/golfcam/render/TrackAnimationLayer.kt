@@ -58,7 +58,7 @@ fun TrajectoryStaticOverlay(
 ) {
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
-    val alphaMultiplier = (style.colorAlpha * style.colorPreset.bandAlpha).toFloat().coerceIn(0f, 1f)
+    val alphaMultiplier = style.trackAlphaMultiplier()
 
     Canvas(modifier = modifier.fillMaxSize()) {
         drawTrajectoryPath(
@@ -67,7 +67,7 @@ fun TrajectoryStaticOverlay(
             tailProgress = 0f,
             gradientColors = gradientColors,
             baseStrokeWidth = baseWidth,
-            taperPower = style.taperPower,
+            taperPower = style.effectiveTaperPower(),
             alphaMultiplier = alphaMultiplier,
         )
         drawHeadGlow(
@@ -132,8 +132,8 @@ fun TrajectoryAnimationOverlay(
             tailProgress = tailProgress,
             gradientColors = gradientColors,
             baseStrokeWidth = baseWidth,
-            taperPower = style.taperPower,
-            alphaMultiplier = (style.colorAlpha * style.colorPreset.bandAlpha).toFloat().coerceIn(0f, 1f),
+            taperPower = style.effectiveTaperPower(),
+            alphaMultiplier = style.trackAlphaMultiplier(),
         )
         if (headProgress > 0f && headProgress < 1f) {
             drawHeadGlow(
@@ -265,5 +265,15 @@ private fun lerpColor(a: Color, b: Color, t: Float): Color {
         alpha = a.alpha + (b.alpha - a.alpha) * tc,
     )
 }
+
+private fun TrackStyle.trackAlphaMultiplier(): Float {
+    if (!renderTuning.showBodyBand && !renderTuning.showHighlightCore) return 0f
+    val base = (colorAlpha * colorPreset.bandAlpha * renderTuning.bandAlphaMultiplier).toFloat()
+    val visibilityMultiplier = if (renderTuning.showBodyBand) 1f else renderTuning.highlightAlphaMax
+    return (base * visibilityMultiplier).coerceIn(0f, 1f)
+}
+
+private fun TrackStyle.effectiveTaperPower(): Float =
+    renderTuning.widthTaperPower.takeIf { it > 0f } ?: taperPower
 
 private fun Double.pow(exp: Double): Double = Math.pow(this, exp)

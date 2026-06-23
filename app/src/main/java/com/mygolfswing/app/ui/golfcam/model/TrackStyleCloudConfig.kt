@@ -63,7 +63,7 @@ object TrackStyleCloudConfigLoader {
         }.getOrNull()
     }
 
-    private fun parse(config: JsonObject): TrackStyleCloudConfig {
+    internal fun parse(config: JsonObject): TrackStyleCloudConfig {
         val defaultColorHex = config.string("defaultColorHex")?.hexToArgbLong()
         val cloudPresets = config["presets"]
             ?.let { it as? JsonArray }

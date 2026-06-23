@@ -7,8 +7,29 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 
 class GolfCamTrackStyleAlignmentTest {
+
+    @Test
+    fun bezierArcProgressMapsThroughArcLengthTable() {
+        val bezier = BezierPath(
+            p0 = NormalizedPoint(0.05f, 0.85f),
+            p1 = NormalizedPoint(0.20f, -0.20f),
+            p2 = NormalizedPoint(0.75f, 0.15f),
+            p3 = NormalizedPoint(0.95f, 0.72f),
+        )
+        val arcTable = ArcLengthTable(bezier)
+        val uAtHalfArc = arcTable.uAtArcLength(arcTable.totalLength * 0.5f)
+        val pointAtHalfArc = bezier.pointAtArcProgress(0.5f, arcTable)
+        val rawPointAtHalfT = bezier.point(0.5f)
+        val expected = bezier.point(uAtHalfArc)
+
+        assertTrue(abs(uAtHalfArc - 0.5f) > 0.001f)
+        assertEquals(expected.x, pointAtHalfArc.x, 1e-6f)
+        assertEquals(expected.y, pointAtHalfArc.y, 1e-6f)
+        assertTrue(abs(pointAtHalfArc.x - rawPointAtHalfT.x) > 0.001f || abs(pointAtHalfArc.y - rawPointAtHalfT.y) > 0.001f)
+    }
 
     @Test
     fun displayDistanceUsesIosCadenceFloorAndRoundedFinalValue() {

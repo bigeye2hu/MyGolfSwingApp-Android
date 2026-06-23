@@ -58,10 +58,12 @@ fun TrajectoryStaticOverlay(
 ) {
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
+    val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
     Canvas(modifier = modifier.fillMaxSize()) {
         drawTrajectoryPath(
             bezier = bezier,
+            arcTable = arcTable,
             headProgress = 1f,
             tailProgress = 0f,
             gradientColors = gradientColors,
@@ -70,6 +72,7 @@ fun TrajectoryStaticOverlay(
         )
         drawHeadGlow(
             bezier = bezier,
+            arcTable = arcTable,
             headProgress = 1f,
             color = gradientColors.last(),
             radius = baseWidth * 2.5f,
@@ -107,6 +110,7 @@ fun TrajectoryAnimationOverlay(
     val gradientColors = style.colorPreset.gradientColors.map { Color(it) }
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
     val totalDurSec = timing.totalDurationSec
+    val arcTable = remember(bezier) { ArcLengthTable(bezier) }
 
     val elapsedSec = elapsedMs / 1000.0
     val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
@@ -126,6 +130,7 @@ fun TrajectoryAnimationOverlay(
     Canvas(modifier = modifier.fillMaxSize()) {
         drawTrajectoryPath(
             bezier = bezier,
+            arcTable = arcTable,
             headProgress = headProgress,
             tailProgress = tailProgress,
             gradientColors = gradientColors,
@@ -135,6 +140,7 @@ fun TrajectoryAnimationOverlay(
         if (headProgress > 0f && headProgress < 1f) {
             drawHeadGlow(
                 bezier = bezier,
+                arcTable = arcTable,
                 headProgress = headProgress,
                 color = gradientColors.last(),
                 radius = baseWidth * 2.5f,
@@ -150,6 +156,7 @@ fun TrajectoryAnimationOverlay(
             )
             drawDistanceLabel(
                 bezier = bezier,
+                arcTable = arcTable,
                 headProgress = headProgress,
                 distance = displayDist,
                 unit = style.distanceUnit.abbreviation,
@@ -163,6 +170,7 @@ fun TrajectoryAnimationOverlay(
 
 private fun DrawScope.drawTrajectoryPath(
     bezier: BezierPath,
+    arcTable: ArcLengthTable,
     headProgress: Float,
     tailProgress: Float,
     gradientColors: List<Color>,
@@ -198,8 +206,8 @@ private fun DrawScope.drawTrajectoryPath(
             val alpha = alphaFor(tailFade, colorProgress).coerceIn(0f, 1f)
             if (alpha <= 0.001f) continue
 
-            val p0 = bezier.point(t0)
-            val p1 = bezier.point(t1)
+            val p0 = bezier.pointAtArcProgress(t0, arcTable)
+            val p1 = bezier.pointAtArcProgress(t1, arcTable)
             drawLine(
                 color = segColor.copy(alpha = alpha),
                 start = Offset(p0.x * size.width, p0.y * size.height),
@@ -246,12 +254,13 @@ private fun DrawScope.drawTrajectoryPath(
 
 private fun DrawScope.drawHeadGlow(
     bezier: BezierPath,
+    arcTable: ArcLengthTable,
     headProgress: Float,
     color: Color,
     radius: Float,
     alphaMultiplier: Float,
 ) {
-    val pt = bezier.point(headProgress)
+    val pt = bezier.pointAtArcProgress(headProgress, arcTable)
     val center = Offset(pt.x * size.width, pt.y * size.height)
 
     drawCircle(color = color.copy(alpha = 0.35f * alphaMultiplier), radius = radius * 1.8f, center = center)
@@ -261,13 +270,14 @@ private fun DrawScope.drawHeadGlow(
 
 private fun DrawScope.drawDistanceLabel(
     bezier: BezierPath,
+    arcTable: ArcLengthTable,
     headProgress: Float,
     distance: Int,
     unit: String,
     textMeasurer: TextMeasurer,
 ) {
     if (distance <= 0) return
-    val pt = bezier.point(headProgress)
+    val pt = bezier.pointAtArcProgress(headProgress, arcTable)
     val center = Offset(pt.x * size.width, pt.y * size.height)
 
     val text = "$distance$unit"

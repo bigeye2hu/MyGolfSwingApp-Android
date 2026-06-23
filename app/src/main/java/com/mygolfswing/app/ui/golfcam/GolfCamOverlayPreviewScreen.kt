@@ -64,6 +64,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
@@ -258,6 +259,7 @@ private suspend fun exportVideoWithTrajectory(
         timing = timing,
         params = TrajectoryMotionModel.parametersFromStyle(selection.style),
     )
+    val arcTable = ArcLengthTable(selection.flightCurve.bezierPath)
 
     // 输出文件
     val outputFile = File(context.cacheDir, "trajectory_export_${System.currentTimeMillis()}.mp4")
@@ -301,7 +303,7 @@ private suspend fun exportVideoWithTrajectory(
         }
 
         // 绘制轨迹叠加
-        drawTrajectoryOnCanvas(c, model, selection.style, elapsedSec, width.toFloat(), height.toFloat(), timing)
+        drawTrajectoryOnCanvas(c, model, arcTable, selection.style, elapsedSec, width.toFloat(), height.toFloat(), timing)
 
         surface.unlockCanvasAndPost(c)
 
@@ -389,6 +391,7 @@ private suspend fun exportVideoWithTrajectory(
 private fun drawTrajectoryOnCanvas(
     canvas: AndroidCanvas,
     model: TrajectoryMotionModel,
+    arcTable: ArcLengthTable,
     style: TrackStyle,
     elapsedSec: Double,
     width: Float,
@@ -421,8 +424,8 @@ private fun drawTrajectoryOnCanvas(
             val t1 = tailProgress + (headProgress - tailProgress) * ((i + 1).toFloat() / steps)
             if (t1 <= tailProgress || t0 >= headProgress) continue
 
-            val p0 = model.bezier.point(t0)
-            val p1 = model.bezier.point(t1)
+            val p0 = model.bezier.pointAtArcProgress(t0, arcTable)
+            val p1 = model.bezier.pointAtArcProgress(t1, arcTable)
             val colorProgress = t0.coerceIn(0f, 1f)
             val localProgress = (t0 - tailProgress) / (headProgress - tailProgress).coerceAtLeast(0.001f)
             val alpha = (alphaFor(localProgress.coerceIn(0f, 1f), colorProgress) * 255f).toInt().coerceIn(0, 255)
@@ -468,7 +471,7 @@ private fun drawTrajectoryOnCanvas(
         }
     }
 
-    val head = model.bezier.point(headProgress)
+    val head = model.bezier.pointAtArcProgress(headProgress, arcTable)
     val headX = head.x * width
     val headY = head.y * height
     val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)

@@ -27,6 +27,12 @@ data class BezierPath(
             y = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
         )
     }
+
+    fun pointAtArcProgress(progress: Float, arcTable: ArcLengthTable): NormalizedPoint {
+        if (arcTable.totalLength <= 0f) return point(progress.coerceIn(0f, 1f))
+        val u = arcTable.uAtArcLength(arcTable.totalLength * progress.coerceIn(0f, 1f))
+        return point(u)
+    }
 }
 
 // ─── 轨迹算法 V5（对齐 iOS TrajectoryMotionModel）──────────────────────────────

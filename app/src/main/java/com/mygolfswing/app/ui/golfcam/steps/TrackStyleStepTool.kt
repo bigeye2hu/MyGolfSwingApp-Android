@@ -57,7 +57,6 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleCloudConfigLoader
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
-import com.mygolfswing.app.ui.golfcam.model.TrajectoryPresetKind
 import com.mygolfswing.app.ui.golfcam.model.defaultTrackColorPresets
 
 // ── 样式类别 ──────────────────────────────────────────────────
@@ -193,80 +192,6 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
                 StyleCategory.DISTANCE -> DistanceContent(style = style, onChange = { style = it })
             }
         }
-    }
-}
-
-@Composable
-private fun TrajectoryPresetContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("弹道算法", color = DSColors.shadowGray, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-            Text(
-                style.trajectoryPreset.displayName,
-                color = DSColors.inkGreen,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(TrajectoryPresetKind.entries) { preset ->
-                val selected = preset == style.trajectoryPreset
-                Column(
-                    modifier = Modifier
-                        .width(112.dp)
-                        .height(54.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (selected) DSColors.fairway else DSColors.mistGreen.copy(alpha = 0.65f))
-                        .border(
-                            width = if (selected) 0.dp else 1.dp,
-                            color = DSColors.fairway.copy(alpha = 0.24f),
-                            shape = RoundedCornerShape(12.dp),
-                        )
-                        .clickable {
-                            val params = com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionParameters.preset(preset)
-                            onChange(
-                                style.copy(
-                                    trajectoryPreset = preset,
-                                    motionLaunchBias = params.launchBias,
-                                    motionDrag = params.drag,
-                                    motionLiftHold = params.liftHold,
-                                    motionDescentAcceleration = params.descentAcceleration,
-                                    motionTailBoost = params.tailBoost,
-                                    v4VMin = params.vMin,
-                                    v4VMax = params.vMax,
-                                    v4PLeft = params.pLeft,
-                                    v4PRight = params.pRight,
-                                ),
-                            )
-                        }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text(
-                        preset.displayName,
-                        color = if (selected) Color.White else DSColors.inkGreen,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        trajectoryPresetSubtitle(preset),
-                        color = if (selected) Color.White.copy(alpha = 0.8f) else DSColors.shadowGray,
-                        fontSize = 9.sp,
-                        maxLines = 1,
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun trajectoryPresetSubtitle(preset: TrajectoryPresetKind): String {
-    return when (preset) {
-        TrajectoryPresetKind.STANDARD -> "均衡飞行节奏"
-        TrajectoryPresetKind.HIGH_ARC -> "顶点更高更柔"
-        TrajectoryPresetKind.LOW_PIERCING -> "低平穿透更快"
-        TrajectoryPresetKind.SOFT_LANDING -> "短杆柔和落地"
-        TrajectoryPresetKind.GOLF_CAM_LIKE -> "学习 GolfCam 节奏"
     }
 }
 

@@ -1,33 +1,15 @@
 package com.mygolfswing.app.ui.golfcam.render
 
-import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -43,9 +25,6 @@ import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
-import kotlinx.coroutines.delay
-import kotlin.math.max
-import kotlin.math.sqrt
 
 // ─── 轨迹动画层 Composable（对齐 iOS TrackAnimationLayerView）────────────────────
 
@@ -237,19 +216,6 @@ private fun DrawScope.drawDistanceLabel(
     drawText(measured, topLeft = Offset(offsetX, offsetY))
 }
 
-private fun lerpColor(a: Color, b: Color, t: Float): Color {
-    val tc = t.coerceIn(0f, 1f)
-    return Color(
-        red = a.red + (b.red - a.red) * tc,
-        green = a.green + (b.green - a.green) * tc,
-        blue = a.blue + (b.blue - a.blue) * tc,
-        alpha = a.alpha + (b.alpha - a.alpha) * tc,
-    )
-}
-
-private fun TrackStyle.trackBandAlpha(): Float =
-    (colorAlpha * colorPreset.bandAlpha * renderTuning.bandAlphaMultiplier).toFloat().coerceIn(0f, 1f)
-
 private fun TrackStyle.headGlowRadius(videoHeight: Float, headProgress: Float, apexProgress: Float): Float =
     GolfCamTrailGeometry.strokeWidth(
         widthPct = widthPct,
@@ -258,21 +224,3 @@ private fun TrackStyle.headGlowRadius(videoHeight: Float, headProgress: Float, a
         apexProgress = apexProgress,
         tuning = renderTuning,
     ) * 1.25f
-
-private fun highlightWeight(progress: Float, start: Float, peak: Float, end: Float, falloffPower: Float): Float {
-    if (progress < start || progress > end) return 0f
-    return if (progress <= peak) {
-        smoothStep(start, peak, progress)
-    } else {
-        val t = smoothStep(peak, end, progress)
-        (1f - t).coerceIn(0f, 1f).toDouble().pow(falloffPower.toDouble()).toFloat()
-    }
-}
-
-private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
-    if (kotlin.math.abs(edge1 - edge0) <= 0.0001f) return if (value >= edge1) 1f else 0f
-    val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
-}
-
-private fun Double.pow(exp: Double): Double = Math.pow(this, exp)

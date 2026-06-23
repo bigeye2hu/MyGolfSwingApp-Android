@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.geometry.Offset
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -97,6 +98,145 @@ data class TrajectoryTiming(
     val defaultAnchorTimeSec: Double get() = minOf(0.5, totalDurationSec * 0.18)
 }
 
+// ─── 轨迹算法选择（对齐 iOS TrajectoryAlgorithmManager）────────────────────────
+
+enum class KRegion {
+    LOW,
+    MEDIUM,
+    HIGH,
+    EXTREME;
+
+    companion object {
+        fun from(k: Double): KRegion = when {
+            k < 0.35 -> LOW
+            k < 0.50 -> MEDIUM
+            k < 0.60 -> HIGH
+            else -> EXTREME
+        }
+    }
+}
+
+enum class SPeakRegion {
+    LOW,
+    STANDARD,
+    HIGH;
+
+    companion object {
+        fun from(sPeak: Double): SPeakRegion = when {
+            sPeak < 0.55 -> LOW
+            sPeak < 0.70 -> STANDARD
+            else -> HIGH
+        }
+    }
+}
+
+enum class TrajectoryAlgorithmType {
+    V44_STANDARD,
+    V44_LOW_K_PATCH,
+    V44_HIGH_K_COMPRESS,
+    V45_HIGH_ARC,
+    V45_LOW_ARC,
+    V44_EXTREME;
+
+    val parameterAdjustments: AlgorithmParameters
+        get() = when (this) {
+            V44_STANDARD -> AlgorithmParameters(
+                kAsymFactor = 3.0,
+                pLeftMultiplier = 1.0,
+                pRightMultiplier = 1.0,
+                vMinFactor = 1.0,
+                tailSpeedBoost = 0.0,
+            )
+            V44_LOW_K_PATCH -> AlgorithmParameters(
+                kAsymFactor = 3.0,
+                pLeftMultiplier = 0.9,
+                pRightMultiplier = 1.1,
+                vMinFactor = 1.0,
+                tailSpeedBoost = 0.1,
+            )
+            V44_HIGH_K_COMPRESS -> AlgorithmParameters(
+                kAsymFactor = 2.5,
+                pLeftMultiplier = 1.1,
+                pRightMultiplier = 0.9,
+                vMinFactor = 0.9,
+                tailSpeedBoost = 0.0,
+            )
+            V45_HIGH_ARC -> AlgorithmParameters(
+                kAsymFactor = 3.5,
+                pLeftMultiplier = 1.2,
+                pRightMultiplier = 0.8,
+                vMinFactor = 0.85,
+                tailSpeedBoost = 0.15,
+            )
+            V45_LOW_ARC -> AlgorithmParameters(
+                kAsymFactor = 2.5,
+                pLeftMultiplier = 0.85,
+                pRightMultiplier = 1.15,
+                vMinFactor = 1.1,
+                tailSpeedBoost = -0.05,
+            )
+            V44_EXTREME -> AlgorithmParameters(
+                kAsymFactor = 2.0,
+                pLeftMultiplier = 1.0,
+                pRightMultiplier = 1.0,
+                vMinFactor = 1.2,
+                tailSpeedBoost = 0.0,
+            )
+        }
+}
+
+data class AlgorithmParameters(
+    val kAsymFactor: Double,
+    val pLeftMultiplier: Double,
+    val pRightMultiplier: Double,
+    val vMinFactor: Double,
+    val tailSpeedBoost: Double,
+)
+
+data class AlgorithmSelection(
+    val kRegion: KRegion,
+    val sPeakRegion: SPeakRegion,
+    val algorithmType: TrajectoryAlgorithmType,
+    val parameters: AlgorithmParameters,
+)
+
+object TrajectoryAlgorithmManager {
+    private val matrix: Map<KRegion, Map<SPeakRegion, TrajectoryAlgorithmType>> = mapOf(
+        KRegion.LOW to mapOf(
+            SPeakRegion.LOW to TrajectoryAlgorithmType.V45_LOW_ARC,
+            SPeakRegion.STANDARD to TrajectoryAlgorithmType.V44_LOW_K_PATCH,
+            SPeakRegion.HIGH to TrajectoryAlgorithmType.V45_HIGH_ARC,
+        ),
+        KRegion.MEDIUM to mapOf(
+            SPeakRegion.LOW to TrajectoryAlgorithmType.V45_LOW_ARC,
+            SPeakRegion.STANDARD to TrajectoryAlgorithmType.V44_STANDARD,
+            SPeakRegion.HIGH to TrajectoryAlgorithmType.V45_HIGH_ARC,
+        ),
+        KRegion.HIGH to mapOf(
+            SPeakRegion.LOW to TrajectoryAlgorithmType.V44_HIGH_K_COMPRESS,
+            SPeakRegion.STANDARD to TrajectoryAlgorithmType.V44_HIGH_K_COMPRESS,
+            SPeakRegion.HIGH to TrajectoryAlgorithmType.V44_HIGH_K_COMPRESS,
+        ),
+        KRegion.EXTREME to mapOf(
+            SPeakRegion.LOW to TrajectoryAlgorithmType.V44_EXTREME,
+            SPeakRegion.STANDARD to TrajectoryAlgorithmType.V44_EXTREME,
+            SPeakRegion.HIGH to TrajectoryAlgorithmType.V44_EXTREME,
+        ),
+    )
+
+    fun selectAlgorithm(k: Double, sPeak: Double): AlgorithmSelection {
+        val kRegion = KRegion.from(k)
+        val sPeakRegion = SPeakRegion.from(sPeak)
+        val algorithmType = matrix[kRegion]?.get(sPeakRegion) ?: TrajectoryAlgorithmType.V44_STANDARD
+        return AlgorithmSelection(
+            kRegion = kRegion,
+            sPeakRegion = sPeakRegion,
+            algorithmType = algorithmType,
+            parameters = algorithmType.parameterAdjustments,
+        )
+    }
+}
+
 // ─── 弧长表（均匀弧长采样，O(1) 反查）──────────────────────────────────────────
 
 class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
@@ -129,6 +269,18 @@ class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
         return uSamples[lo] + ratio * (uSamples[hi] - uSamples[lo])
     }
 
+    fun arcLengthAtU(u: Float): Float {
+        val target = u.coerceIn(0f, 1f)
+        var lo = 0; var hi = uSamples.size - 1
+        while (lo < hi - 1) {
+            val mid = (lo + hi) / 2
+            if (uSamples[mid] < target) lo = mid else hi = mid
+        }
+        val ratio = if (uSamples[hi] == uSamples[lo]) 0f
+        else (target - uSamples[lo]) / (uSamples[hi] - uSamples[lo])
+        return arcLengths[lo] + ratio * (arcLengths[hi] - arcLengths[lo])
+    }
+
     fun apexU(): Float {
         var minY = Float.MAX_VALUE; var minU = 0f
         for (i in uSamples.indices) {
@@ -152,24 +304,51 @@ class TrajectoryMotionModel(
     private val resolvedApex: Double
     private val sSamples: DoubleArray
     private val tSamples: DoubleArray
+    private val selection: AlgorithmSelection
 
     init {
         val apexU = arcTable.apexU()
-        val apexArc = arcTable.arcLengths.let {
-            // 弧长表私有，用 uAtArcLength 反算
-            val apexArcLen = arcTable.totalLength * apexU
-            apexArcLen.toDouble()
-        }
-        val rawApex = if (arcTable.totalLength > 0) {
-            arcTable.uAtArcLength(arcTable.totalLength * apexU).toDouble()
-        } else 0.6
-        resolvedApex = (params.apexProgress ?: rawApex).coerceIn(0.05, 0.95)
+        val apexArc = arcTable.arcLengthAtU(apexU)
+        val realApex = if (arcTable.totalLength > 0) apexArc / arcTable.totalLength else 0.6f
+        resolvedApex = (params.apexProgress ?: realApex.toDouble()).coerceIn(0.05, 0.95)
 
-        val slowPoint = resolvedApex
+        selection = TrajectoryAlgorithmManager.selectAlgorithm(
+            k = params.speedK,
+            sPeak = resolvedApex,
+        )
+        val adjusted = adjustedParameters(params, selection)
+        val physicalK = mapUiKToPhysicalK(params.speedK, selection.algorithmType)
+        val mode = detectMode(physicalK, resolvedApex)
+        val slowPoint = if (mode == "OVERSHOOT") physicalK else resolvedApex
         val anchor = params.anchorTime ?: timing.defaultAnchorTimeSec
         val totalDur = timing.totalDurationSec
 
-        val (ss, ts) = buildTimeMapping(slowPoint, params, sampleCount)
+        val asymmetryA = solveA(
+            targetK = physicalK,
+            anchorTime = anchor,
+            totalDuration = totalDur,
+            slowPoint = slowPoint,
+            vMin = adjusted.vMin,
+            vMax = adjusted.vMax,
+            pLeft = adjusted.pLeft,
+            pRight = adjusted.pRight,
+            mode = mode,
+            selection = selection,
+            visualParams = params,
+        )
+
+        val (ss, ts) = buildTimeMapping(
+            slowPoint = slowPoint,
+            vMin = adjusted.vMin,
+            vMax = adjusted.vMax,
+            pLeft = adjusted.pLeft,
+            pRight = adjusted.pRight,
+            asymmetryA = asymmetryA,
+            mode = mode,
+            selection = selection,
+            visualParams = params,
+            sampleCount = sampleCount,
+        )
         sSamples = ss
         tSamples = ts
     }
@@ -188,7 +367,216 @@ class TrajectoryMotionModel(
     fun positionAtTime(elapsedSec: Double) = positionAtProgress(progressAtTime(elapsedSec))
 
     companion object {
-        private fun baseSpeed(s: Double, slowPoint: Double, vMin: Double, vStart: Double, vEnd: Double, pLeft: Double, pRight: Double): Double {
+        private data class AdjustedParams(
+            val vMin: Double,
+            val vMax: Double,
+            val pLeft: Double,
+            val pRight: Double,
+        )
+
+        fun parametersFromStyle(style: TrackStyle, apexProgress: Double? = null): TrajectoryMotionParameters {
+            return TrajectoryMotionParameters.preset(style.trajectoryPreset).copy(
+                speedK = style.speedLevel,
+                apexProgress = apexProgress,
+                preset = style.trajectoryPreset,
+            )
+        }
+
+        private fun adjustedParameters(
+            params: TrajectoryMotionParameters,
+            selection: AlgorithmSelection,
+        ): AdjustedParams {
+            val algorithm = selection.parameters
+            return AdjustedParams(
+                vMin = max(0.1, params.vMin * algorithm.vMinFactor),
+                vMax = max(0.2, params.vMax),
+                pLeft = max(0.1, params.pLeft * algorithm.pLeftMultiplier),
+                pRight = max(0.1, params.pRight * algorithm.pRightMultiplier),
+            )
+        }
+
+        private fun mapUiKToPhysicalK(kUi: Double, algorithmType: TrajectoryAlgorithmType): Double {
+            val kUiLowMin = 0.15
+            val kUiLowMax = 0.35
+            var kPhysLowMin = 0.31
+            var kPhysLowMax = 0.35
+
+            val kUiHighMin = 0.45
+            val kUiHighMax = 0.60
+            var kPhysHighMin = 0.43
+            var kPhysHighMax = 0.44
+
+            when (algorithmType) {
+                TrajectoryAlgorithmType.V44_LOW_K_PATCH -> {
+                    kPhysLowMin = 0.28
+                    kPhysLowMax = 0.36
+                }
+                TrajectoryAlgorithmType.V44_HIGH_K_COMPRESS -> {
+                    kPhysHighMin = 0.42
+                    kPhysHighMax = 0.435
+                }
+                TrajectoryAlgorithmType.V44_EXTREME -> {
+                    kPhysHighMin = 0.41
+                    kPhysHighMax = 0.43
+                }
+                else -> Unit
+            }
+
+            if (kUi < kUiLowMax) {
+                val t = (kUi - kUiLowMin) / (kUiLowMax - kUiLowMin)
+                return kPhysLowMin + max(0.0, t).pow(1.8) * (kPhysLowMax - kPhysLowMin)
+            }
+            if (kUi < kUiHighMin) return kUi
+            if (kUi <= kUiHighMax) {
+                val t = (kUi - kUiHighMin) / (kUiHighMax - kUiHighMin)
+                return kPhysHighMin + t * (kPhysHighMax - kPhysHighMin)
+            }
+            return kUi
+        }
+
+        private fun detectMode(k: Double, sPeak: Double): String {
+            val eps = 0.015
+            return when {
+                k < sPeak - eps -> "NORMAL"
+                k > sPeak + eps -> "OVERSHOOT"
+                else -> "CRITICAL"
+            }
+        }
+
+        private fun solveA(
+            targetK: Double,
+            anchorTime: Double,
+            totalDuration: Double,
+            slowPoint: Double,
+            vMin: Double,
+            vMax: Double,
+            pLeft: Double,
+            pRight: Double,
+            mode: String,
+            selection: AlgorithmSelection,
+            visualParams: TrajectoryMotionParameters,
+        ): Double {
+            var lo = -1.5
+            var hi = 1.5
+            val tNorm = anchorTime / max(totalDuration, 1e-6)
+
+            repeat(40) {
+                val mid = 0.5 * (lo + hi)
+                val mapping = buildTimeMapping(
+                    slowPoint = slowPoint,
+                    vMin = vMin,
+                    vMax = vMax,
+                    pLeft = pLeft,
+                    pRight = pRight,
+                    asymmetryA = mid,
+                    mode = mode,
+                    selection = selection,
+                    visualParams = visualParams,
+                    sampleCount = 300,
+                )
+
+                val sMatch = sForTime(tNorm, mapping.first, mapping.second)
+                if (abs(sMatch - targetK) < 1e-6) return mid
+                if (sMatch < targetK) lo = mid else hi = mid
+            }
+
+            return 0.5 * (lo + hi)
+        }
+
+        private fun buildTimeMapping(
+            slowPoint: Double,
+            vMin: Double,
+            vMax: Double,
+            pLeft: Double,
+            pRight: Double,
+            asymmetryA: Double,
+            mode: String,
+            selection: AlgorithmSelection,
+            visualParams: TrajectoryMotionParameters,
+            sampleCount: Int,
+        ): Pair<DoubleArray, DoubleArray> {
+            val sampleSize = max(40, sampleCount)
+            val ds = 1.0 / sampleSize
+            val sSamples = DoubleArray(sampleSize + 1) { it.toDouble() / sampleSize }
+            val vSamples = DoubleArray(sampleSize + 1) {
+                speed(
+                    s = sSamples[it],
+                    slowPoint = slowPoint,
+                    vMin = vMin,
+                    vMax = vMax,
+                    pLeft = pLeft,
+                    pRight = pRight,
+                    asymmetryA = asymmetryA,
+                    selection = selection,
+                    visualParams = visualParams,
+                )
+            }
+
+            enforceUSpeedShape(vSamples, slowPoint, mode)
+            applyVisualTail(
+                vSamples = vSamples,
+                slowPoint = slowPoint,
+                tailBoost = selection.parameters.tailSpeedBoost + visualParams.tailBoost,
+            )
+
+            val tSamples = DoubleArray(sampleSize + 1)
+            for (k in 1..sampleSize) {
+                val vMid = 0.5 * (vSamples[k] + vSamples[k - 1])
+                tSamples[k] = tSamples[k - 1] + ds / max(vMid, 1e-6)
+            }
+            val totalT = tSamples[sampleSize]
+            if (totalT > 0) {
+                for (k in 0..sampleSize) tSamples[k] /= totalT
+            }
+
+            return sSamples to tSamples
+        }
+
+        private fun speed(
+            s: Double,
+            slowPoint: Double,
+            vMin: Double,
+            vMax: Double,
+            pLeft: Double,
+            pRight: Double,
+            asymmetryA: Double,
+            selection: AlgorithmSelection,
+            visualParams: TrajectoryMotionParameters,
+        ): Double {
+            val a = asymmetryA.coerceIn(-1.5, 1.5)
+            val launchBoost = 1.0 + (visualParams.launchBias - 0.5).coerceIn(-0.5, 0.5) * 0.8
+            val dragDamp = 1.0 - visualParams.drag.coerceIn(0.0, 1.0) * 0.18
+            val holdDamp = 1.0 - visualParams.liftHold.coerceIn(0.0, 1.0) * 0.22
+            val descentBoost = 1.0 + visualParams.descentAcceleration.coerceIn(0.0, 1.0) * 0.28
+
+            val vStart = vMax * launchBoost
+            val vEnd = (vMin + (vMax - vMin) * 0.6) * dragDamp * descentBoost
+            val base = baseSpeed(
+                s = s,
+                slowPoint = slowPoint,
+                vMin = vMin * holdDamp,
+                vStart = vStart,
+                vEnd = vEnd,
+                pLeft = pLeft,
+                pRight = pRight,
+            )
+
+            return if (a >= 0) {
+                speedPositiveA(s, slowPoint, vMin, base, a, selection.parameters.kAsymFactor)
+            } else {
+                speedNegativeA(s, slowPoint, vMin, base, a, selection.parameters.kAsymFactor)
+            }
+        }
+
+        private fun baseSpeed(
+            s: Double,
+            slowPoint: Double,
+            vMin: Double,
+            vStart: Double,
+            vEnd: Double,
+            pLeft: Double,
+            pRight: Double,
+        ): Double {
             return if (s <= slowPoint) {
                 val t = (slowPoint - s) / max(slowPoint, 1e-6)
                 vMin + (vStart - vMin) * t.pow(pLeft)
@@ -198,48 +586,88 @@ class TrajectoryMotionModel(
             }
         }
 
-        private fun speed(s: Double, slowPoint: Double, params: TrajectoryMotionParameters): Double {
-            val launchBoost = 1.0 + (params.launchBias - 0.5).coerceIn(-0.5, 0.5) * 0.8
-            val dragDamp = 1.0 - params.drag.coerceIn(0.0, 1.0) * 0.18
-            val holdDamp = 1.0 - params.liftHold.coerceIn(0.0, 1.0) * 0.22
-            val descentBoost = 1.0 + params.descentAcceleration.coerceIn(0.0, 1.0) * 0.28
-
-            val vStart = params.vMax * launchBoost
-            val vEnd = (params.vMin + (params.vMax - params.vMin) * 0.6) * dragDamp * descentBoost
-            return max(0.1, baseSpeed(s, slowPoint, params.vMin * holdDamp, vStart, vEnd, params.pLeft, params.pRight))
-        }
-
-        private fun buildTimeMapping(slowPoint: Double, params: TrajectoryMotionParameters, sampleCount: Int): Pair<DoubleArray, DoubleArray> {
-            val M = max(40, sampleCount)
-            val sSamples = DoubleArray(M + 1) { it.toDouble() / M }
-            val vSamples = DoubleArray(M + 1) { speed(sSamples[it], slowPoint, params) }
-
-            enforceUShape(vSamples, slowPoint)
-            applyTailBoost(vSamples, slowPoint, params.tailBoost)
-
-            val tSamples = DoubleArray(M + 1)
-            val ds = 1.0 / M
-            for (k in 1..M) {
-                val vMid = 0.5 * (vSamples[k] + vSamples[k - 1])
-                tSamples[k] = tSamples[k - 1] + ds / max(vMid, 1e-6)
+        private fun speedPositiveA(
+            s: Double,
+            slowPoint: Double,
+            vMin: Double,
+            base: Double,
+            asymmetryA: Double,
+            kAsym: Double,
+        ): Double {
+            val dist: Double
+            val sign: Double
+            if (s <= slowPoint) {
+                dist = (slowPoint - s) / max(slowPoint, 1e-6)
+                sign = 1.0
+            } else {
+                dist = (s - slowPoint) / max(1.0 - slowPoint, 1e-6)
+                sign = -1.0
             }
-            val totalT = tSamples[M]
-            if (totalT > 0) for (k in 0..M) tSamples[k] /= totalT
 
-            return sSamples to tSamples
+            var delta = kAsym * dist * dist * sign * base
+            if (s > slowPoint) delta = max(delta, -0.6 * base)
+
+            var v = base + asymmetryA * delta
+            if (s > slowPoint) v = max(vMin * 0.9, v)
+            return max(0.1, v)
         }
 
-        private fun enforceUShape(vSamples: DoubleArray, slowPoint: Double) {
-            val last = vSamples.size - 1
-            val slowIdx = (slowPoint * last).toInt().coerceIn(0, last)
-            for (k in 1..slowIdx) if (vSamples[k] > vSamples[k - 1]) vSamples[k] = vSamples[k - 1]
-            for (k in (slowIdx + 1)..last) if (vSamples[k] < vSamples[k - 1]) vSamples[k] = vSamples[k - 1]
+        private fun speedNegativeA(
+            s: Double,
+            slowPoint: Double,
+            vMin: Double,
+            base: Double,
+            asymmetryA: Double,
+            kAsym: Double,
+        ): Double {
+            val a = min(1.0, max(0.0, -asymmetryA))
+            val x = if (s <= slowPoint) {
+                s / max(slowPoint, 1e-6)
+            } else {
+                (s - slowPoint) / max(1.0 - slowPoint, 1e-6)
+            }
+            val delta = if (s <= slowPoint) {
+                -a * kAsym * x * (1.0 - x) * (base - vMin)
+            } else {
+                a * kAsym * x.pow(2.0) * base
+            }
+            return max(0.1, base + delta)
         }
 
-        private fun applyTailBoost(vSamples: DoubleArray, slowPoint: Double, tailBoost: Double) {
-            if (tailBoost == 0.0) return
+        private fun enforceUSpeedShape(vSamples: DoubleArray, slowPoint: Double, mode: String) {
+            if (vSamples.size <= 2) return
             val last = vSamples.size - 1
             val slowIdx = (slowPoint * last).toInt().coerceIn(0, last)
+            if (slowIdx >= 1) {
+                for (k in 1..slowIdx) {
+                    if (vSamples[k] > vSamples[k - 1]) vSamples[k] = vSamples[k - 1]
+                }
+            }
+            if (slowIdx + 1 <= last) {
+                for (k in (slowIdx + 1)..last) {
+                    if (vSamples[k] < vSamples[k - 1]) vSamples[k] = vSamples[k - 1]
+                }
+            }
+
+            if (mode == "NORMAL") {
+                val vEnd = vSamples[last]
+                val vApex = vSamples[slowIdx]
+                if (vSamples[0] < vEnd * 0.8) {
+                    val scale = (vEnd * 0.8) / max(vSamples[0], 1e-6)
+                    for (k in 0..slowIdx) vSamples[k] *= scale
+                }
+                if (vSamples[0] < vApex * 2.0) {
+                    val scale = (vApex * 2.0) / max(vSamples[0], 1e-6)
+                    for (k in 0..slowIdx) vSamples[k] *= scale
+                }
+            }
+        }
+
+        private fun applyVisualTail(vSamples: DoubleArray, slowPoint: Double, tailBoost: Double) {
+            if (tailBoost == 0.0 || vSamples.size <= 2) return
+            val last = vSamples.size - 1
+            val slowIdx = (slowPoint * last).toInt().coerceIn(0, last)
+            if (slowIdx + 1 > last) return
             for (k in (slowIdx + 1)..last) {
                 val progress = (k - slowIdx).toDouble() / max(1, last - slowIdx)
                 vSamples[k] *= max(0.2, 1.0 + tailBoost * progress)

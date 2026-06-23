@@ -68,7 +68,6 @@ import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
-import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionParameters
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import kotlinx.coroutines.Dispatchers
@@ -254,7 +253,7 @@ private suspend fun exportVideoWithTrajectory(
     val model = TrajectoryMotionModel(
         bezier = selection.flightCurve.bezierPath,
         timing = timing,
-        params = TrajectoryMotionParameters.preset(selection.style.trajectoryPreset),
+        params = TrajectoryMotionModel.parametersFromStyle(selection.style),
     )
 
     // 输出文件
@@ -393,10 +392,7 @@ private fun drawTrajectoryOnCanvas(
     height: Float,
     timing: TrajectoryTiming,
 ) {
-    val motionProgress = model.progressAtTime(elapsedSec)
-    val headProgress = com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
-        .progress(motionProgress, style.speedLevel)
-        .toFloat()
+    val headProgress = model.progressAtTime(elapsedSec).toFloat()
         .coerceIn(0f, 1f)
     if (headProgress <= 0f) return
 

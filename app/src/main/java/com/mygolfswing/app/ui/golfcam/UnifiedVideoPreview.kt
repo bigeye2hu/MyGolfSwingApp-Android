@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -451,7 +452,7 @@ private fun FlightCurveOverlay(
                 ) { change, _ ->
                     val w = size.width.toFloat(); val h = size.height.toFloat()
                     val newX = (change.position.x / w).coerceIn(0.02f, 0.98f)
-                    val newY = (change.position.y / h).coerceIn(0.02f, 0.98f)
+                    val newY = (change.position.y / h).coerceIn(-0.5f, 1.2f)
                     if (dragging == 1) { cp1x = newX; cp1y = newY }
                     else if (dragging == 2) { cp2x = newX; cp2y = newY }
                 }
@@ -466,11 +467,7 @@ private fun FlightCurveOverlay(
         drawLine(Color.White.copy(alpha = 0.35f), p0, p1, strokeWidth = 1.5f)
         drawLine(Color.White.copy(alpha = 0.35f), p3, p2, strokeWidth = 1.5f)
 
-        val path = Path().apply {
-            moveTo(p0.x, p0.y)
-            cubicTo(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y)
-        }
-        drawPath(path, color = DSColors.fairway, style = Stroke(width = 3.5f, cap = StrokeCap.Round))
+        drawGolfCamCurveStroke(p0 = p0, p1 = p1, p2 = p2, p3 = p3)
 
         drawCircle(Color.White.copy(alpha = 0.9f), 9f, p0)
         drawCircle(Color.White.copy(alpha = 0.9f), 9f, p3)
@@ -496,8 +493,8 @@ private fun suggestedGolfCamControlPoints(
     val p1X = 0.08f
     val p2X = 0.32f
     val p1Y = 0.56f
-    val baseLift = 0.26f
-    val xLift = 0.26f
+    val baseLift = 0.07f
+    val xLift = 0.20f
     val topReference = minOf(start.y, end.y)
     val lift = maxOf(baseLift, baseLift + horizontal * xLift)
     val handleY = maxOf(0.04f, topReference - lift)
@@ -516,7 +513,85 @@ private fun suggestedGolfCamControlPoints(
 private fun clampPoint(point: NormalizedPoint): NormalizedPoint {
     return NormalizedPoint(
         x = point.x.coerceIn(0.02f, 0.98f),
-        y = point.y.coerceIn(0.02f, 0.98f),
+        y = point.y.coerceIn(-0.5f, 1.2f),
+    )
+}
+
+private fun DrawScope.drawGolfCamCurveStroke(
+    p0: Offset,
+    p1: Offset,
+    p2: Offset,
+    p3: Offset,
+    segments: Int = 180,
+) {
+    for (index in 0 until segments) {
+        val start = cubicPoint(index.toFloat() / segments, p0, p1, p2, p3)
+        val end = cubicPoint((index + 1).toFloat() / segments, p0, p1, p2, p3)
+        drawLine(
+            color = Color.Black.copy(alpha = 0.14f),
+            start = start,
+            end = end,
+            strokeWidth = foregroundCurveWidth(index, segments) + 1.1f,
+            cap = StrokeCap.Butt,
+        )
+    }
+
+    for (index in 0 until segments) {
+        val start = cubicPoint(index.toFloat() / segments, p0, p1, p2, p3)
+        val end = cubicPoint((index + 1).toFloat() / segments, p0, p1, p2, p3)
+        drawLine(
+            color = curveSegmentColor(index, segments),
+            start = start,
+            end = end,
+            strokeWidth = foregroundCurveWidth(index, segments),
+            cap = StrokeCap.Butt,
+        )
+    }
+}
+
+private fun foregroundCurveWidth(index: Int, segments: Int): Float {
+    val t = index.toFloat() / maxOf(1, segments - 1)
+    val launchFullness = Math.pow((1f - t).toDouble(), 1.05).toFloat()
+    return 1.15f + launchFullness * 5.35f
+}
+
+private fun curveSegmentColor(index: Int, segments: Int): Color {
+    val t = index.toDouble() / maxOf(1, segments - 1)
+    val brightness = Math.pow(t, 0.85)
+    val opacity = 0.24 + brightness * 0.72
+    val color = if (t < 0.42) {
+        interpolateRgb(Rgb(0.08, 0.23, 0.18), Rgb(0.25, 0.62, 0.49), t / 0.42)
+    } else {
+        interpolateRgb(Rgb(0.25, 0.62, 0.49), Rgb(0.55, 0.96, 0.82), (t - 0.42) / 0.58)
+    }
+    return Color(
+        red = color.r.toFloat(),
+        green = color.g.toFloat(),
+        blue = color.b.toFloat(),
+        alpha = opacity.toFloat(),
+    )
+}
+
+private data class Rgb(val r: Double, val g: Double, val b: Double)
+
+private fun interpolateRgb(a: Rgb, b: Rgb, amount: Double): Rgb {
+    val t = amount.coerceIn(0.0, 1.0)
+    return Rgb(
+        r = a.r + (b.r - a.r) * t,
+        g = a.g + (b.g - a.g) * t,
+        b = a.b + (b.b - a.b) * t,
+    )
+}
+
+private fun cubicPoint(t: Float, p0: Offset, p1: Offset, p2: Offset, p3: Offset): Offset {
+    val u = 1f - t
+    val tt = t * t
+    val uu = u * u
+    val uuu = uu * u
+    val ttt = tt * t
+    return Offset(
+        x = uuu * p0.x + 3f * uu * t * p1.x + 3f * u * tt * p2.x + ttt * p3.x,
+        y = uuu * p0.y + 3f * uu * t * p1.y + 3f * u * tt * p2.y + ttt * p3.y,
     )
 }
 

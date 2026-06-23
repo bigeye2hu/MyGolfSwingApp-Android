@@ -93,7 +93,7 @@ fun TrajectoryAnimationOverlay(
         TrajectoryMotionModel(
             bezier = bezier,
             timing = timing,
-            params = com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionParameters.preset(style.trajectoryPreset),
+            params = TrajectoryMotionModel.parametersFromStyle(style),
         )
     }
 
@@ -101,10 +101,7 @@ fun TrajectoryAnimationOverlay(
     val baseWidth = 8f * (style.widthPct / 50.0).toFloat()
     val totalDurSec = timing.totalDurationSec
 
-    val motionProgress = model.progressAtTime(elapsedMs / 1000.0)
-    val headProgress = GolfCamSpeedConfig
-        .progress(motionProgress, style.speedLevel)
-        .toFloat()
+    val headProgress = model.progressAtTime(elapsedMs / 1000.0).toFloat()
 
     val tailProgress = remember(headProgress, style.tailHalfLife, totalDurSec) {
         // tailHalfLife 范围 5~100，映射为占总时长的百分比

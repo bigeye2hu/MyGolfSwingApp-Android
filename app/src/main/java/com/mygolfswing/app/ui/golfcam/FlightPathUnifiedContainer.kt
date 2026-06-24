@@ -73,6 +73,7 @@ import com.mygolfswing.app.ui.golfcam.steps.ImpactPositionStepTool
 import com.mygolfswing.app.ui.golfcam.steps.LandingStepTool
 import com.mygolfswing.app.ui.golfcam.steps.TrackStyleStepTool
 import com.mygolfswing.app.ui.golfcam.steps.TrimStepTool
+import kotlinx.coroutines.delay
 
 internal data class ImpactCandidateDetectionKey(
     val trimStartMs: Long,
@@ -109,6 +110,7 @@ fun FlightPathUnifiedContainer(
     var flightCurveFrameRate by remember { mutableStateOf<Double?>(null) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var videoFrameRate by remember { mutableStateOf(30.0) }
+    var trimPreviewPositionMs by remember { mutableLongStateOf(0L) }
     // 音频检测候选帧
     var candidateFrames by remember { mutableStateOf<List<CandidateImpactFrame>>(emptyList()) }
     var candidateDetectionKey by remember { mutableStateOf<ImpactCandidateDetectionKey?>(null) }
@@ -150,6 +152,13 @@ fun FlightPathUnifiedContainer(
             updateFrameRate()
         }
         onDispose { player.removeListener(listener) }
+    }
+
+    LaunchedEffect(currentStep, player) {
+        while (currentStep == GolfCamStep.TRIM) {
+            trimPreviewPositionMs = player.currentPosition.coerceAtLeast(0L)
+            delay(100L)
+        }
     }
 
     // 裁剪完成后触发音频检测，候选帧索引按真实视频帧率换算。
@@ -252,7 +261,11 @@ fun FlightPathUnifiedContainer(
                         videoUri = videoUri,
                         durationMs = durationMs,
                         savedTrimResult = state.trimResult,
-                        onSeek = { timeMs -> player.seekTo(timeMs) },
+                        currentTimeMs = trimPreviewPositionMs,
+                        onSeek = { timeMs ->
+                            trimPreviewPositionMs = timeMs
+                            player.seekTo(timeMs)
+                        },
                         onResult = { state.trimResult = it },
                     )
                     GolfCamStep.IMPACT_FRAME -> ImpactFrameStepTool(

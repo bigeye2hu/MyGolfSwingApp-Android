@@ -106,6 +106,27 @@ internal fun trimSeekTimeMs(durationMs: Long, fraction: Float): Long {
     return (fraction.coerceIn(0f, 1f) * durationMs).toLong().coerceIn(0L, durationMs)
 }
 
+internal fun trimPlayheadFraction(
+    durationMs: Long,
+    currentTimeMs: Long,
+    startFraction: Float,
+    endFraction: Float,
+): Float? {
+    if (durationMs <= 0L) return null
+    val currentFraction = (currentTimeMs.toFloat() / durationMs).coerceIn(0f, 1f)
+    return if (currentFraction in startFraction..endFraction) currentFraction else null
+}
+
+internal fun trimPlayheadSeekTimeMs(
+    durationMs: Long,
+    fraction: Float,
+    startFraction: Float,
+    endFraction: Float,
+): Long {
+    val clampedFraction = fraction.coerceIn(startFraction, endFraction)
+    return trimSeekTimeMs(durationMs, clampedFraction)
+}
+
 /**
  * 步骤 1：视频裁剪。
  * 设计：缩略图条 + 两端白色把手（iOS 风格），整体左右保留安全边距规避系统手势区。
@@ -115,6 +136,7 @@ fun TrimStepTool(
     videoUri: Uri,
     durationMs: Long,
     savedTrimResult: TrimResult? = null,
+    currentTimeMs: Long = 0L,
     onSeek: ((Long) -> Unit)? = null,
     onResult: (TrimResult) -> Unit,
 ) {
@@ -175,6 +197,7 @@ fun TrimStepTool(
         VideoTrimBar(
             videoUri = videoUri,
             durationMs = durationMs,
+            currentTimeMs = currentTimeMs,
             startFraction = startFraction,
             endFraction = endFraction,
             onStartChange = { fraction ->
@@ -185,6 +208,7 @@ fun TrimStepTool(
                 endFraction = fraction
                 onSeek?.invoke(trimSeekTimeMs(durationMs, fraction))
             },
+            onPlayheadSeek = { timeMs -> onSeek?.invoke(timeMs) },
         )
 
         // 提示文字
@@ -206,16 +230,18 @@ fun TrimStepTool(
 
 // ─── 主控件 ───────────────────────────────────────────────────────────────────
 
-private enum class DragTarget { START, END }
+private enum class DragTarget { START, END, PLAYHEAD }
 
 @Composable
 private fun VideoTrimBar(
     videoUri: Uri,
     durationMs: Long,
+    currentTimeMs: Long,
     startFraction: Float,
     endFraction: Float,
     onStartChange: (Float) -> Unit,
     onEndChange: (Float) -> Unit,
+    onPlayheadSeek: (Long) -> Unit,
 ) {
     val context = LocalContext.current
     var thumbnails by remember(videoUri) { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
@@ -253,6 +279,8 @@ private fun VideoTrimBar(
         val barWidthPx = with(density) { maxWidth.toPx() }
         val handleWPx = with(density) { HANDLE_W.toPx() }
         val touchZone = with(density) { (HANDLE_W + HANDLE_TOUCH_EXTRA).toPx() }
+        val playheadTouchZone = with(density) { 14.dp.toPx() }
+        val playheadFraction = trimPlayheadFraction(durationMs, currentTimeMs, startFraction, endFraction)
 
         // 记录当前拖哪个把手
         var activeDrag by remember { mutableStateOf<DragTarget?>(null) }
@@ -268,15 +296,18 @@ private fun VideoTrimBar(
                     if (thumbnails.isNotEmpty()) drawThumbnails(thumbnails, size)
                     drawDimOverlay(startFraction, endFraction, size)
                     drawSelectionBorder(startFraction, endFraction, size, handleWPx)
+                    playheadFraction?.let { drawPlayhead(it, size) }
                 }
-                .pointerInput(barWidthPx, touchZone) {
+                .pointerInput(barWidthPx, touchZone, playheadFraction, startFraction, endFraction) {
                     detectDragGestures(
                         onDragStart = { offset ->
                             val startX = startFraction * barWidthPx
                             val endX = endFraction * barWidthPx
+                            val playheadX = playheadFraction?.let { it * barWidthPx }
                             activeDrag = when {
                                 abs(offset.x - startX) <= touchZone -> DragTarget.START
                                 abs(offset.x - endX) <= touchZone -> DragTarget.END
+                                playheadX != null && abs(offset.x - playheadX) <= playheadTouchZone -> DragTarget.PLAYHEAD
                                 else -> null
                             }
                         },
@@ -289,6 +320,8 @@ private fun VideoTrimBar(
                                     onStartChange(clampTrimStartFraction(newFraction, endFraction, durationMs))
                                 DragTarget.END ->
                                     onEndChange(clampTrimEndFraction(newFraction, startFraction, durationMs))
+                                DragTarget.PLAYHEAD ->
+                                    onPlayheadSeek(trimPlayheadSeekTimeMs(durationMs, newFraction, startFraction, endFraction))
                             }
                         },
                         onDragEnd = { activeDrag = null },
@@ -388,6 +421,24 @@ private fun DrawScope.drawSelectionBorder(
         Offset(startX + handleWPx / 2, canvasSize.height - stroke / 2),
         Offset(endX - handleWPx / 2, canvasSize.height - stroke / 2),
         stroke,
+    )
+}
+
+private fun DrawScope.drawPlayhead(fraction: Float, canvasSize: Size) {
+    val x = fraction.coerceIn(0f, 1f) * canvasSize.width
+    val top = 2.dp.toPx()
+    val bottom = canvasSize.height - 2.dp.toPx()
+    drawLine(
+        Color.Black.copy(alpha = 0.50f),
+        Offset(x, top),
+        Offset(x, bottom),
+        strokeWidth = 4.dp.toPx(),
+    )
+    drawLine(
+        Color.White,
+        Offset(x, top),
+        Offset(x, bottom),
+        strokeWidth = 2.dp.toPx(),
     )
 }
 

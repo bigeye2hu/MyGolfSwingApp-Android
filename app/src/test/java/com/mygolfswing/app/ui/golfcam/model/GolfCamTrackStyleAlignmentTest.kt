@@ -16,6 +16,8 @@ import com.mygolfswing.app.ui.golfcam.steps.defaultTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.initialTrimFractions
 import com.mygolfswing.app.ui.golfcam.steps.initialImpactFrameIndex
 import com.mygolfswing.app.ui.golfcam.steps.minimumTrimFraction
+import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadFraction
+import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadSeekTimeMs
 import com.mygolfswing.app.ui.golfcam.steps.trimSeekTimeMs
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
@@ -441,6 +443,17 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(5_000L, trimSeekTimeMs(durationMs = 20_000L, fraction = 0.25f))
         assertEquals(20_000L, trimSeekTimeMs(durationMs = 20_000L, fraction = 1.25f))
         assertEquals(0L, trimSeekTimeMs(durationMs = 0L, fraction = 0.5f))
+    }
+
+    @Test
+    fun trimPlayheadMatchesIosSelectedRangeRules() {
+        assertEquals(0.30f, trimPlayheadFraction(20_000L, 6_000L, 0.25f, 0.75f) ?: -1f, 1e-6f)
+        assertEquals(null, trimPlayheadFraction(20_000L, 4_000L, 0.25f, 0.75f))
+        assertEquals(null, trimPlayheadFraction(20_000L, 16_000L, 0.25f, 0.75f))
+
+        assertEquals(5_000L, trimPlayheadSeekTimeMs(20_000L, 0.10f, 0.25f, 0.75f))
+        assertEquals(8_000L, trimPlayheadSeekTimeMs(20_000L, 0.40f, 0.25f, 0.75f))
+        assertEquals(15_000L, trimPlayheadSeekTimeMs(20_000L, 0.90f, 0.25f, 0.75f))
     }
 
     @Test

@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,7 +38,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -63,7 +63,6 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.ImpactFrameSelection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -238,7 +237,6 @@ private fun FrameFilmstrip(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
 
     // 缩略图缓存
     var thumbnails by remember(videoUri, startMs, thumbCount) { mutableStateOf<List<android.graphics.Bitmap?>>(List(thumbCount) { null }) }
@@ -290,17 +288,18 @@ private fun FrameFilmstrip(
          }
     }
 
-    // 代码改帧时滚动轨道
-    LaunchedEffect(currentFrame) {
-        val targetThumb = frameToThumbIndex(currentFrame)
-        if (!listState.isScrollInProgress) {
-            scope.launch { listState.animateScrollToItem(targetThumb) }
-        }
-    }
-
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val cellWPx = with(density) { CELL_W.toPx() }
-        val sidePad = (maxWidth - CELL_W) / 2  // 使第一/最后一张可滚到中心
+        val sidePad = ((maxWidth - CELL_W) / 2).coerceAtLeast(0.dp)  // 使第一/最后一张可滚到中心
+        val sidePadPx = with(density) { sidePad.toPx().toInt() }
+        val snapFlingBehavior = rememberSnapFlingBehavior(listState)
+
+        // 代码改帧时滚动轨道，并和 iOS .centeredHorizontally 一样把目标缩略图居中。
+        LaunchedEffect(currentFrame, sidePadPx) {
+            val targetThumb = frameToThumbIndex(currentFrame)
+            if (!listState.isScrollInProgress) {
+                listState.animateScrollToItem(targetThumb, scrollOffset = -sidePadPx)
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -317,6 +316,7 @@ private fun FrameFilmstrip(
             Box(modifier = Modifier.weight(1f)) {
                 LazyRow(
                     state = listState,
+                    flingBehavior = snapFlingBehavior,
                     contentPadding = PaddingValues(horizontal = sidePad),
                     horizontalArrangement = Arrangement.spacedBy(CELL_GAP),
                     modifier = Modifier

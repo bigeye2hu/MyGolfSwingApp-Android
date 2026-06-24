@@ -104,12 +104,32 @@ import kotlin.math.roundToInt
 private data class VideoPlaybackConfig(
     val frameRate: Double = 30.0,
     val aspectRatio: Float = 9f / 16f,
+    val visualWidth: Int = 1080,
+    val visualHeight: Int = 1920,
 )
 
 internal data class ExportVideoDimensions(
     val width: Int,
     val height: Int,
 )
+
+internal enum class ExportResolution(val displayName: String, val landscapeWidth: Int, val landscapeHeight: Int) {
+    HD_1080P("1080p", 1920, 1080),
+    UHD_4K("4K", 3840, 2160);
+
+    fun dimensions(isPortrait: Boolean): ExportVideoDimensions {
+        return if (isPortrait) {
+            ExportVideoDimensions(width = landscapeHeight, height = landscapeWidth)
+        } else {
+            ExportVideoDimensions(width = landscapeWidth, height = landscapeHeight)
+        }
+    }
+
+    fun displaySize(isPortrait: Boolean): String {
+        val size = dimensions(isPortrait)
+        return "${size.width} × ${size.height}"
+    }
+}
 
 internal data class ExportTrimRange(
     val startMs: Long,
@@ -131,6 +151,10 @@ internal fun exportVideoDimensions(rawWidth: Int, rawHeight: Int, rotationDegree
     } else {
         ExportVideoDimensions(width = safeWidth, height = safeHeight)
     }
+}
+
+internal fun targetExportVideoDimensions(resolution: ExportResolution, isPortrait: Boolean): ExportVideoDimensions {
+    return resolution.dimensions(isPortrait)
 }
 
 internal fun effectiveExportFrameRotation(
@@ -185,6 +209,8 @@ fun GolfCamOverlayPreviewScreen(
     var exportDone by remember { mutableStateOf(false) }
     var videoConfig by remember { mutableStateOf(VideoPlaybackConfig()) }
     var showPlaybackButton by remember { mutableStateOf(true) }
+    var showExportSettings by remember { mutableStateOf(false) }
+    var selectedExportResolution by remember { mutableStateOf(ExportResolution.HD_1080P) }
 
     LaunchedEffect(videoUri) {
         videoConfig = withContext(Dispatchers.IO) {
@@ -249,10 +275,16 @@ fun GolfCamOverlayPreviewScreen(
     val playbackProgress = (previewPositionMs.toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
     val impactProgress = (previewImpactMs.toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
     val landingProgress = ((previewImpactMs + flightTimeMs).toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
+    val isPortrait = videoConfig.visualHeight >= videoConfig.visualWidth
+    val isSource4K = max(videoConfig.visualWidth, videoConfig.visualHeight) >= 3800
 
     Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
         Column(modifier = Modifier.fillMaxSize()) {
-            PreviewTopBar(onDismiss = onDismiss)
+            PreviewTopBar(
+                selectedResolution = selectedExportResolution,
+                onDismiss = onDismiss,
+                onSettings = { showExportSettings = true },
+            )
 
             BoxWithConstraints(
                 modifier = Modifier
@@ -349,6 +381,8 @@ fun GolfCamOverlayPreviewScreen(
                                     timing = timing,
                                     trimStartMs = trimStartMs,
                                     trimEndMs = trimEndMs,
+                                    exportResolution = selectedExportResolution,
+                                    isPortrait = isPortrait,
                                     onProgress = { exportProgress = it },
                                 )
                                 exportDone = true
@@ -360,11 +394,25 @@ fun GolfCamOverlayPreviewScreen(
                 },
             )
         }
+
+        if (showExportSettings) {
+            ExportSettingsOverlay(
+                selectedResolution = selectedExportResolution,
+                isSource4K = isSource4K,
+                isPortrait = isPortrait,
+                onSelect = { selectedExportResolution = it },
+                onDismiss = { showExportSettings = false },
+            )
+        }
     }
 }
 
 @Composable
-private fun PreviewTopBar(onDismiss: () -> Unit) {
+private fun PreviewTopBar(
+    selectedResolution: ExportResolution,
+    onDismiss: () -> Unit,
+    onSettings: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -386,19 +434,19 @@ private fun PreviewTopBar(onDismiss: () -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("轨迹总览", color = DSColors.inkGreen, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             Text(
-                "HD",
-                color = Color.White,
+                if (selectedResolution == ExportResolution.UHD_4K) "4K" else "HD",
+                color = if (selectedResolution == ExportResolution.UHD_4K) Color.Black else Color.White,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .clip(RoundedCornerShape(4.dp))
-                    .background(DSColors.fairway)
+                    .background(if (selectedResolution == ExportResolution.UHD_4K) DSColors.trophyGold else DSColors.fairway)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
         Spacer(modifier = Modifier.weight(1f))
         IconButton(
-            onClick = {},
+            onClick = onSettings,
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
@@ -406,6 +454,144 @@ private fun PreviewTopBar(onDismiss: () -> Unit) {
         ) {
             Icon(Icons.Filled.Settings, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(20.dp))
         }
+    }
+}
+
+@Composable
+private fun ExportSettingsOverlay(
+    selectedResolution: ExportResolution,
+    isSource4K: Boolean,
+    isPortrait: Boolean,
+    onSelect: (ExportResolution) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.34f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(DSColors.warmWhite)
+                .clickable {}
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp)
+                .padding(top = 24.dp, bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(DSColors.mistGreen.copy(alpha = 0.92f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Download, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(25.dp))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("导出设置", color = DSColors.inkGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("选择导出视频的分辨率", color = DSColors.shadowGray, fontSize = 14.sp)
+            }
+            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ExportResolutionOption(
+                    resolution = ExportResolution.HD_1080P,
+                    selected = selectedResolution == ExportResolution.HD_1080P,
+                    available = true,
+                    reason = null,
+                    isPortrait = isPortrait,
+                    onSelect = onSelect,
+                )
+                ExportResolutionOption(
+                    resolution = ExportResolution.UHD_4K,
+                    selected = selectedResolution == ExportResolution.UHD_4K,
+                    available = isSource4K,
+                    reason = if (isSource4K) null else "需要4K源视频",
+                    isPortrait = isPortrait,
+                    onSelect = onSelect,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("当前选择:", color = DSColors.shadowGray, fontSize = 14.sp)
+                Text(selectedResolution.displayName, color = DSColors.inkGreen, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                "完成",
+                color = DSColors.fairway,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(DSColors.mistGreen.copy(alpha = 0.72f))
+                    .clickable { onDismiss() }
+                    .padding(horizontal = 28.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportResolutionOption(
+    resolution: ExportResolution,
+    selected: Boolean,
+    available: Boolean,
+    reason: String?,
+    isPortrait: Boolean,
+    onSelect: (ExportResolution) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) DSColors.mistGreen.copy(alpha = 0.92f) else DSColors.cardWhite)
+            .clickable(enabled = available) { onSelect(resolution) }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    resolution.displayName,
+                    color = if (available) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.55f),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (resolution == ExportResolution.UHD_4K) {
+                    Text(
+                        "4K",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (available) DSColors.trophyGold else DSColors.shadowGray.copy(alpha = 0.45f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Text(
+                resolution.displaySize(isPortrait),
+                color = if (available) DSColors.shadowGray else DSColors.shadowGray.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+            )
+            reason?.let {
+                Text(it, color = Color(0xFFB95D4D), fontSize = 11.sp)
+            }
+        }
+        Text(
+            when {
+                selected -> "✓"
+                available -> "○"
+                else -> "锁"
+            },
+            color = if (selected) DSColors.fairway else if (available) DSColors.shadowGray.copy(alpha = 0.45f) else DSColors.shadowGray.copy(alpha = 0.55f),
+            fontSize = if (selected) 24.sp else 18.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -682,6 +868,8 @@ private suspend fun exportVideoWithTrajectory(
     timing: TrajectoryTiming,
     trimStartMs: Long,
     trimEndMs: Long?,
+    exportResolution: ExportResolution,
+    isPortrait: Boolean,
     onProgress: (Float) -> Unit,
 ) = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
@@ -690,7 +878,7 @@ private suspend fun exportVideoWithTrajectory(
     val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1280
     val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 720
     val rotationDegrees = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
-    val exportSize = exportVideoDimensions(rawWidth = rawWidth, rawHeight = rawHeight, rotationDegrees = rotationDegrees)
+    val exportSize = targetExportVideoDimensions(exportResolution, isPortrait)
     val width = exportSize.width
     val height = exportSize.height
     val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 3000L
@@ -1030,6 +1218,8 @@ private fun drawTrajectoryOnCanvas(
 }
 
 private fun readVideoPlaybackConfig(context: Context, videoUri: Uri): VideoPlaybackConfig {
+    var visualWidth = 1080
+    var visualHeight = 1920
     val aspectRatio = runCatching {
         val retriever = MediaMetadataRetriever()
         try {
@@ -1039,6 +1229,8 @@ private fun readVideoPlaybackConfig(context: Context, videoUri: Uri): VideoPlayb
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
             val width = if (rotation == 90 || rotation == 270) rawHeight else rawWidth
             val height = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
+            visualWidth = width.coerceAtLeast(1)
+            visualHeight = height.coerceAtLeast(1)
             width.toFloat() / height.coerceAtLeast(1).toFloat()
         } finally {
             retriever.release()
@@ -1055,6 +1247,8 @@ private fun readVideoPlaybackConfig(context: Context, videoUri: Uri): VideoPlayb
                 return VideoPlaybackConfig(
                     frameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE).coerceIn(1, 120).toDouble(),
                     aspectRatio = aspectRatio,
+                    visualWidth = visualWidth,
+                    visualHeight = visualHeight,
                 )
             }
         }
@@ -1064,7 +1258,7 @@ private fun readVideoPlaybackConfig(context: Context, videoUri: Uri): VideoPlayb
     } finally {
         extractor.release()
     }
-    return VideoPlaybackConfig(frameRate = frameRate, aspectRatio = aspectRatio)
+    return VideoPlaybackConfig(frameRate = frameRate, aspectRatio = aspectRatio, visualWidth = visualWidth, visualHeight = visualHeight)
 }
 
 private fun trackColorWithAlpha(argb: Long, alpha: Float): Int {

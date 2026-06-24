@@ -2,6 +2,7 @@ package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.ImpactCandidateDetectionKey
+import com.mygolfswing.app.ui.golfcam.ExportResolution
 import com.mygolfswing.app.ui.golfcam.effectiveExportFrameRotation
 import com.mygolfswing.app.ui.golfcam.exportTrimRange
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
@@ -10,6 +11,7 @@ import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
 import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
 import com.mygolfswing.app.ui.golfcam.shouldReuseImpactCandidates
+import com.mygolfswing.app.ui.golfcam.targetExportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
 import com.mygolfswing.app.ui.golfcam.steps.defaultTrimEndFraction
@@ -321,6 +323,23 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(1920, portrait90.height)
         assertEquals(1080, portrait270.width)
         assertEquals(1920, portrait270.height)
+    }
+
+    @Test
+    fun targetExportResolutionMatchesIosOrientationRules() {
+        val landscape1080 = targetExportVideoDimensions(ExportResolution.HD_1080P, isPortrait = false)
+        val portrait1080 = targetExportVideoDimensions(ExportResolution.HD_1080P, isPortrait = true)
+        val landscape4k = targetExportVideoDimensions(ExportResolution.UHD_4K, isPortrait = false)
+        val portrait4k = targetExportVideoDimensions(ExportResolution.UHD_4K, isPortrait = true)
+
+        assertEquals(1920, landscape1080.width)
+        assertEquals(1080, landscape1080.height)
+        assertEquals(1080, portrait1080.width)
+        assertEquals(1920, portrait1080.height)
+        assertEquals(3840, landscape4k.width)
+        assertEquals(2160, landscape4k.height)
+        assertEquals(2160, portrait4k.width)
+        assertEquals(3840, portrait4k.height)
     }
 
     @Test

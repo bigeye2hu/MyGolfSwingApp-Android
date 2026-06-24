@@ -829,7 +829,7 @@ object GolfCamSpeedConfig {
 // ─── 轨迹样式（对齐 iOS TrackStyle）──────────────────────────────────────────────
 
 object GolfCamDistanceConfig {
-    const val MIN_DISTANCE = 0.0
+    const val MIN_DISTANCE = 10.0
     const val MAX_DISTANCE = 1000.0
     const val MAX_INPUT_DIGITS = 4
 

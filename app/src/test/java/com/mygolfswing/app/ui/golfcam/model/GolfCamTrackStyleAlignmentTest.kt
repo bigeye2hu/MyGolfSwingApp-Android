@@ -204,8 +204,10 @@ class GolfCamTrackStyleAlignmentTest {
 
     @Test
     fun distanceConfigMatchesIosCloudAndUiRange() {
-        assertEquals(0.0, GolfCamDistanceConfig.clamp(-10.0), 0.0)
+        assertEquals(10.0, GolfCamDistanceConfig.clamp(-10.0), 0.0)
+        assertEquals(10.0, GolfCamDistanceConfig.clamp(1.0), 0.0)
         assertEquals(1000.0, GolfCamDistanceConfig.clamp(1200.0), 0.0)
+        assertEquals("10", GolfCamDistanceConfig.inputText("1"))
         assertEquals("1000", GolfCamDistanceConfig.inputText("10000"))
         assertEquals("150", GolfCamDistanceConfig.inputText("150yd"))
         assertEquals("", GolfCamDistanceConfig.inputText(""))

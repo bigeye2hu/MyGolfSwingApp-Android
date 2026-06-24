@@ -5,6 +5,7 @@ import com.mygolfswing.app.ui.golfcam.ImpactCandidateDetectionKey
 import com.mygolfswing.app.ui.golfcam.ExportResolution
 import com.mygolfswing.app.ui.golfcam.effectiveExportFrameRotation
 import com.mygolfswing.app.ui.golfcam.exportTrimRange
+import com.mygolfswing.app.ui.golfcam.exportSaveFailureMessage
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.isAudioMimeType
 import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
@@ -348,6 +349,15 @@ class GolfCamTrackStyleAlignmentTest {
     fun exportedFileOpensPreviewBeforeGallerySave() {
         assertFalse(shouldOpenExportPreview(null))
         assertTrue(shouldOpenExportPreview(File("GolfSwing_preview.mp4")))
+    }
+
+    @Test
+    fun exportSaveFailuresKeepPreviewOpenWithUserVisibleMessage() {
+        assertEquals(
+            "保存失败：权限被拒绝",
+            exportSaveFailureMessage(IllegalStateException("权限被拒绝")),
+        )
+        assertEquals("保存失败：未知错误", exportSaveFailureMessage(Throwable()))
     }
 
     @Test

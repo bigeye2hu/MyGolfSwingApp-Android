@@ -162,6 +162,10 @@ internal fun shouldOpenExportPreview(exportedFile: File?): Boolean {
     return exportedFile != null
 }
 
+internal fun exportSaveFailureMessage(error: Throwable): String {
+    return "保存失败：${error.message ?: "未知错误"}"
+}
+
 internal fun effectiveExportFrameRotation(
     metadataRotationDegrees: Int,
     frameWidth: Int,
@@ -218,6 +222,7 @@ fun GolfCamOverlayPreviewScreen(
     var selectedExportResolution by remember { mutableStateOf(ExportResolution.HD_1080P) }
     var exportedVideoFile by remember { mutableStateOf<File?>(null) }
     var savingExport by remember { mutableStateOf(false) }
+    var exportSaveMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(videoUri) {
         videoConfig = withContext(Dispatchers.IO) {
@@ -392,6 +397,7 @@ fun GolfCamOverlayPreviewScreen(
                                     isPortrait = isPortrait,
                                     onProgress = { exportProgress = it },
                                 ).also { exportedVideoFile = it }
+                                exportSaveMessage = null
                             } finally {
                                 exporting = false
                             }
@@ -415,19 +421,25 @@ fun GolfCamOverlayPreviewScreen(
             ExportPreviewOverlay(
                 videoFile = file,
                 saving = savingExport,
+                saveMessage = exportSaveMessage,
                 onDismiss = {
                     file.delete()
                     exportedVideoFile = null
+                    exportSaveMessage = null
                 },
+                onClearSaveMessage = { exportSaveMessage = null },
                 onSave = {
                     if (!savingExport) {
                         scope.launch {
                             savingExport = true
+                            exportSaveMessage = null
                             try {
                                 saveExportedVideoToGallery(context, file)
                                 exportDone = true
                                 file.delete()
                                 exportedVideoFile = null
+                            } catch (error: Throwable) {
+                                exportSaveMessage = exportSaveFailureMessage(error)
                             } finally {
                                 savingExport = false
                             }
@@ -570,7 +582,9 @@ private fun ExportSettingsOverlay(
 private fun ExportPreviewOverlay(
     videoFile: File,
     saving: Boolean,
+    saveMessage: String?,
     onDismiss: () -> Unit,
+    onClearSaveMessage: () -> Unit,
     onSave: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -644,6 +658,50 @@ private fun ExportPreviewOverlay(
                 ) {
                     CircularProgressIndicator(color = Color.White)
                     Text("正在保存到相册...", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        saveMessage?.let { message ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.46f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 32.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(DSColors.cardWhite)
+                        .padding(horizontal = 24.dp, vertical = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Text(
+                        "保存结果",
+                        color = DSColors.inkGreen,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        message,
+                        color = DSColors.shadowGray,
+                        fontSize = 15.sp,
+                        lineHeight = 21.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DSColors.inkGreen)
+                            .clickable { onClearSaveMessage() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("确定", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -1160,15 +1218,16 @@ private suspend fun saveExportedVideoToGallery(
         }
     }
     val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-    uri?.let { destUri ->
-        context.contentResolver.openOutputStream(destUri)?.use { out ->
-            outputFile.inputStream().copyTo(out)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.clear()
-            values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            context.contentResolver.update(destUri, values, null, null)
-        }
+        ?: error("无法创建相册文件")
+
+    context.contentResolver.openOutputStream(uri)?.use { out ->
+        outputFile.inputStream().copyTo(out)
+    } ?: error("无法写入相册文件")
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        values.clear()
+        values.put(MediaStore.Video.Media.IS_PENDING, 0)
+        context.contentResolver.update(uri, values, null, null)
     }
 }
 

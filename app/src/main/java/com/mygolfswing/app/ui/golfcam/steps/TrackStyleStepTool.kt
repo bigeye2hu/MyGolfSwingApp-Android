@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -226,6 +227,12 @@ private fun ColorContent(
             Box(
                 modifier = Modifier
                     .size(34.dp)
+                    .shadow(
+                        elevation = 4.dp,
+                        shape = CircleShape,
+                        ambientColor = Color(style.colorPreset.bandOuterColor()).copy(alpha = 0.16f),
+                        spotColor = Color(style.colorPreset.bandOuterColor()).copy(alpha = 0.24f),
+                    )
                     .clip(CircleShape)
                     .background(Brush.linearGradient(style.colorPreset.gradientColors.map { Color(it) }))
                     .border(2.dp, Color.White.copy(alpha = 0.92f), CircleShape),
@@ -259,10 +266,17 @@ private fun ColorContent(
         ) {
             items(presets) { preset ->
                 val selected = preset.name == style.colorPreset.name
+                val glowColor = Color(preset.bandOuterColor())
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(44.dp)
+                        .shadow(
+                            elevation = if (selected) 7.dp else 3.dp,
+                            shape = CircleShape,
+                            ambientColor = glowColor.copy(alpha = if (selected) 0.34f else 0.12f),
+                            spotColor = glowColor.copy(alpha = if (selected) 0.52f else 0.20f),
+                        )
                         .border(
                             width = if (selected) 2.dp else 0.dp,
                             color = Color.White.copy(alpha = if (selected) 0.90f else 0f),
@@ -287,7 +301,7 @@ private fun ColorContent(
                             imageVector = Icons.Filled.Check,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(12.dp),
                         )
                     }
                 }

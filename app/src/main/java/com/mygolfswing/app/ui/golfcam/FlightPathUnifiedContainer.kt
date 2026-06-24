@@ -252,6 +252,7 @@ fun FlightPathUnifiedContainer(
                         videoUri = videoUri,
                         durationMs = durationMs,
                         savedTrimResult = state.trimResult,
+                        onSeek = { timeMs -> player.seekTo(timeMs) },
                         onResult = { state.trimResult = it },
                     )
                     GolfCamStep.IMPACT_FRAME -> ImpactFrameStepTool(

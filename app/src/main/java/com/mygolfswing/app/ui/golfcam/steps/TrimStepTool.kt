@@ -101,6 +101,11 @@ internal fun initialTrimFractions(durationMs: Long, saved: TrimResult?): Pair<Fl
         (savedEnd.toFloat() / durationMs).coerceIn(0f, 1f)
 }
 
+internal fun trimSeekTimeMs(durationMs: Long, fraction: Float): Long {
+    if (durationMs <= 0L) return 0L
+    return (fraction.coerceIn(0f, 1f) * durationMs).toLong().coerceIn(0L, durationMs)
+}
+
 /**
  * 步骤 1：视频裁剪。
  * 设计：缩略图条 + 两端白色把手（iOS 风格），整体左右保留安全边距规避系统手势区。
@@ -110,6 +115,7 @@ fun TrimStepTool(
     videoUri: Uri,
     durationMs: Long,
     savedTrimResult: TrimResult? = null,
+    onSeek: ((Long) -> Unit)? = null,
     onResult: (TrimResult) -> Unit,
 ) {
     val initialFractions = remember(durationMs) { initialTrimFractions(durationMs, savedTrimResult) }
@@ -171,8 +177,14 @@ fun TrimStepTool(
             durationMs = durationMs,
             startFraction = startFraction,
             endFraction = endFraction,
-            onStartChange = { startFraction = it },
-            onEndChange = { endFraction = it },
+            onStartChange = { fraction ->
+                startFraction = fraction
+                onSeek?.invoke(trimSeekTimeMs(durationMs, fraction))
+            },
+            onEndChange = { fraction ->
+                endFraction = fraction
+                onSeek?.invoke(trimSeekTimeMs(durationMs, fraction))
+            },
         )
 
         // 提示文字

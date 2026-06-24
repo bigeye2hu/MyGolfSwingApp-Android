@@ -96,6 +96,8 @@ fun GolfCamTrajectoryEntry(
                 videoUri = uri,
                 selection = lastSelection!!,
                 impactTimeMs = lastImpactTimeMs,
+                trimStartMs = state.trimResult?.startMs ?: 0L,
+                trimEndMs = state.trimResult?.endMs,
                 onDismiss = onDismiss,
                 onReEdit = { showPreview = false },
             )

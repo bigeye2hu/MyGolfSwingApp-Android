@@ -100,6 +100,13 @@ internal data class ExportVideoDimensions(
     val height: Int,
 )
 
+internal data class ExportTrimRange(
+    val startMs: Long,
+    val endMs: Long,
+) {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(1L)
+}
+
 private data class AudioTrackInfo(
     val sourceTrackIndex: Int,
     val format: MediaFormat,
@@ -131,6 +138,17 @@ internal fun effectiveExportFrameRotation(
 
 internal fun isAudioMimeType(mime: String?): Boolean = mime?.startsWith("audio/") == true
 
+internal fun exportTrimRange(
+    trimStartMs: Long,
+    trimEndMs: Long?,
+    sourceDurationMs: Long,
+): ExportTrimRange {
+    val safeDuration = sourceDurationMs.coerceAtLeast(1L)
+    val start = trimStartMs.coerceIn(0L, (safeDuration - 1L).coerceAtLeast(0L))
+    val end = (trimEndMs ?: safeDuration).coerceIn(start + 1L, safeDuration)
+    return ExportTrimRange(startMs = start, endMs = end)
+}
+
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
  * 播放带轨迹叠加的视频，可导出为 MP4 保存到相册。
@@ -140,6 +158,8 @@ fun GolfCamOverlayPreviewScreen(
     videoUri: Uri,
     selection: TrackStyleSelection,
     impactTimeMs: Long = 0L,
+    trimStartMs: Long = 0L,
+    trimEndMs: Long? = null,
     onDismiss: () -> Unit,
     onReEdit: () -> Unit,
 ) {
@@ -159,19 +179,32 @@ fun GolfCamOverlayPreviewScreen(
         }
     }
 
-    val impactMs = impactTimeMs
+    val previewImpactMs = (impactTimeMs - trimStartMs).coerceAtLeast(0L)
     val flightTimeMs = (selection.flightCurve.landingPoint.flightTimeSec * 1000)
         .toLong()
         .coerceAtLeast(500L)
     val timing = TrajectoryTiming(
-        impactTimeMs = impactMs,
-        landingTimeMs = impactMs + flightTimeMs,
+        impactTimeMs = previewImpactMs,
+        landingTimeMs = previewImpactMs + flightTimeMs,
         fps = videoConfig.frameRate,
     )
 
-    val player = remember {
+    val player = remember(videoUri, trimStartMs, trimEndMs) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(videoUri))
+            val mediaItem = if (trimStartMs > 0L || trimEndMs != null) {
+                MediaItem.Builder()
+                    .setUri(videoUri)
+                    .setClippingConfiguration(
+                        MediaItem.ClippingConfiguration.Builder()
+                            .setStartPositionMs(trimStartMs.coerceAtLeast(0L))
+                            .apply { trimEndMs?.let { setEndPositionMs(it.coerceAtLeast(trimStartMs + 1L)) } }
+                            .build(),
+                    )
+                    .build()
+            } else {
+                MediaItem.fromUri(videoUri)
+            }
+            setMediaItem(mediaItem)
             prepare()
             repeatMode = Player.REPEAT_MODE_ONE
         }
@@ -183,7 +216,7 @@ fun GolfCamOverlayPreviewScreen(
     }
     LaunchedEffect(playing) {
         while (playing) {
-            elapsedMs = (player.currentPosition - impactMs).coerceAtLeast(0L)
+            elapsedMs = (player.currentPosition - previewImpactMs).coerceAtLeast(0L)
             delay(16L)
         }
     }
@@ -284,6 +317,8 @@ fun GolfCamOverlayPreviewScreen(
                                         videoUri = videoUri,
                                         selection = selection,
                                         timing = timing,
+                                        trimStartMs = trimStartMs,
+                                        trimEndMs = trimEndMs,
                                         onProgress = { exportProgress = it },
                                     )
                                     exportDone = true
@@ -314,6 +349,8 @@ private suspend fun exportVideoWithTrajectory(
     videoUri: Uri,
     selection: TrackStyleSelection,
     timing: TrajectoryTiming,
+    trimStartMs: Long,
+    trimEndMs: Long?,
     onProgress: (Float) -> Unit,
 ) = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
@@ -326,6 +363,11 @@ private suspend fun exportVideoWithTrajectory(
     val width = exportSize.width
     val height = exportSize.height
     val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 3000L
+    val trimRange = exportTrimRange(
+        trimStartMs = trimStartMs,
+        trimEndMs = trimEndMs,
+        sourceDurationMs = durationMs,
+    )
     val fps = timing.fps.roundToInt().coerceIn(1, 120)
 
     val bezier = selection.flightCurve.bezierPath
@@ -364,17 +406,18 @@ private suspend fun exportVideoWithTrajectory(
     var videoTrackIndex = -1
     var muxerStarted = false
 
-    val totalFrames = (durationMs * fps / 1000).toInt().coerceAtLeast(1)
+    val totalFrames = (trimRange.durationMs * fps / 1000).toInt().coerceAtLeast(1)
     val bufferInfo = MediaCodec.BufferInfo()
 
     // 逐帧渲染
     for (frameIdx in 0 until totalFrames) {
-        val frameTimeMs = frameIdx * 1000L / fps
-        val elapsedSec = (frameTimeMs - timing.impactTimeMs).toDouble() / 1000.0
+        val outputFrameTimeMs = frameIdx * 1000L / fps
+        val sourceFrameTimeMs = trimRange.startMs + outputFrameTimeMs
+        val elapsedSec = (outputFrameTimeMs - timing.impactTimeMs).toDouble() / 1000.0
 
         // 提取原始视频帧
         val frameBitmap = retriever.getFrameAtTime(
-            frameTimeMs * 1000L,
+            sourceFrameTimeMs * 1000L,
             MediaMetadataRetriever.OPTION_CLOSEST,
         )
 
@@ -413,7 +456,7 @@ private suspend fun exportVideoWithTrajectory(
                     val buf = encoder.getOutputBuffer(outIdx) ?: run {
                         encoder.releaseOutputBuffer(outIdx, false); outputDone = true; continue
                     }
-                    bufferInfo.presentationTimeUs = frameTimeMs * 1000L
+                    bufferInfo.presentationTimeUs = outputFrameTimeMs * 1000L
                     if (muxerStarted && bufferInfo.size > 0 &&
                         bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
                     ) {
@@ -457,7 +500,8 @@ private suspend fun exportVideoWithTrajectory(
             audioTrackInfo = audioTrackInfo,
             muxer = muxer,
             muxerTrackIndex = audioMuxerTrackIndex,
-            durationUs = durationMs * 1000L,
+            trimStartUs = trimRange.startMs * 1000L,
+            trimEndUs = trimRange.endMs * 1000L,
         )
     }
     if (muxerStarted) muxer.stop()
@@ -552,12 +596,14 @@ private fun copyAudioTrackToMuxer(
     audioTrackInfo: AudioTrackInfo,
     muxer: MediaMuxer,
     muxerTrackIndex: Int,
-    durationUs: Long,
+    trimStartUs: Long,
+    trimEndUs: Long,
 ) {
     val extractor = MediaExtractor()
     try {
         extractor.setDataSource(context, videoUri, null)
         extractor.selectTrack(audioTrackInfo.sourceTrackIndex)
+        extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val maxInputSize = if (audioTrackInfo.format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
             audioTrackInfo.format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
         } else {
@@ -568,11 +614,15 @@ private fun copyAudioTrackToMuxer(
 
         while (true) {
             val sampleTimeUs = extractor.sampleTime
-            if (sampleTimeUs < 0 || sampleTimeUs > durationUs) break
+            if (sampleTimeUs < 0 || sampleTimeUs > trimEndUs) break
+            if (sampleTimeUs < trimStartUs) {
+                extractor.advance()
+                continue
+            }
             buffer.clear()
             val sampleSize = extractor.readSampleData(buffer, 0)
             if (sampleSize <= 0) break
-            info.set(0, sampleSize, sampleTimeUs, extractor.sampleFlags)
+            info.set(0, sampleSize, sampleTimeUs - trimStartUs, extractor.sampleFlags)
             muxer.writeSampleData(muxerTrackIndex, buffer, info)
             extractor.advance()
         }

@@ -2,6 +2,7 @@ package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.effectiveExportFrameRotation
+import com.mygolfswing.app.ui.golfcam.exportTrimRange
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.isAudioMimeType
 import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
@@ -364,6 +365,23 @@ class GolfCamTrackStyleAlignmentTest {
         assertTrue(isAudioMimeType("audio/3gpp"))
         assertFalse(isAudioMimeType("video/avc"))
         assertFalse(isAudioMimeType(null))
+    }
+
+    @Test
+    fun exportTrimRangeMatchesIosTrimmedDurationRules() {
+        val full = exportTrimRange(trimStartMs = 0L, trimEndMs = null, sourceDurationMs = 60_000L)
+        val clipped = exportTrimRange(trimStartMs = 10_000L, trimEndMs = 25_000L, sourceDurationMs = 60_000L)
+        val clamped = exportTrimRange(trimStartMs = 70_000L, trimEndMs = 90_000L, sourceDurationMs = 60_000L)
+
+        assertEquals(0L, full.startMs)
+        assertEquals(60_000L, full.endMs)
+        assertEquals(60_000L, full.durationMs)
+        assertEquals(10_000L, clipped.startMs)
+        assertEquals(25_000L, clipped.endMs)
+        assertEquals(15_000L, clipped.durationMs)
+        assertEquals(59_999L, clamped.startMs)
+        assertEquals(60_000L, clamped.endMs)
+        assertEquals(1L, clamped.durationMs)
     }
 
     @Test

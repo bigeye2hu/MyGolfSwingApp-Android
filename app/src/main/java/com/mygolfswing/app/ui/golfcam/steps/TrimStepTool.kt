@@ -88,6 +88,19 @@ internal fun clampTrimEndFraction(newFraction: Float, startFraction: Float, dura
     return newFraction.coerceIn(minEnd, 1f)
 }
 
+internal fun initialTrimFractions(durationMs: Long, saved: TrimResult?): Pair<Float, Float> {
+    if (durationMs <= 0L) return 0f to 1f
+    val minDurationMs = min(durationMs, MIN_TRIM_DURATION_MS)
+    val savedStart = saved?.startMs ?: return 0f to defaultTrimEndFraction(durationMs)
+    val savedEnd = saved.endMs
+    val validSavedRange = savedStart >= 0L &&
+        savedEnd <= durationMs &&
+        savedEnd - savedStart >= minDurationMs
+    if (!validSavedRange) return 0f to defaultTrimEndFraction(durationMs)
+    return (savedStart.toFloat() / durationMs).coerceIn(0f, 1f) to
+        (savedEnd.toFloat() / durationMs).coerceIn(0f, 1f)
+}
+
 /**
  * 步骤 1：视频裁剪。
  * 设计：缩略图条 + 两端白色把手（iOS 风格），整体左右保留安全边距规避系统手势区。
@@ -96,10 +109,12 @@ internal fun clampTrimEndFraction(newFraction: Float, startFraction: Float, dura
 fun TrimStepTool(
     videoUri: Uri,
     durationMs: Long,
+    savedTrimResult: TrimResult? = null,
     onResult: (TrimResult) -> Unit,
 ) {
-    var startFraction by remember(durationMs) { mutableStateOf(0f) }
-    var endFraction by remember(durationMs) { mutableStateOf(defaultTrimEndFraction(durationMs)) }
+    val initialFractions = remember(durationMs) { initialTrimFractions(durationMs, savedTrimResult) }
+    var startFraction by remember(durationMs) { mutableStateOf(initialFractions.first) }
+    var endFraction by remember(durationMs) { mutableStateOf(initialFractions.second) }
 
     LaunchedEffect(startFraction, endFraction, durationMs) {
         if (durationMs > 0L) {

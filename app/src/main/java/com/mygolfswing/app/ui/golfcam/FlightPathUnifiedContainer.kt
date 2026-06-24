@@ -233,6 +233,7 @@ fun FlightPathUnifiedContainer(
                     GolfCamStep.TRIM -> TrimStepTool(
                         videoUri = videoUri,
                         durationMs = durationMs,
+                        savedTrimResult = state.trimResult,
                         onResult = { state.trimResult = it },
                     )
                     GolfCamStep.IMPACT_FRAME -> ImpactFrameStepTool(

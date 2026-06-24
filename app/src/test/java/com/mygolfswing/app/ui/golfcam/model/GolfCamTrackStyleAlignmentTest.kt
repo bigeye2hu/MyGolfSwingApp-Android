@@ -11,6 +11,7 @@ import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
 import com.mygolfswing.app.ui.golfcam.steps.defaultTrimEndFraction
+import com.mygolfswing.app.ui.golfcam.steps.initialTrimFractions
 import com.mygolfswing.app.ui.golfcam.steps.initialImpactFrameIndex
 import com.mygolfswing.app.ui.golfcam.steps.minimumTrimFraction
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
@@ -403,6 +404,32 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(0.525f, clampTrimEndFraction(newFraction = 0.10f, startFraction = 0.50f, durationMs = 20_000L), 1e-6f)
         assertEquals(0f, clampTrimStartFraction(newFraction = 0.90f, endFraction = 1.0f, durationMs = 300L), 0f)
         assertEquals(1f, clampTrimEndFraction(newFraction = 0.10f, startFraction = 0f, durationMs = 300L), 0f)
+    }
+
+    @Test
+    fun trimStepRestoresSavedRangeBeforeFallingBackToIosDefault() {
+        val restored = initialTrimFractions(
+            durationMs = 60_000L,
+            saved = TrimResult(startMs = 8_000L, endMs = 24_000L),
+        )
+        val missing = initialTrimFractions(durationMs = 60_000L, saved = null)
+        val invalidReversed = initialTrimFractions(
+            durationMs = 60_000L,
+            saved = TrimResult(startMs = 24_000L, endMs = 8_000L),
+        )
+        val invalidTooShort = initialTrimFractions(
+            durationMs = 60_000L,
+            saved = TrimResult(startMs = 8_000L, endMs = 8_200L),
+        )
+
+        assertEquals(8_000f / 60_000f, restored.first, 1e-6f)
+        assertEquals(24_000f / 60_000f, restored.second, 1e-6f)
+        assertEquals(0f, missing.first, 0f)
+        assertEquals(0.5f, missing.second, 0f)
+        assertEquals(0f, invalidReversed.first, 0f)
+        assertEquals(0.5f, invalidReversed.second, 0f)
+        assertEquals(0f, invalidTooShort.first, 0f)
+        assertEquals(0.5f, invalidTooShort.second, 0f)
     }
 
     @Test

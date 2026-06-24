@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -984,10 +985,27 @@ private fun PreviewFunctionButton(
     devBadge: Boolean = false,
     onClick: () -> Unit = {},
 ) {
+    val buttonShape = RoundedCornerShape(16.dp)
+    val backgroundColor = when {
+        !enabled -> Color(0xFFF7F8F4)
+        primary -> DSColors.mistGreen.copy(alpha = 0.85f)
+        else -> Color(0xFFF3F7F0)
+    }
+    val borderColor = when {
+        !enabled -> DSColors.shadowGray.copy(alpha = 0.15f)
+        primary -> tint.copy(alpha = 0.58f)
+        else -> tint.copy(alpha = 0.22f)
+    }
+
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (primary) DSColors.mistGreen.copy(alpha = 0.85f) else Color(0xFFF3F7F0))
+            .clip(buttonShape)
+            .background(backgroundColor)
+            .border(
+                width = if (primary) 1.4.dp else 1.dp,
+                color = borderColor,
+                shape = buttonShape,
+            )
             .clickable(enabled = enabled) { onClick() }
             .padding(vertical = 11.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -997,9 +1015,17 @@ private fun PreviewFunctionButton(
             Box(
                 modifier = Modifier
                     .size(42.dp)
+                    .shadow(
+                        elevation = if (primary && enabled) 8.dp else 0.dp,
+                        shape = CircleShape,
+                        ambientColor = tint.copy(alpha = 0.24f),
+                        spotColor = tint.copy(alpha = 0.24f),
+                    )
                     .clip(CircleShape)
                     .background(
-                        if (primary) {
+                        if (!enabled) {
+                            Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                        } else if (primary) {
                             Brush.linearGradient(listOf(tint, DSColors.deepGreen))
                         } else {
                             Brush.linearGradient(listOf(tint.copy(alpha = 0.14f), tint.copy(alpha = 0.14f)))
@@ -1021,6 +1047,7 @@ private fun PreviewFunctionButton(
                     fontSize = 7.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
+                        .offset(x = 9.dp, y = (-5).dp)
                         .clip(RoundedCornerShape(5.dp))
                         .background(DSColors.trophyGold.copy(alpha = 0.12f))
                         .padding(horizontal = 4.dp, vertical = 2.dp),

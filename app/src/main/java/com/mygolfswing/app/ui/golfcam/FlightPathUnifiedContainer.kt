@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,7 +73,20 @@ import com.mygolfswing.app.ui.golfcam.steps.ImpactPositionStepTool
 import com.mygolfswing.app.ui.golfcam.steps.LandingStepTool
 import com.mygolfswing.app.ui.golfcam.steps.TrackStyleStepTool
 import com.mygolfswing.app.ui.golfcam.steps.TrimStepTool
-import androidx.compose.runtime.mutableIntStateOf
+
+internal data class ImpactCandidateDetectionKey(
+    val trimStartMs: Long,
+    val trimEndMs: Long,
+    val frameRate: Double,
+)
+
+internal fun shouldReuseImpactCandidates(
+    currentKey: ImpactCandidateDetectionKey?,
+    nextKey: ImpactCandidateDetectionKey,
+    candidateFrames: List<CandidateImpactFrame>,
+): Boolean {
+    return candidateFrames.isNotEmpty() && currentKey == nextKey
+}
 
 /**
  * 六步统一轨迹编辑容器（对齐 iOS FlightPathUnifiedContainer）。
@@ -97,7 +111,7 @@ fun FlightPathUnifiedContainer(
     var videoFrameRate by remember { mutableStateOf(30.0) }
     // 音频检测候选帧
     var candidateFrames by remember { mutableStateOf<List<CandidateImpactFrame>>(emptyList()) }
-    var candidateFrameRate by remember { mutableStateOf<Double?>(null) }
+    var candidateDetectionKey by remember { mutableStateOf<ImpactCandidateDetectionKey?>(null) }
     var showHelp by remember { mutableStateOf(false) }
 
     val player = remember {
@@ -141,7 +155,8 @@ fun FlightPathUnifiedContainer(
     // 裁剪完成后触发音频检测，候选帧索引按真实视频帧率换算。
     LaunchedEffect(state.trimResult, videoFrameRate) {
         val trim = state.trimResult ?: return@LaunchedEffect
-        if (candidateFrames.isNotEmpty() && candidateFrameRate == videoFrameRate) return@LaunchedEffect
+        val nextDetectionKey = ImpactCandidateDetectionKey(trim.startMs, trim.endMs, videoFrameRate)
+        if (shouldReuseImpactCandidates(candidateDetectionKey, nextDetectionKey, candidateFrames)) return@LaunchedEffect
         val startSec = trim.startMs / 1000.0
         val endSec = trim.endMs / 1000.0
         val rawCandidates = AudioImpactDetector.detect(context, videoUri, startSec, endSec)
@@ -155,7 +170,7 @@ fun FlightPathUnifiedContainer(
                 )
             }
             .sortedByDescending { it.confidence }
-        candidateFrameRate = videoFrameRate
+        candidateDetectionKey = nextDetectionKey
     }
 
     Box(

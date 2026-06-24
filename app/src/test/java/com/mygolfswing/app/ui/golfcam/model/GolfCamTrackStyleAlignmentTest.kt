@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
+import com.mygolfswing.app.ui.golfcam.ImpactCandidateDetectionKey
 import com.mygolfswing.app.ui.golfcam.effectiveExportFrameRotation
 import com.mygolfswing.app.ui.golfcam.exportTrimRange
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
@@ -8,6 +9,7 @@ import com.mygolfswing.app.ui.golfcam.isAudioMimeType
 import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
 import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
+import com.mygolfswing.app.ui.golfcam.shouldReuseImpactCandidates
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
 import com.mygolfswing.app.ui.golfcam.steps.defaultTrimEndFraction
@@ -456,6 +458,22 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(90, autoMiddleFrameAlreadyWrittenToState)
         assertEquals(24, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = candidates, totalFrames = 180))
         assertEquals(90, initialImpactFrameIndex(savedFrameIndex = autoMiddleFrameAlreadyWrittenToState, candidateFrames = candidates, totalFrames = 180))
+    }
+
+    @Test
+    fun impactCandidateDetectionCacheIsScopedToTrimRangeAndFrameRate() {
+        val oldKey = ImpactCandidateDetectionKey(trimStartMs = 1_000L, trimEndMs = 6_000L, frameRate = 60.0)
+        val sameKey = ImpactCandidateDetectionKey(trimStartMs = 1_000L, trimEndMs = 6_000L, frameRate = 60.0)
+        val changedTrim = ImpactCandidateDetectionKey(trimStartMs = 2_000L, trimEndMs = 7_000L, frameRate = 60.0)
+        val changedFrameRate = ImpactCandidateDetectionKey(trimStartMs = 1_000L, trimEndMs = 6_000L, frameRate = 30.0)
+        val candidates = listOf(
+            CandidateImpactFrame(frameIndex = 12, confidence = 0.90f, timeSec = 0.2),
+        )
+
+        assertTrue(shouldReuseImpactCandidates(oldKey, sameKey, candidates))
+        assertFalse(shouldReuseImpactCandidates(oldKey, changedTrim, candidates))
+        assertFalse(shouldReuseImpactCandidates(oldKey, changedFrameRate, candidates))
+        assertFalse(shouldReuseImpactCandidates(oldKey, sameKey, emptyList()))
     }
 
     @Test

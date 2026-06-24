@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,17 +26,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,11 +59,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -168,10 +179,12 @@ fun GolfCamOverlayPreviewScreen(
 
     var playing by remember { mutableStateOf(true) }  // 进入预览页自动播放
     var elapsedMs by remember { mutableLongStateOf(0L) }
+    var previewPositionMs by remember { mutableLongStateOf(0L) }
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf(false) }
     var videoConfig by remember { mutableStateOf(VideoPlaybackConfig()) }
+    var showPlaybackButton by remember { mutableStateOf(true) }
 
     LaunchedEffect(videoUri) {
         videoConfig = withContext(Dispatchers.IO) {
@@ -214,15 +227,40 @@ fun GolfCamOverlayPreviewScreen(
     LaunchedEffect(playing) {
         if (playing) player.play() else player.pause()
     }
-    LaunchedEffect(playing) {
-        while (playing) {
-            elapsedMs = (player.currentPosition - previewImpactMs).coerceAtLeast(0L)
-            delay(16L)
+    LaunchedEffect(player, previewImpactMs) {
+        while (true) {
+            previewPositionMs = player.currentPosition.coerceAtLeast(0L)
+            elapsedMs = (previewPositionMs - previewImpactMs).coerceAtLeast(0L)
+            delay(33L)
+        }
+    }
+    LaunchedEffect(playing, showPlaybackButton) {
+        if (playing && showPlaybackButton) {
+            delay(3000L)
+            showPlaybackButton = false
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    val clippedDurationMs = remember(trimStartMs, trimEndMs, player.duration) {
+        val fromTrim = trimEndMs?.let { (it - trimStartMs).coerceAtLeast(1L) }
+        val playerDuration = player.duration.takeIf { it > 0L }
+        fromTrim ?: playerDuration ?: 1L
+    }
+    val playbackProgress = (previewPositionMs.toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
+    val impactProgress = (previewImpactMs.toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
+    val landingProgress = ((previewImpactMs + flightTimeMs).toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
+
+    Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            PreviewTopBar(onDismiss = onDismiss)
+
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
             val displaySize = VideoDisplayGeometry.fit(
                 containerWidth = maxWidth.value,
                 containerHeight = maxHeight.value,
@@ -232,14 +270,19 @@ fun GolfCamOverlayPreviewScreen(
             Box(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(displaySize.width.dp, displaySize.height.dp),
+                    .size(displaySize.width.dp, displaySize.height.dp)
+                    .shadow(16.dp, RoundedCornerShape(18.dp), ambientColor = Color.Black.copy(alpha = 0.10f), spotColor = Color.Black.copy(alpha = 0.12f))
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color.Black),
             ) {
                 AndroidView(
                     factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(Unit) {
-                            detectTapGestures { playing = !playing }
+                            detectTapGestures {
+                                showPlaybackButton = !showPlaybackButton
+                            }
                         },
                 )
 
@@ -250,96 +293,384 @@ fun GolfCamOverlayPreviewScreen(
                     playing = playing,
                     elapsedMs = elapsedMs,
                 )
+
+                if (showPlaybackButton) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.42f))
+                            .clickable {
+                                playing = !playing
+                                showPlaybackButton = true
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                }
             }
         }
 
-        // 顶部栏
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = Color.White)
-            }
-            Text("预览", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f).padding(start = 4.dp))
-        }
-
-        // 底部操作栏
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.6f))
-                .navigationBarsPadding()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (exporting) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("正在导出...", color = Color.White, fontSize = 13.sp)
-                    LinearProgressIndicator(
-                        progress = { exportProgress },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = DSColors.fairway,
-                        trackColor = Color.White.copy(alpha = 0.2f),
-                    )
-                }
-            } else if (exportDone) {
-                Text("✅ 已保存到相册", color = DSColors.fairway, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Button(
-                    onClick = onReEdit,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.15f)),
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Icon(Icons.Filled.Edit, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("重新编辑", color = Color.White)
-                }
-                Button(
-                    onClick = {
-                        if (!exporting && !exportDone) {
-                            scope.launch {
-                                exporting = true
-                                exportProgress = 0f
-                                try {
-                                    exportVideoWithTrajectory(
-                                        context = context,
-                                        videoUri = videoUri,
-                                        selection = selection,
-                                        timing = timing,
-                                        trimStartMs = trimStartMs,
-                                        trimEndMs = trimEndMs,
-                                        onProgress = { exportProgress = it },
-                                    )
-                                    exportDone = true
-                                } finally {
-                                    exporting = false
-                                }
+            PreviewBottomPanel(
+                playbackProgress = playbackProgress,
+                impactProgress = impactProgress,
+                landingProgress = landingProgress,
+                currentTimeMs = previewPositionMs,
+                totalTimeMs = clippedDurationMs,
+                playing = playing,
+                exporting = exporting,
+                exportProgress = exportProgress,
+                exportDone = exportDone,
+                onTogglePlay = {
+                    playing = !playing
+                    showPlaybackButton = true
+                },
+                onEditFlightPath = onReEdit,
+                onExport = {
+                    if (!exporting && !exportDone) {
+                        scope.launch {
+                            exporting = true
+                            exportProgress = 0f
+                            player.pause()
+                            playing = false
+                            showPlaybackButton = true
+                            try {
+                                exportVideoWithTrajectory(
+                                    context = context,
+                                    videoUri = videoUri,
+                                    selection = selection,
+                                    timing = timing,
+                                    trimStartMs = trimStartMs,
+                                    trimEndMs = trimEndMs,
+                                    onProgress = { exportProgress = it },
+                                )
+                                exportDone = true
+                            } finally {
+                                exporting = false
                             }
                         }
-                    },
-                    enabled = !exporting && !exportDone,
-                    colors = ButtonDefaults.buttonColors(containerColor = DSColors.fairway),
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Icon(Icons.Filled.Download, null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("保存到相册", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
+                    }
+                },
+            )
         }
     }
+}
+
+@Composable
+private fun PreviewTopBar(onDismiss: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .background(DSColors.warmWhite)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(DSColors.mistGreen.copy(alpha = 0.76f)),
+        ) {
+            Icon(Icons.Filled.Home, contentDescription = null, tint = DSColors.inkGreen, modifier = Modifier.size(21.dp))
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("轨迹总览", color = DSColors.inkGreen, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "HD",
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(DSColors.fairway)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        IconButton(
+            onClick = {},
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(DSColors.mistGreen.copy(alpha = 0.76f)),
+        ) {
+            Icon(Icons.Filled.Settings, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun PreviewBottomPanel(
+    playbackProgress: Float,
+    impactProgress: Float,
+    landingProgress: Float,
+    currentTimeMs: Long,
+    totalTimeMs: Long,
+    playing: Boolean,
+    exporting: Boolean,
+    exportProgress: Float,
+    exportDone: Boolean,
+    onTogglePlay: () -> Unit,
+    onEditFlightPath: () -> Unit,
+    onExport: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(16.dp, RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.08f))
+            .background(DSColors.cardWhite)
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp)
+            .padding(top = 12.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        PreviewProgressBar(
+            playbackProgress = playbackProgress,
+            impactProgress = impactProgress,
+            landingProgress = landingProgress,
+            currentTimeMs = currentTimeMs,
+            totalTimeMs = totalTimeMs,
+            playing = playing,
+            onTogglePlay = onTogglePlay,
+        )
+
+        if (exporting) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("正在导出视频...", color = DSColors.inkGreen, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                LinearProgressIndicator(
+                    progress = { exportProgress },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = DSColors.fairway,
+                    trackColor = DSColors.mistGreen,
+                )
+            }
+        } else if (exportDone) {
+            Text("已保存到相册", color = DSColors.fairway, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            PreviewFunctionButton(
+                title = "飞行轨迹",
+                icon = Icons.AutoMirrored.Filled.ShowChart,
+                tint = DSColors.fairway,
+                onClick = onEditFlightPath,
+                modifier = Modifier.weight(1f),
+            )
+            PreviewFunctionButton(
+                title = "杆头轨迹",
+                icon = Icons.Filled.Edit,
+                tint = Color(0xFF3E8FA5),
+                devBadge = true,
+                enabled = false,
+                modifier = Modifier.weight(1f),
+            )
+            PreviewFunctionButton(
+                title = "裁剪",
+                icon = Icons.Filled.ContentCut,
+                tint = DSColors.trophyGold,
+                devBadge = true,
+                enabled = false,
+                modifier = Modifier.weight(1f),
+            )
+            PreviewFunctionButton(
+                title = "导出",
+                icon = Icons.Filled.Download,
+                tint = DSColors.fairway,
+                primary = true,
+                enabled = !exporting && !exportDone,
+                onClick = onExport,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewProgressBar(
+    playbackProgress: Float,
+    impactProgress: Float,
+    landingProgress: Float,
+    currentTimeMs: Long,
+    totalTimeMs: Long,
+    playing: Boolean,
+    onTogglePlay: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(32.dp)) {
+            val markerWidth = 42.dp
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(DSColors.shadowGray.copy(alpha = 0.28f)),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(playbackProgress.coerceIn(0f, 1f))
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Brush.horizontalGradient(listOf(DSColors.fairway, DSColors.leafGreen))),
+            )
+            KeyTimeMarker(
+                label = "击球",
+                progress = impactProgress,
+                color = DSColors.trophyGold,
+                markerWidth = markerWidth,
+                containerWidth = maxWidth,
+            )
+            KeyTimeMarker(
+                label = "落点",
+                progress = landingProgress,
+                color = DSColors.fairway,
+                markerWidth = markerWidth,
+                containerWidth = maxWidth,
+            )
+        }
+
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TimeLabel(title = "当前", value = formatPreviewTime(currentTimeMs), alignment = TextAlign.Start)
+            Spacer(modifier = Modifier.weight(1f))
+            Row(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(DSColors.fairway)
+                    .clickable { onTogglePlay() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
+                Text(if (playing) "播放中" else "点击播放", color = Color.White, fontSize = 10.sp)
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            TimeLabel(title = "总时长", value = formatPreviewTime(totalTimeMs), alignment = TextAlign.End)
+        }
+    }
+}
+
+@Composable
+private fun KeyTimeMarker(
+    label: String,
+    progress: Float,
+    color: Color,
+    markerWidth: androidx.compose.ui.unit.Dp,
+    containerWidth: androidx.compose.ui.unit.Dp,
+) {
+    val safeProgress = progress.coerceIn(0f, 1f)
+    val left = (containerWidth - markerWidth) * safeProgress
+    Column(
+        modifier = Modifier
+            .offset(x = left.coerceAtLeast(0.dp))
+            .width(markerWidth)
+            .padding(bottom = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            label,
+            color = color,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(DSColors.cardWhite.copy(alpha = 0.96f))
+                .padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+        Box(modifier = Modifier.size(width = 2.dp, height = 12.dp).background(color))
+    }
+}
+
+@Composable
+private fun TimeLabel(title: String, value: String, alignment: TextAlign) {
+    Column(horizontalAlignment = if (alignment == TextAlign.End) Alignment.End else Alignment.Start) {
+        Text(title, color = DSColors.shadowGray, fontSize = 9.sp)
+        Text(value, color = DSColors.inkGreen.copy(alpha = 0.78f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun PreviewFunctionButton(
+    title: String,
+    icon: ImageVector,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    enabled: Boolean = true,
+    devBadge: Boolean = false,
+    onClick: () -> Unit = {},
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (primary) DSColors.mistGreen.copy(alpha = 0.85f) else Color(0xFFF3F7F0))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 11.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(contentAlignment = Alignment.TopEnd) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (primary) {
+                            Brush.linearGradient(listOf(tint, DSColors.deepGreen))
+                        } else {
+                            Brush.linearGradient(listOf(tint.copy(alpha = 0.14f), tint.copy(alpha = 0.14f)))
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (!enabled) DSColors.shadowGray.copy(alpha = 0.45f) else if (primary) Color.White else tint,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            if (devBadge) {
+                Text(
+                    "稍后",
+                    color = DSColors.trophyGold,
+                    fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(DSColors.trophyGold.copy(alpha = 0.12f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                )
+            }
+        }
+        Text(
+            title,
+            color = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
+            fontSize = 12.sp,
+            fontWeight = if (primary) FontWeight.Bold else FontWeight.SemiBold,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+private fun formatPreviewTime(ms: Long): String {
+    return "%.1fs".format(ms.coerceAtLeast(0L) / 1000.0)
 }
 
 // ─── 视频导出（逐帧渲染轨迹叠加）─────────────────────────────────────────────────

@@ -2,6 +2,8 @@ package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
+import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
+import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
@@ -257,6 +259,24 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(0f, normalizedVideoCoordinate(10f, 0f), 0f)
         assertEquals(0.5f, normalizedVideoCoordinate(500f, 1000f), 0f)
         assertEquals(1f, normalizedVideoCoordinate(1200f, 1000f), 0f)
+    }
+
+    @Test
+    fun landingMarkerAnchorCompensatesIosCustomImageOffset() {
+        assertEquals(0.506f, normalizedLandingCoordinate(500f, 1000f, markerSizePx = 24f), 1e-6f)
+        assertEquals(1f, normalizedLandingCoordinate(998f, 1000f, markerSizePx = 24f), 0f)
+        assertEquals(0f, normalizedLandingCoordinate(-10f, 1000f, markerSizePx = 24f), 0f)
+    }
+
+    @Test
+    fun curveControlDragClampMatchesIosUnifiedFlowRange() {
+        val topLeft = clampedCurveControlPoint(-500f, -900f, 1000f, 1000f)
+        val bottomRight = clampedCurveControlPoint(1600f, 1800f, 1000f, 1000f)
+
+        assertEquals(0.02f, topLeft.x, 0f)
+        assertEquals(-0.5f, topLeft.y, 0f)
+        assertEquals(0.98f, bottomRight.x, 0f)
+        assertEquals(1.2f, bottomRight.y, 0f)
     }
 
     @Test

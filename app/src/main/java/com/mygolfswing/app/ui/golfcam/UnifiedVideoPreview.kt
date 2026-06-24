@@ -67,12 +67,34 @@ import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryStaticOverlay
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.coroutines.delay
-import kotlin.math.abs
 
 internal fun normalizedVideoCoordinate(positionPx: Float, dimensionPx: Float): Float {
     if (dimensionPx <= 0f) return 0f
     return (positionPx / dimensionPx).coerceIn(0f, 1f)
 }
+
+internal fun normalizedLandingCoordinate(
+    positionPx: Float,
+    dimensionPx: Float,
+    markerSizePx: Float,
+): Float {
+    return normalizedVideoCoordinate(
+        positionPx + markerSizePx * LANDING_MARKER_ANCHOR_RATIO,
+        dimensionPx,
+    )
+}
+
+internal fun clampedCurveControlPoint(
+    xPx: Float,
+    yPx: Float,
+    widthPx: Float,
+    heightPx: Float,
+): NormalizedPoint {
+    if (widthPx <= 0f || heightPx <= 0f) return NormalizedPoint(0.5f, 0.5f)
+    return GolfCamCurveSpec.clampPoint(NormalizedPoint(xPx / widthPx, yPx / heightPx))
+}
+
+private const val LANDING_MARKER_ANCHOR_RATIO = 0.25f
 
 /**
  * 视频预览 + 步骤叠加交互层（对齐 iOS UnifiedVideoPreview）。
@@ -413,52 +435,71 @@ private fun LandingOverlay(
     val landing = state.landing
     val nx = landing?.normalizedX ?: 0.5f
     val ny = landing?.normalizedY ?: 0.5f
+    var isDragging by remember { mutableStateOf(false) }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
+        val markerSizePx = with(density) { 24.dp.toPx() }
+        val dragRadiusPx = with(density) { 50.dp.toPx() }
+        val visualCx = nx * wPx
+        val visualCy = ny * hPx - markerSizePx * LANDING_MARKER_ANCHOR_RATIO
 
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
+                    detectTapGestures(
+                        onDoubleTap = { offset ->
                             onLandingChange?.invoke(
                                 normalizedVideoCoordinate(offset.x, wPx),
-                                normalizedVideoCoordinate(offset.y, hPx),
+                                normalizedLandingCoordinate(offset.y, hPx, markerSizePx),
                             )
                         },
-                    ) { change, _ ->
-                        change.consume()
-                        onLandingChange?.invoke(
-                            normalizedVideoCoordinate(change.position.x, wPx),
-                            normalizedVideoCoordinate(change.position.y, hPx),
-                        )
-                    }
+                    )
                 }
-                .pointerInput(Unit) {
-                    detectTapGestures { offset ->
-                        onLandingChange?.invoke(
-                            normalizedVideoCoordinate(offset.x, wPx),
-                            normalizedVideoCoordinate(offset.y, hPx),
-                        )
+                .pointerInput(nx, ny, markerSizePx) {
+                    var hitDrag = false
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            val dx = offset.x - visualCx
+                            val dy = offset.y - visualCy
+                            hitDrag = (dx * dx + dy * dy) <= dragRadiusPx * dragRadiusPx
+                            isDragging = hitDrag
+                        },
+                        onDragEnd = { hitDrag = false; isDragging = false },
+                        onDragCancel = { hitDrag = false; isDragging = false },
+                    ) { change, _ ->
+                        if (hitDrag) {
+                            change.consume()
+                            onLandingChange?.invoke(
+                                normalizedVideoCoordinate(change.position.x, wPx),
+                                normalizedLandingCoordinate(change.position.y, hPx, markerSizePx),
+                            )
+                        }
                     }
                 },
         ) {
             val cx = nx * size.width
-            val cy = ny * size.height
-            val outerRadius = 18.dp.toPx()
-            val innerRadius = 11.dp.toPx()
+            val anchorOffset = markerSizePx * LANDING_MARKER_ANCHOR_RATIO
+            val cy = ny * size.height - anchorOffset
+            val outerRadius = 16.dp.toPx()
+            val innerRadius = 9.dp.toPx()
             val strokeWidth = 2.dp.toPx()
-            val d = 4.dp.toPx()
-            drawCircle(color = DSColors.fairway.copy(alpha = 0.22f), radius = outerRadius, center = Offset(cx, cy))
-            drawCircle(color = DSColors.fairway, radius = innerRadius, center = Offset(cx, cy), style = Stroke(strokeWidth))
+            val d = 3.5.dp.toPx()
+            val landingPurple = Color(0xFF8B5CF6)
+            if (isDragging) {
+                drawCircle(Color.White.copy(alpha = 0.62f), radius = 22.dp.toPx(), center = Offset(cx, cy), style = Stroke(2.5.dp.toPx()))
+            }
+            drawCircle(color = Color.Black.copy(alpha = 0.24f), radius = outerRadius, center = Offset(cx, cy + 1.5.dp.toPx()))
+            drawCircle(color = landingPurple.copy(alpha = 0.22f), radius = outerRadius, center = Offset(cx, cy))
+            drawCircle(color = landingPurple, radius = innerRadius, center = Offset(cx, cy), style = Stroke(strokeWidth))
             val path = Path().apply {
                 moveTo(cx, cy - d); lineTo(cx + d, cy); lineTo(cx, cy + d); lineTo(cx - d, cy); close()
             }
-            drawPath(path, color = DSColors.fairway)
+            drawPath(path, color = landingPurple)
+            drawCircle(color = Color.White, radius = 2.5.dp.toPx(), center = Offset(cx, cy + anchorOffset))
         }
     }
 }
@@ -498,46 +539,108 @@ private fun FlightCurveOverlay(
         onFlightCurveChange?.invoke(NormalizedPoint(cp1x, cp1y), NormalizedPoint(cp2x, cp2y))
     }
 
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val wPx = with(density) { maxWidth.toPx() }
+        val hPx = with(density) { maxHeight.toPx() }
+        val touchTargetDp = 60.dp
+        val touchTargetPx = with(density) { touchTargetDp.toPx() }
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width; val h = size.height
+            val p0 = Offset(impact.normalizedX * w, impact.normalizedY * h)
+            val p1 = Offset(cp1x * w, cp1y * h)
+            val p2 = Offset(cp2x * w, cp2y * h)
+            val p3 = Offset(landing.normalizedX * w, landing.normalizedY * h)
+
+            drawLine(Color.White.copy(alpha = 0.35f), p0, p1, strokeWidth = 1.5f)
+            drawLine(Color.White.copy(alpha = 0.35f), p3, p2, strokeWidth = 1.5f)
+
+            drawGolfCamCurveStroke(p0 = p0, p1 = p1, p2 = p2, p3 = p3)
+
+            drawCircle(Color.White.copy(alpha = 0.9f), 4.5.dp.toPx(), p0)
+            drawCircle(Color(0xFF8B5CF6).copy(alpha = 0.9f), 4.5.dp.toPx(), p3)
+            drawCurveControlMarker(center = p1, dragging = dragging == 1)
+            drawCurveControlMarker(center = p2, dragging = dragging == 2)
+        }
+
+        CurveControlHitTarget(
+            centerX = cp1x * wPx,
+            centerY = cp1y * hPx,
+            targetSize = touchTargetDp,
+            onDragStart = { dragging = 1 },
+            onDragEnd = { dragging = null },
+            onDrag = { dragAmount ->
+                val next = clampedCurveControlPoint(
+                    xPx = cp1x * wPx + dragAmount.x,
+                    yPx = cp1y * hPx + dragAmount.y,
+                    widthPx = wPx,
+                    heightPx = hPx,
+                )
+                cp1x = next.x
+                cp1y = next.y
+            },
+            modifier = Modifier.offset {
+                IntOffset((cp1x * wPx - touchTargetPx / 2f).toInt(), (cp1y * hPx - touchTargetPx / 2f).toInt())
+            },
+        )
+        CurveControlHitTarget(
+            centerX = cp2x * wPx,
+            centerY = cp2y * hPx,
+            targetSize = touchTargetDp,
+            onDragStart = { dragging = 2 },
+            onDragEnd = { dragging = null },
+            onDrag = { dragAmount ->
+                val next = clampedCurveControlPoint(
+                    xPx = cp2x * wPx + dragAmount.x,
+                    yPx = cp2y * hPx + dragAmount.y,
+                    widthPx = wPx,
+                    heightPx = hPx,
+                )
+                cp2x = next.x
+                cp2y = next.y
+            },
+            modifier = Modifier.offset {
+                IntOffset((cp2x * wPx - touchTargetPx / 2f).toInt(), (cp2y * hPx - touchTargetPx / 2f).toInt())
+            },
+        )
+    }
+}
+
+@Composable
+private fun CurveControlHitTarget(
+    centerX: Float,
+    centerY: Float,
+    targetSize: androidx.compose.ui.unit.Dp,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
+    onDrag: (Offset) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(targetSize)
+            .pointerInput(centerX, centerY) {
                 detectDragGestures(
-                    onDragStart = { offset ->
-                        val w = size.width.toFloat(); val h = size.height.toFloat()
-                        val d1 = abs(offset.x - cp1x * w) + abs(offset.y - cp1y * h)
-                        val d2 = abs(offset.x - cp2x * w) + abs(offset.y - cp2y * h)
-                        dragging = if (d1 < d2) 1 else 2
-                    },
-                    onDragEnd = { dragging = null },
-                ) { change, _ ->
+                    onDragStart = { onDragStart() },
+                    onDragEnd = onDragEnd,
+                    onDragCancel = onDragEnd,
+                ) { change, dragAmount ->
                     change.consume()
-                    val w = size.width.toFloat(); val h = size.height.toFloat()
-                    val newX = (change.position.x / w).coerceIn(0.02f, 0.98f)
-                    val newY = (change.position.y / h).coerceIn(-0.5f, 1.2f)
-                    if (dragging == 1) { cp1x = newX; cp1y = newY }
-                    else if (dragging == 2) { cp2x = newX; cp2y = newY }
+                    onDrag(dragAmount)
                 }
             },
-    ) {
-        val w = size.width; val h = size.height
-        val p0 = Offset(impact.normalizedX * w, impact.normalizedY * h)
-        val p1 = Offset(cp1x * w, cp1y * h)
-        val p2 = Offset(cp2x * w, cp2y * h)
-        val p3 = Offset(landing.normalizedX * w, landing.normalizedY * h)
+    )
+}
 
-        drawLine(Color.White.copy(alpha = 0.35f), p0, p1, strokeWidth = 1.5f)
-        drawLine(Color.White.copy(alpha = 0.35f), p3, p2, strokeWidth = 1.5f)
-
-        drawGolfCamCurveStroke(p0 = p0, p1 = p1, p2 = p2, p3 = p3)
-
-        drawCircle(Color.White.copy(alpha = 0.9f), 4.5.dp.toPx(), p0)
-        drawCircle(Color.White.copy(alpha = 0.9f), 4.5.dp.toPx(), p3)
-        drawCircle(DSColors.fairway.copy(alpha = 0.25f), 18.dp.toPx(), p1)
-        drawCircle(DSColors.fairway, 9.dp.toPx(), p1)
-        drawCircle(DSColors.fairway.copy(alpha = 0.25f), 18.dp.toPx(), p2)
-        drawCircle(DSColors.fairway, 9.dp.toPx(), p2)
+private fun DrawScope.drawCurveControlMarker(center: Offset, dragging: Boolean) {
+    val purple = Color(0xFF8B5CF6)
+    if (dragging) {
+        drawCircle(Color.White.copy(alpha = 0.6f), 22.dp.toPx(), center, style = Stroke(2.dp.toPx()))
     }
+    drawCircle(Color.Black.copy(alpha = 0.22f), 13.dp.toPx(), center + Offset(0f, 1.5.dp.toPx()))
+    drawCircle(Color.White, 12.dp.toPx(), center)
+    drawCircle(purple, 12.dp.toPx(), center, style = Stroke(2.dp.toPx()))
 }
 
 private fun DrawScope.drawGolfCamCurveStroke(

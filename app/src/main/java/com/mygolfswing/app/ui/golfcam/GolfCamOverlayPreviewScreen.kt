@@ -68,7 +68,6 @@ import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
-import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
@@ -514,8 +513,6 @@ private fun drawTrajectoryOnCanvas(
         elapsedSec = elapsedSec,
         legacyProgressAtTime = legacyProgressAtTime,
     ) ?: return
-    val tuning = style.renderTuning
-
     TrajectoryRibbonRenderer.draw(
         canvas = canvas,
         bezier = bezier,
@@ -529,24 +526,25 @@ private fun drawTrajectoryOnCanvas(
 
     val headX = snapshot.headPoint.x * width
     val headY = snapshot.headPoint.y * height
-    val headGlowRadius = GolfCamTrailGeometry.strokeWidth(
-        widthPct = style.widthPct,
-        videoHeight = height,
-        globalProgress = snapshot.headProgress,
-        apexProgress = snapshot.apexProgress,
-        tuning = tuning,
-    ) * 1.25f
-    val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
-    val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        this.style = android.graphics.Paint.Style.FILL
+    if (TrajectoryOverlayRenderSpec.shouldDrawFlyingHead(snapshot.headProgress)) {
+        val headGlowRadius = TrajectoryOverlayRenderSpec.headGlowRadius(
+            style = style,
+            videoHeight = height,
+            headProgress = snapshot.headProgress,
+            apexProgress = snapshot.apexProgress,
+        )
+        val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
+        val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            this.style = android.graphics.Paint.Style.FILL
+        }
+        val glowAlphas = TrajectoryOverlayRenderSpec.headGlowAlphas(glowAlpha)
+        glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.outer)
+        canvas.drawCircle(headX, headY, headGlowRadius * 1.8f, glowPaint)
+        glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.body)
+        canvas.drawCircle(headX, headY, headGlowRadius, glowPaint)
+        glowPaint.color = android.graphics.Color.argb((255 * glowAlphas.core).toInt().coerceIn(0, 255), 255, 255, 255)
+        canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
     }
-    val glowAlphas = TrajectoryOverlayRenderSpec.headGlowAlphas(glowAlpha)
-    glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.outer)
-    canvas.drawCircle(headX, headY, headGlowRadius * 1.8f, glowPaint)
-    glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.body)
-    canvas.drawCircle(headX, headY, headGlowRadius, glowPaint)
-    glowPaint.color = android.graphics.Color.argb((255 * glowAlphas.core).toInt().coerceIn(0, 255), 255, 255, 255)
-    canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
 
     snapshot.distance?.let { displayDist ->
         drawDistanceLabelOnCanvas(

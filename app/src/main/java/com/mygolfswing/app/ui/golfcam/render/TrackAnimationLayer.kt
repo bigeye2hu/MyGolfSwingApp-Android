@@ -19,7 +19,6 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
-import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
@@ -50,7 +49,12 @@ fun TrajectoryStaticOverlay(
         drawHeadGlow(
             headPoint = bezier.pointAtArcProgress(1f, arcTable),
             color = Color(style.primaryColorArgb()),
-            radius = style.headGlowRadius(videoHeight = size.height, headProgress = 1f, apexProgress = arcTable.apexProgress()),
+            radius = TrajectoryOverlayRenderSpec.headGlowRadius(
+                style = style,
+                videoHeight = size.height,
+                headProgress = 1f,
+                apexProgress = arcTable.apexProgress(),
+            ),
             alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
         )
     }
@@ -110,11 +114,16 @@ fun TrajectoryAnimationOverlay(
                 tailProgress = frame.tailProgress,
                 style = style,
             )
-            if (frame.headProgress < 1f) {
+            if (TrajectoryOverlayRenderSpec.shouldDrawFlyingHead(frame.headProgress)) {
                 drawHeadGlow(
                     headPoint = frame.headPoint,
                     color = Color(style.primaryColorArgb()),
-                    radius = style.headGlowRadius(videoHeight = size.height, headProgress = frame.headProgress, apexProgress = frame.apexProgress),
+                    radius = TrajectoryOverlayRenderSpec.headGlowRadius(
+                        style = style,
+                        videoHeight = size.height,
+                        headProgress = frame.headProgress,
+                        apexProgress = frame.apexProgress,
+                    ),
                     alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
                 )
             }
@@ -214,12 +223,3 @@ private fun DrawScope.drawDistanceLabel(
     drawText(unitMeasured, topLeft = Offset(layout.unitLeft, layout.unitTop))
     drawText(valueMeasured, topLeft = Offset(layout.valueLeft, layout.valueTop))
 }
-
-private fun TrackStyle.headGlowRadius(videoHeight: Float, headProgress: Float, apexProgress: Float): Float =
-    GolfCamTrailGeometry.strokeWidth(
-        widthPct = widthPct,
-        videoHeight = videoHeight,
-        globalProgress = headProgress,
-        apexProgress = apexProgress,
-        tuning = renderTuning,
-    ) * 1.25f

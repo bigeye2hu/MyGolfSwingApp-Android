@@ -228,10 +228,29 @@ class GolfCamTrackStyleAlignmentTest {
     @Test
     fun headGlowAlphaSpecIsSharedByPreviewAndExport() {
         val alphas = TrajectoryOverlayRenderSpec.headGlowAlphas(0.7f)
+        val style = TrackStyle(widthPct = 40.0)
 
         assertEquals(0.245f, alphas.outer, 1e-6f)
         assertEquals(0.525f, alphas.body, 1e-6f)
         assertEquals(0.63f, alphas.core, 1e-6f)
+        assertTrue(TrajectoryOverlayRenderSpec.shouldDrawFlyingHead(0.999f))
+        assertFalse(TrajectoryOverlayRenderSpec.shouldDrawFlyingHead(1f))
+        assertEquals(
+            GolfCamTrailGeometry.strokeWidth(
+                widthPct = style.widthPct,
+                videoHeight = 1080f,
+                globalProgress = 0.5f,
+                apexProgress = 0.4f,
+                tuning = style.renderTuning,
+            ) * 1.25f,
+            TrajectoryOverlayRenderSpec.headGlowRadius(
+                style = style,
+                videoHeight = 1080f,
+                headProgress = 0.5f,
+                apexProgress = 0.4f,
+            ),
+            1e-6f,
+        )
     }
 
     @Test

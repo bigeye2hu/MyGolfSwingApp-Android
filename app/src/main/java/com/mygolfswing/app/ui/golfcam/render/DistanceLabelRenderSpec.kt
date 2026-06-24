@@ -24,6 +24,7 @@ internal object DistanceLabelRenderSpec {
     fun valueFontPx(videoHeight: Float): Float = 24f * scale(videoHeight)
     fun lineSpacingPx(videoHeight: Float): Float = 2f * scale(videoHeight)
     fun shadowOffsetPx(videoHeight: Float): Float = 1f * scale(videoHeight)
+    fun shadowBlurRadiusPx(videoHeight: Float): Float = 3f * scale(videoHeight)
 
     fun isFlyingLeft(currentX: Float, previousX: Float?): Boolean {
         val previous = previousX ?: return true

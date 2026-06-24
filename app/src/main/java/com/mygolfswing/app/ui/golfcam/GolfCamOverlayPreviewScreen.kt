@@ -656,13 +656,15 @@ private fun drawDistanceLabelOnCanvas(
     )
     val shadowOffset = DistanceLabelRenderSpec.shadowOffsetPx(height)
     val shadowAlpha = (DistanceLabelRenderSpec.SHADOW_ALPHA * 255f).toInt().coerceIn(0, 255)
-    unitPaint.color = android.graphics.Color.argb(shadowAlpha, 0, 0, 0)
-    valuePaint.color = android.graphics.Color.argb(shadowAlpha, 0, 0, 0)
-    canvas.drawText(unit, layout.unitLeft + shadowOffset, layout.unitTop - unitMetrics.ascent + shadowOffset, unitPaint)
-    canvas.drawText(valueText, layout.valueLeft + shadowOffset, layout.valueTop - valueMetrics.ascent + shadowOffset, valuePaint)
+    val shadowBlur = DistanceLabelRenderSpec.shadowBlurRadiusPx(height)
+    val shadowColor = android.graphics.Color.argb(shadowAlpha, 0, 0, 0)
 
     unitPaint.color = android.graphics.Color.WHITE
     valuePaint.color = android.graphics.Color.WHITE
+    unitPaint.setShadowLayer(shadowBlur, shadowOffset, shadowOffset, shadowColor)
+    valuePaint.setShadowLayer(shadowBlur, shadowOffset, shadowOffset, shadowColor)
     canvas.drawText(unit, layout.unitLeft, layout.unitTop - unitMetrics.ascent, unitPaint)
     canvas.drawText(valueText, layout.valueLeft, layout.valueTop - valueMetrics.ascent, valuePaint)
+    unitPaint.clearShadowLayer()
+    valuePaint.clearShadowLayer()
 }

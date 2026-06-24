@@ -187,11 +187,10 @@ private fun DrawScope.drawDistanceLabel(
 ) {
     if (distance <= 0) return
     val center = Offset(headPoint.x * size.width, headPoint.y * size.height)
-    val scale = DistanceLabelRenderSpec.scale(size.height)
     val shadow = Shadow(
         color = Color.Black.copy(alpha = DistanceLabelRenderSpec.SHADOW_ALPHA),
         offset = Offset(DistanceLabelRenderSpec.shadowOffsetPx(size.height), DistanceLabelRenderSpec.shadowOffsetPx(size.height)),
-        blurRadius = 3f * scale,
+        blurRadius = DistanceLabelRenderSpec.shadowBlurRadiusPx(size.height),
     )
     val unitStyle = TextStyle(
         fontSize = DistanceLabelRenderSpec.unitFontPx(size.height).toSp(),

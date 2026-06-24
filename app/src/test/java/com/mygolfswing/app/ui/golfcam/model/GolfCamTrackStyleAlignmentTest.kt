@@ -519,6 +519,8 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(11f, DistanceLabelRenderSpec.unitFontPx(height), 0.0f)
         assertEquals(24f, DistanceLabelRenderSpec.valueFontPx(height), 0.0f)
         assertEquals(37.8f, height * DistanceLabelRenderSpec.OFFSET_RATIO, 0.001f)
+        assertEquals(1f, DistanceLabelRenderSpec.shadowOffsetPx(height), 0.0f)
+        assertEquals(3f, DistanceLabelRenderSpec.shadowBlurRadiusPx(height), 0.0f)
         assertEquals((500f - 37.8f) - metrics.unitWidth / 2f, flyingLeft.unitLeft, 0.001f)
         assertEquals((500f + 37.8f) - metrics.unitWidth / 2f, flyingRight.unitLeft, 0.001f)
         assertEquals(flyingLeft.unitTop + metrics.unitHeight + 2f, flyingLeft.valueTop, 0.001f)

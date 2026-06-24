@@ -2,6 +2,7 @@ package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
+import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -243,6 +244,14 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(2560f, portraitInTallScreen.height, 0.01f)
         assertEquals(562.5f, portraitInShortBox.width, 0.01f)
         assertEquals(1000f, portraitInShortBox.height, 0.01f)
+    }
+
+    @Test
+    fun interactiveOverlayCoordinatesClampToFullIosNormalizedRange() {
+        assertEquals(0f, normalizedVideoCoordinate(-20f, 1000f), 0f)
+        assertEquals(0f, normalizedVideoCoordinate(10f, 0f), 0f)
+        assertEquals(0.5f, normalizedVideoCoordinate(500f, 1000f), 0f)
+        assertEquals(1f, normalizedVideoCoordinate(1200f, 1000f), 0f)
     }
 
     @Test

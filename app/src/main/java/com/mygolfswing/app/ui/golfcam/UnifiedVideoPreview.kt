@@ -69,6 +69,11 @@ import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
+internal fun normalizedVideoCoordinate(positionPx: Float, dimensionPx: Float): Float {
+    if (dimensionPx <= 0f) return 0f
+    return (positionPx / dimensionPx).coerceIn(0f, 1f)
+}
+
 /**
  * 视频预览 + 步骤叠加交互层（对齐 iOS UnifiedVideoPreview）。
  * 圆角卡片样式，底部覆盖播放控制按钮（TRIM 步骤显示）。
@@ -338,8 +343,8 @@ private fun ImpactPositionOverlay(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = { offset ->
-                            nx = (offset.x / wPx).coerceIn(0.02f, 0.98f)
-                            ny = (offset.y / hPx).coerceIn(0.02f, 0.98f)
+                            nx = normalizedVideoCoordinate(offset.x, wPx)
+                            ny = normalizedVideoCoordinate(offset.y, hPx)
                             onPositionChange?.invoke(nx, ny)
                         },
                     )
@@ -358,8 +363,8 @@ private fun ImpactPositionOverlay(
                         onDrag = { change, _ ->
                             if (hitDrag) {
                                 change.consume()
-                                nx = (change.position.x / wPx).coerceIn(0.02f, 0.98f)
-                                ny = (change.position.y / hPx).coerceIn(0.02f, 0.98f)
+                                nx = normalizedVideoCoordinate(change.position.x, wPx)
+                                ny = normalizedVideoCoordinate(change.position.y, hPx)
                                 onPositionChange?.invoke(nx, ny)
                             }
                         },
@@ -421,23 +426,23 @@ private fun LandingOverlay(
                     detectDragGestures(
                         onDragStart = { offset ->
                             onLandingChange?.invoke(
-                                (offset.x / wPx).coerceIn(0f, 1f),
-                                (offset.y / hPx).coerceIn(0f, 1f),
+                                normalizedVideoCoordinate(offset.x, wPx),
+                                normalizedVideoCoordinate(offset.y, hPx),
                             )
                         },
                     ) { change, _ ->
                         change.consume()
                         onLandingChange?.invoke(
-                            (change.position.x / wPx).coerceIn(0f, 1f),
-                            (change.position.y / hPx).coerceIn(0f, 1f),
+                            normalizedVideoCoordinate(change.position.x, wPx),
+                            normalizedVideoCoordinate(change.position.y, hPx),
                         )
                     }
                 }
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         onLandingChange?.invoke(
-                            (offset.x / wPx).coerceIn(0f, 1f),
-                            (offset.y / hPx).coerceIn(0f, 1f),
+                            normalizedVideoCoordinate(offset.x, wPx),
+                            normalizedVideoCoordinate(offset.y, hPx),
                         )
                     }
                 },

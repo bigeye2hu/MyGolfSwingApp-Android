@@ -109,6 +109,20 @@ internal fun exportVideoDimensions(rawWidth: Int, rawHeight: Int, rotationDegree
     }
 }
 
+internal fun effectiveExportFrameRotation(
+    metadataRotationDegrees: Int,
+    frameWidth: Int,
+    frameHeight: Int,
+    exportWidth: Int,
+    exportHeight: Int,
+): Int {
+    val rotation = ((metadataRotationDegrees % 360) + 360) % 360
+    val frameAlreadyVisual = (rotation == 90 || rotation == 270) &&
+        frameWidth == exportWidth &&
+        frameHeight == exportHeight
+    return if (frameAlreadyVisual) 0 else rotation
+}
+
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
  * 播放带轨迹叠加的视频，可导出为 MP4 保存到相册。
@@ -460,15 +474,13 @@ private fun drawVideoFrameOnCanvas(
     rotationDegrees: Int,
 ) {
     val src = Rect(0, 0, frameBitmap.width, frameBitmap.height)
-    val rotation = if (
-        (rotationDegrees == 90 || rotationDegrees == 270) &&
-        frameBitmap.width == width &&
-        frameBitmap.height == height
-    ) {
-        0
-    } else {
-        rotationDegrees
-    }
+    val rotation = effectiveExportFrameRotation(
+        metadataRotationDegrees = rotationDegrees,
+        frameWidth = frameBitmap.width,
+        frameHeight = frameBitmap.height,
+        exportWidth = width,
+        exportHeight = height,
+    )
 
     canvas.save()
     when (rotation) {

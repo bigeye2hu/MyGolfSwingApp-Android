@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
+import com.mygolfswing.app.ui.golfcam.effectiveExportFrameRotation
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
 import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
@@ -310,6 +311,50 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(1920, portrait90.height)
         assertEquals(1080, portrait270.width)
         assertEquals(1920, portrait270.height)
+    }
+
+    @Test
+    fun exportFrameRotationAvoidsDoubleRotatingRetrieverVisualFrames() {
+        assertEquals(
+            0,
+            effectiveExportFrameRotation(
+                metadataRotationDegrees = 0,
+                frameWidth = 1920,
+                frameHeight = 1080,
+                exportWidth = 1920,
+                exportHeight = 1080,
+            ),
+        )
+        assertEquals(
+            90,
+            effectiveExportFrameRotation(
+                metadataRotationDegrees = 90,
+                frameWidth = 1920,
+                frameHeight = 1080,
+                exportWidth = 1080,
+                exportHeight = 1920,
+            ),
+        )
+        assertEquals(
+            0,
+            effectiveExportFrameRotation(
+                metadataRotationDegrees = 90,
+                frameWidth = 1080,
+                frameHeight = 1920,
+                exportWidth = 1080,
+                exportHeight = 1920,
+            ),
+        )
+        assertEquals(
+            0,
+            effectiveExportFrameRotation(
+                metadataRotationDegrees = 270,
+                frameWidth = 1080,
+                frameHeight = 1920,
+                exportWidth = 1080,
+                exportHeight = 1920,
+            ),
+        )
     }
 
     @Test

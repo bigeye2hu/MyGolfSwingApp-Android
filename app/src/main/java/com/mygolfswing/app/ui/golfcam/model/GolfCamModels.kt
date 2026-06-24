@@ -836,9 +836,7 @@ object GolfCamDistanceConfig {
     fun clamp(distance: Double): Double = distance.coerceIn(MIN_DISTANCE, MAX_DISTANCE)
 
     fun inputText(raw: String): String {
-        val digits = raw.filter { it.isDigit() }.take(MAX_INPUT_DIGITS)
-        val value = digits.toDoubleOrNull() ?: return digits
-        return clamp(value).toInt().toString()
+        return raw.filter { it.isDigit() }.take(MAX_INPUT_DIGITS)
     }
 
     fun displayText(distance: Double): String = clamp(distance).toInt().toString()

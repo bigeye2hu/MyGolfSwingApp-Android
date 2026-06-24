@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -60,6 +59,9 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleCloudConfigLoader
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
+
+private val STYLE_CATEGORY_HEIGHT = 36.dp
+private val STYLE_CONTENT_HEIGHT = 108.dp
 
 // ── 样式类别 ──────────────────────────────────────────────────
 
@@ -122,8 +124,11 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .height(STYLE_CATEGORY_HEIGHT)
+                .padding(horizontal = 12.dp)
+                .padding(top = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             StyleCategory.userVisibleCases.forEach { category ->
                 val isSelected = category == selectedCategory
@@ -161,13 +166,13 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
             }
         }
 
-        HorizontalDivider(color = DSColors.mistGreen, thickness = 1.dp)
-
         // ── 内容区域 ──
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp),
+                .height(STYLE_CONTENT_HEIGHT)
+                .padding(vertical = 2.dp),
+            contentAlignment = Alignment.Center,
         ) {
             when (selectedCategory) {
                 StyleCategory.COLOR -> ColorContent(style = style, presets = colorPresets, onChange = { style = it })
@@ -206,7 +211,10 @@ private fun ColorContent(
     presets: List<com.mygolfswing.app.ui.golfcam.model.TrackColorPreset>,
     onChange: (TrackStyle) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        modifier = Modifier.padding(vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         // 不透明度滑块
         Row(
             modifier = Modifier
@@ -255,13 +263,15 @@ private fun ColorContent(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(44.dp)
-                        .padding(if (selected) 0.dp else 2.dp)
+                        .border(
+                            width = if (selected) 2.dp else 0.dp,
+                            color = Color.White.copy(alpha = if (selected) 0.90f else 0f),
+                            shape = CircleShape,
+                        )
+                        .padding(3.dp)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(preset.gradientColors.map { Color(it) }))
-                        .then(
-                            if (selected) Modifier.border(2.dp, Color.White, CircleShape)
-                            else Modifier.border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape),
-                        )
+                        .border(1.dp, Color.White.copy(alpha = if (selected) 0.18f else 0.10f), CircleShape)
                         .clickable {
                             onChange(
                                 style.copy(
@@ -299,25 +309,27 @@ private fun SliderContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(DSColors.mistGreen.copy(alpha = 0.54f))
-            .border(1.dp, DSColors.fairway.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(label, color = DSColors.shadowGray, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(range.start.toInt().toString(), color = DSColors.shadowGray, fontSize = 10.sp)
-            Text(displayText, color = DSColors.fairway, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text(range.endInclusive.toInt().toString(), color = DSColors.shadowGray, fontSize = 10.sp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = DSColors.shadowGray, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(displayText, color = DSColors.inkGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
         Slider(
             value = value,
             onValueChange = onChange,
             valueRange = range,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
             colors = SliderDefaults.colors(
                 thumbColor = DSColors.fairway,
                 activeTrackColor = DSColors.fairway,
@@ -341,7 +353,10 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
         onChange(style.copy(totalDistance = clamped))
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        modifier = Modifier.padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -373,97 +388,102 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                 fontWeight = FontWeight.Medium,
             )
         }
-        if (style.showDistance) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DSColors.mistGreen.copy(alpha = if (style.showDistance) 0.55f else 0.28f))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White)
-                        .border(1.dp, DSColors.fairway.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    TextField(
-                        value = distanceText,
-                        onValueChange = { text ->
-                            val sanitized = GolfCamDistanceConfig.inputText(text)
-                            distanceText = sanitized
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Done,
-                        ),
-                        keyboardActions = KeyboardActions(onDone = { commitDistance() }),
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontSize = 28.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            color = DSColors.inkGreen,
-                        ),
-                        modifier = Modifier.width(92.dp),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                        ),
-                    )
-                    Text(
-                        style.distanceUnit.abbreviation,
-                        color = DSColors.fairway,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Box(
-                        modifier = Modifier
-                            .padding(start = 4.dp)
-                            .size(30.dp)
-                            .clip(CircleShape)
-                            .background(DSColors.fairway.copy(alpha = 0.12f))
-                            .clickable { commitDistance() },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Filled.Check, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(16.dp))
-                    }
-                }
-
-                UnitToggleButton(
-                    unitLabel = style.distanceUnit.displayName,
-                    nextUnitLabel = style.distanceUnit.toggle().displayName,
-                    onClick = {
-                        val currentDistance = GolfCamDistanceConfig.clamp(distanceText.toDoubleOrNull() ?: style.totalDistance)
-                        val nextUnit = style.distanceUnit.toggle()
-                        val converted = GolfCamDistanceConfig.convert(
-                            distance = currentDistance,
-                            from = style.distanceUnit,
-                            to = nextUnit,
-                        )
-                        distanceText = GolfCamDistanceConfig.displayText(converted)
-                        onChange(
-                            style.copy(
-                                distanceUnit = nextUnit,
-                                totalDistance = converted,
-                            ),
-                        )
+                TextField(
+                    value = distanceText,
+                    onValueChange = { text ->
+                        distanceText = GolfCamDistanceConfig.inputText(text)
                     },
+                    enabled = style.showDistance,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { commitDistance() }),
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        color = if (style.showDistance) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.40f),
+                    ),
+                    modifier = Modifier.width(80.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
                 )
+                Text(
+                    style.distanceUnit.abbreviation,
+                    color = DSColors.fairway.copy(alpha = if (style.showDistance) 1.0f else 0.35f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(DSColors.fairway.copy(alpha = if (style.showDistance) 0.12f else 0.05f))
+                        .clickable(enabled = style.showDistance) { commitDistance() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Check,
+                        contentDescription = null,
+                        tint = DSColors.fairway.copy(alpha = if (style.showDistance) 1f else 0.35f),
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
             }
+
+            UnitToggleButton(
+                enabled = style.showDistance,
+                unitLabel = style.distanceUnit.displayName,
+                nextUnitLabel = style.distanceUnit.toggle().displayName,
+                onClick = {
+                    val currentDistance = GolfCamDistanceConfig.clamp(distanceText.toDoubleOrNull() ?: style.totalDistance)
+                    val nextUnit = style.distanceUnit.toggle()
+                    val converted = GolfCamDistanceConfig.convert(
+                        distance = currentDistance,
+                        from = style.distanceUnit,
+                        to = nextUnit,
+                    )
+                    distanceText = GolfCamDistanceConfig.displayText(converted)
+                    onChange(
+                        style.copy(
+                            distanceUnit = nextUnit,
+                            totalDistance = converted,
+                        ),
+                    )
+                },
+            )
         }
     }
 }
 
 @Composable
 private fun UnitToggleButton(
+    enabled: Boolean,
     unitLabel: String,
     nextUnitLabel: String,
     onClick: () -> Unit,
@@ -472,15 +492,14 @@ private fun UnitToggleButton(
         modifier = Modifier
             .size(56.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(DSColors.mistGreen.copy(alpha = 0.72f))
-            .border(1.dp, DSColors.fairway.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
-            .clickable { onClick() },
+            .background(DSColors.mistGreen.copy(alpha = if (enabled) 0.55f else 0.28f))
+            .clickable(enabled = enabled) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(unitLabel, color = DSColors.inkGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
-            Text(nextUnitLabel, color = DSColors.shadowGray, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            Text(unitLabel, color = DSColors.inkGreen.copy(alpha = if (enabled) 1f else 0.35f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = DSColors.fairway.copy(alpha = if (enabled) 1f else 0.35f), modifier = Modifier.size(14.dp))
+            Text(nextUnitLabel, color = DSColors.shadowGray.copy(alpha = if (enabled) 1f else 0.42f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

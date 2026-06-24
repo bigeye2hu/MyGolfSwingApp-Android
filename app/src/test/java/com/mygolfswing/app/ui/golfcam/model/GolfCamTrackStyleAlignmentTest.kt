@@ -15,6 +15,7 @@ import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
 import com.mygolfswing.app.ui.golfcam.steps.defaultTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.initialTrimFractions
 import com.mygolfswing.app.ui.golfcam.steps.initialImpactFrameIndex
+import com.mygolfswing.app.ui.golfcam.steps.impactFrameDisplayText
 import com.mygolfswing.app.ui.golfcam.steps.minimumTrimFraction
 import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadFraction
 import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadSeekTimeMs
@@ -513,6 +514,14 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(90, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = emptyList(), totalFrames = 180))
         assertEquals(179, initialImpactFrameIndex(savedFrameIndex = 999, candidateFrames = emptyList(), totalFrames = 180))
         assertEquals(0, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = candidates, totalFrames = 0))
+    }
+
+    @Test
+    fun impactFrameDisplayUsesTrimRelativeFrameCountLikeIos() {
+        assertEquals("1/180", impactFrameDisplayText(currentFrame = 0, totalFrames = 180))
+        assertEquals("43/180", impactFrameDisplayText(currentFrame = 42, totalFrames = 180))
+        assertEquals("180/180", impactFrameDisplayText(currentFrame = 999, totalFrames = 180))
+        assertEquals("1/1", impactFrameDisplayText(currentFrame = 0, totalFrames = 0))
     }
 
     @Test

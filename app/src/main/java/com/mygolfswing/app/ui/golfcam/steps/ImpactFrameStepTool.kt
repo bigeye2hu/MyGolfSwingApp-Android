@@ -83,6 +83,12 @@ internal fun initialImpactFrameIndex(
         .coerceIn(0, lastFrame)
 }
 
+internal fun impactFrameDisplayText(currentFrame: Int, totalFrames: Int): String {
+    val safeTotal = totalFrames.coerceAtLeast(1)
+    val oneBasedFrame = currentFrame.coerceIn(0, safeTotal - 1) + 1
+    return "$oneBasedFrame/$safeTotal"
+}
+
 /**
  * 步骤 2：击球帧选择。
  * UI：缩略图帧轨道（吸附居中）+ 候选帧金色小点 + 上一帧/下一帧按钮
@@ -136,8 +142,6 @@ fun ImpactFrameStepTool(
     }
 
     val elapsedSec = currentFrame / safeFrameRate
-    val absFrameIndex = GolfCamFrameTimeline.frameIndexAt(startMs / 1000.0, safeFrameRate) + currentFrame
-    val videoTotalFrames = GolfCamFrameTimeline.totalFrames(durationMs, safeFrameRate)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -171,7 +175,7 @@ fun ImpactFrameStepTool(
                             .background(DSColors.fairway, RoundedCornerShape(2.dp)),
                     )
                     Text(
-                        "$absFrameIndex/$videoTotalFrames",
+                        impactFrameDisplayText(currentFrame, totalFrames),
                         color = DSColors.inkGreen,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,

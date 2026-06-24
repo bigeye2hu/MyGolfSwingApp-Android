@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.steps
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -125,6 +126,24 @@ internal fun trimPlayheadSeekTimeMs(
 ): Long {
     val clampedFraction = fraction.coerceIn(startFraction, endFraction)
     return trimSeekTimeMs(durationMs, clampedFraction)
+}
+
+internal fun trimThumbnailRotationDegrees(
+    metadataRotationDegrees: Int,
+    rawWidth: Int,
+    rawHeight: Int,
+    frameWidth: Int,
+    frameHeight: Int,
+): Int {
+    val rotation = ((metadataRotationDegrees % 360) + 360) % 360
+    val visualWidth = if (rotation == 90 || rotation == 270) rawHeight else rawWidth
+    val visualHeight = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
+    val alreadyVisual = rawWidth > 0 &&
+        rawHeight > 0 &&
+        (rotation == 90 || rotation == 270) &&
+        frameWidth == visualWidth &&
+        frameHeight == visualHeight
+    return if (alreadyVisual) 0 else rotation
 }
 
 /**
@@ -252,13 +271,26 @@ private fun VideoTrimBar(
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(context, videoUri)
+                val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                val rotationDegrees = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
                 (0 until THUMB_COUNT).map { i ->
                     val timeUs = i.toLong() * durationMs * 1000L / (THUMB_COUNT - 1)
                     val bmp = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                     bmp?.let {
+                        val visualBitmap = rotateTrimThumbnailIfNeeded(
+                            bitmap = it,
+                            rotationDegrees = trimThumbnailRotationDegrees(
+                                metadataRotationDegrees = rotationDegrees,
+                                rawWidth = rawWidth,
+                                rawHeight = rawHeight,
+                                frameWidth = it.width,
+                                frameHeight = it.height,
+                            ),
+                        )
                         val targetH = 160
-                        val targetW = (it.width.toFloat() / it.height * targetH).toInt().coerceAtLeast(1)
-                        Bitmap.createScaledBitmap(it, targetW, targetH, false).asImageBitmap()
+                        val targetW = (visualBitmap.width.toFloat() / visualBitmap.height * targetH).toInt().coerceAtLeast(1)
+                        Bitmap.createScaledBitmap(visualBitmap, targetW, targetH, false).asImageBitmap()
                     }
                 }
             } catch (_: Exception) {
@@ -350,6 +382,13 @@ private fun VideoTrimBar(
             isLeft = false,
         )
     }
+}
+
+private fun rotateTrimThumbnailIfNeeded(bitmap: Bitmap, rotationDegrees: Int): Bitmap {
+    val rotation = ((rotationDegrees % 360) + 360) % 360
+    if (rotation == 0) return bitmap
+    val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }
 
 // ─── 把手外观（iOS 风格：白色窄竖条，两条细 grip 线）────────────────────────────

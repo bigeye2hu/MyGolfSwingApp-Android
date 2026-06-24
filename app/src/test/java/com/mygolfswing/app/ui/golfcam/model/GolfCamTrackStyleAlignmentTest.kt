@@ -19,6 +19,7 @@ import com.mygolfswing.app.ui.golfcam.steps.minimumTrimFraction
 import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadFraction
 import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadSeekTimeMs
 import com.mygolfswing.app.ui.golfcam.steps.trimSeekTimeMs
+import com.mygolfswing.app.ui.golfcam.steps.trimThumbnailRotationDegrees
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -454,6 +455,50 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(5_000L, trimPlayheadSeekTimeMs(20_000L, 0.10f, 0.25f, 0.75f))
         assertEquals(8_000L, trimPlayheadSeekTimeMs(20_000L, 0.40f, 0.25f, 0.75f))
         assertEquals(15_000L, trimPlayheadSeekTimeMs(20_000L, 0.90f, 0.25f, 0.75f))
+    }
+
+    @Test
+    fun trimThumbnailsUseVisualOrientationLikeIosPreferredTrackTransform() {
+        assertEquals(
+            90,
+            trimThumbnailRotationDegrees(
+                metadataRotationDegrees = 90,
+                rawWidth = 1920,
+                rawHeight = 1080,
+                frameWidth = 1920,
+                frameHeight = 1080,
+            ),
+        )
+        assertEquals(
+            0,
+            trimThumbnailRotationDegrees(
+                metadataRotationDegrees = 90,
+                rawWidth = 1920,
+                rawHeight = 1080,
+                frameWidth = 1080,
+                frameHeight = 1920,
+            ),
+        )
+        assertEquals(
+            270,
+            trimThumbnailRotationDegrees(
+                metadataRotationDegrees = 270,
+                rawWidth = 1920,
+                rawHeight = 1080,
+                frameWidth = 1920,
+                frameHeight = 1080,
+            ),
+        )
+        assertEquals(
+            180,
+            trimThumbnailRotationDegrees(
+                metadataRotationDegrees = 180,
+                rawWidth = 1920,
+                rawHeight = 1080,
+                frameWidth = 1920,
+                frameHeight = 1080,
+            ),
+        )
     }
 
     @Test

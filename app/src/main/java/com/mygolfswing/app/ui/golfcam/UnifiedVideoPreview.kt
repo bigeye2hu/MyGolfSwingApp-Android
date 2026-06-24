@@ -98,6 +98,30 @@ internal fun clampedCurveControlPoint(
     return GolfCamCurveSpec.clampDraggedControlPoint(NormalizedPoint(xPx / widthPx, yPx / heightPx))
 }
 
+private fun Offset.distanceSquaredTo(other: Offset): Float {
+    val dx = x - other.x
+    val dy = y - other.y
+    return dx * dx + dy * dy
+}
+
+private fun visibleCurveHitCenter(
+    point: NormalizedPoint,
+    widthPx: Float,
+    heightPx: Float,
+    targetSizePx: Float,
+): Offset {
+    fun clampToVisible(value: Float, dimension: Float): Float {
+        if (dimension <= 0f) return 0f
+        if (dimension <= targetSizePx) return dimension / 2f
+        val half = targetSizePx / 2f
+        return value.coerceIn(half, dimension - half)
+    }
+    return Offset(
+        x = clampToVisible(point.x * widthPx, widthPx),
+        y = clampToVisible(point.y * heightPx, heightPx),
+    )
+}
+
 private const val LANDING_MARKER_ANCHOR_RATIO = 0.25f
 
 /**
@@ -477,11 +501,12 @@ private fun LandingOverlay(
                     var hitDrag = false
                     detectDragGestures(
                         onDragStart = { offset ->
-                            val center = currentAnchorCenter
-                            val dx = offset.x - center.x
-                            val dy = offset.y - center.y
-                            hitDrag = (dx * dx + dy * dy) <= dragRadiusPx * dragRadiusPx
-                            dragGrabOffset = if (hitDrag) offset - center else Offset.Zero
+                            val anchor = currentAnchorCenter
+                            val visualCenter = anchor - Offset(0f, markerSizePx * LANDING_MARKER_ANCHOR_RATIO)
+                            val radiusSquared = dragRadiusPx * dragRadiusPx
+                            hitDrag = offset.distanceSquaredTo(anchor) <= radiusSquared ||
+                                offset.distanceSquaredTo(visualCenter) <= radiusSquared
+                            dragGrabOffset = if (hitDrag) offset - anchor else Offset.Zero
                             isDragging = hitDrag
                         },
                         onDragEnd = { hitDrag = false; isDragging = false; dragGrabOffset = Offset.Zero },
@@ -561,6 +586,8 @@ private fun FlightCurveOverlay(
         val hPx = with(density) { maxHeight.toPx() }
         val touchTargetDp = 88.dp
         val touchTargetPx = with(density) { touchTargetDp.toPx() }
+        val cp1HitCenter = visibleCurveHitCenter(NormalizedPoint(cp1x, cp1y), wPx, hPx, touchTargetPx)
+        val cp2HitCenter = visibleCurveHitCenter(NormalizedPoint(cp2x, cp2y), wPx, hPx, touchTargetPx)
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width; val h = size.height
@@ -596,7 +623,7 @@ private fun FlightCurveOverlay(
                 cp1y = next.y
             },
             modifier = Modifier.offset {
-                IntOffset((cp1x * wPx - touchTargetPx / 2f).toInt(), (cp1y * hPx - touchTargetPx / 2f).toInt())
+                IntOffset((cp1HitCenter.x - touchTargetPx / 2f).toInt(), (cp1HitCenter.y - touchTargetPx / 2f).toInt())
             },
         )
         CurveControlHitTarget(
@@ -614,7 +641,7 @@ private fun FlightCurveOverlay(
                 cp2y = next.y
             },
             modifier = Modifier.offset {
-                IntOffset((cp2x * wPx - touchTargetPx / 2f).toInt(), (cp2y * hPx - touchTargetPx / 2f).toInt())
+                IntOffset((cp2HitCenter.x - touchTargetPx / 2f).toInt(), (cp2HitCenter.y - touchTargetPx / 2f).toInt())
             },
         )
     }

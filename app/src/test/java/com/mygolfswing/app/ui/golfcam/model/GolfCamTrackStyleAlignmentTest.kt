@@ -3,6 +3,7 @@ package com.mygolfswing.app.ui.golfcam.model
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.effectiveExportFrameRotation
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
+import com.mygolfswing.app.ui.golfcam.isAudioMimeType
 import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
 import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
@@ -355,6 +356,14 @@ class GolfCamTrackStyleAlignmentTest {
                 exportHeight = 1920,
             ),
         )
+    }
+
+    @Test
+    fun exportAudioTrackDetectionMatchesAndroidMuxerMimeRules() {
+        assertTrue(isAudioMimeType("audio/mp4a-latm"))
+        assertTrue(isAudioMimeType("audio/3gpp"))
+        assertFalse(isAudioMimeType("video/avc"))
+        assertFalse(isAudioMimeType(null))
     }
 
     @Test

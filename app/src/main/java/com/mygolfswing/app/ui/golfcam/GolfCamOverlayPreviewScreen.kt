@@ -86,6 +86,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -97,6 +98,11 @@ private data class VideoPlaybackConfig(
 internal data class ExportVideoDimensions(
     val width: Int,
     val height: Int,
+)
+
+private data class AudioTrackInfo(
+    val sourceTrackIndex: Int,
+    val format: MediaFormat,
 )
 
 internal fun exportVideoDimensions(rawWidth: Int, rawHeight: Int, rotationDegrees: Int): ExportVideoDimensions {
@@ -122,6 +128,8 @@ internal fun effectiveExportFrameRotation(
         frameHeight == exportHeight
     return if (frameAlreadyVisual) 0 else rotation
 }
+
+internal fun isAudioMimeType(mime: String?): Boolean = mime?.startsWith("audio/") == true
 
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
@@ -349,7 +357,11 @@ private suspend fun exportVideoWithTrajectory(
     encoder.start()
 
     val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-    var trackIndex = -1
+    val audioTrackInfo = findAudioTrackInfo(context, videoUri)
+    val audioMuxerTrackIndex = audioTrackInfo?.let { info ->
+        runCatching { muxer.addTrack(info.format) }.getOrNull()
+    } ?: -1
+    var videoTrackIndex = -1
     var muxerStarted = false
 
     val totalFrames = (durationMs * fps / 1000).toInt().coerceAtLeast(1)
@@ -392,7 +404,7 @@ private suspend fun exportVideoWithTrajectory(
             when {
                 outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     if (!muxerStarted) {
-                        trackIndex = muxer.addTrack(encoder.outputFormat)
+                        videoTrackIndex = muxer.addTrack(encoder.outputFormat)
                         muxer.start()
                         muxerStarted = true
                     }
@@ -405,7 +417,7 @@ private suspend fun exportVideoWithTrajectory(
                     if (muxerStarted && bufferInfo.size > 0 &&
                         bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
                     ) {
-                        muxer.writeSampleData(trackIndex, buf, bufferInfo)
+                        muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
                     }
                     encoder.releaseOutputBuffer(outIdx, false)
                     outputDone = true
@@ -427,17 +439,27 @@ private suspend fun exportVideoWithTrajectory(
             if (buf != null && muxerStarted && bufferInfo.size > 0 &&
                 bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
             ) {
-                muxer.writeSampleData(trackIndex, buf, bufferInfo)
+                muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
             }
             encoder.releaseOutputBuffer(outIdx, false)
             if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eosReached = true
         } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED && !muxerStarted) {
-            trackIndex = muxer.addTrack(encoder.outputFormat)
+            videoTrackIndex = muxer.addTrack(encoder.outputFormat)
             muxer.start(); muxerStarted = true
         }
     }
 
     encoder.stop(); encoder.release()
+    if (muxerStarted && audioTrackInfo != null && audioMuxerTrackIndex >= 0) {
+        copyAudioTrackToMuxer(
+            context = context,
+            videoUri = videoUri,
+            audioTrackInfo = audioTrackInfo,
+            muxer = muxer,
+            muxerTrackIndex = audioMuxerTrackIndex,
+            durationUs = durationMs * 1000L,
+        )
+    }
     if (muxerStarted) muxer.stop()
     muxer.release()
     retriever.release()
@@ -504,6 +526,61 @@ private fun drawVideoFrameOnCanvas(
         }
     }
     canvas.restore()
+}
+
+private fun findAudioTrackInfo(context: Context, videoUri: Uri): AudioTrackInfo? {
+    val extractor = MediaExtractor()
+    return try {
+        extractor.setDataSource(context, videoUri, null)
+        for (trackIndex in 0 until extractor.trackCount) {
+            val format = extractor.getTrackFormat(trackIndex)
+            if (isAudioMimeType(format.getString(MediaFormat.KEY_MIME))) {
+                return AudioTrackInfo(sourceTrackIndex = trackIndex, format = format)
+            }
+        }
+        null
+    } catch (_: Exception) {
+        null
+    } finally {
+        extractor.release()
+    }
+}
+
+private fun copyAudioTrackToMuxer(
+    context: Context,
+    videoUri: Uri,
+    audioTrackInfo: AudioTrackInfo,
+    muxer: MediaMuxer,
+    muxerTrackIndex: Int,
+    durationUs: Long,
+) {
+    val extractor = MediaExtractor()
+    try {
+        extractor.setDataSource(context, videoUri, null)
+        extractor.selectTrack(audioTrackInfo.sourceTrackIndex)
+        val maxInputSize = if (audioTrackInfo.format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            audioTrackInfo.format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+        } else {
+            256 * 1024
+        }.coerceAtLeast(16 * 1024)
+        val buffer = ByteBuffer.allocate(maxInputSize)
+        val info = MediaCodec.BufferInfo()
+
+        while (true) {
+            val sampleTimeUs = extractor.sampleTime
+            if (sampleTimeUs < 0 || sampleTimeUs > durationUs) break
+            buffer.clear()
+            val sampleSize = extractor.readSampleData(buffer, 0)
+            if (sampleSize <= 0) break
+            info.set(0, sampleSize, sampleTimeUs, extractor.sampleFlags)
+            muxer.writeSampleData(muxerTrackIndex, buffer, info)
+            extractor.advance()
+        }
+    } catch (_: Exception) {
+        // Audio passthrough is best-effort; video export should still succeed.
+    } finally {
+        extractor.release()
+    }
 }
 
 private fun drawTrajectoryOnCanvas(

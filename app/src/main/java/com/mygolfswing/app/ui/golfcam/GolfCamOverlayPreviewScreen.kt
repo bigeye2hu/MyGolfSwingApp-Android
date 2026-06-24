@@ -158,6 +158,15 @@ internal fun targetExportVideoDimensions(resolution: ExportResolution, isPortrai
     return resolution.dimensions(isPortrait)
 }
 
+internal fun targetExportVideoBitrate(dimensions: ExportVideoDimensions): Int {
+    val longEdge = max(dimensions.width, dimensions.height)
+    return when {
+        longEdge >= 3800 -> 30_000_000
+        longEdge >= 1900 -> 15_000_000
+        else -> 8_000_000
+    }
+}
+
 internal fun shouldOpenExportPreview(exportedFile: File?): Boolean {
     return exportedFile != null
 }
@@ -1081,7 +1090,7 @@ private suspend fun exportVideoWithTrajectory(
 
     val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
         setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-        setInteger(MediaFormat.KEY_BIT_RATE, 6_000_000)
+        setInteger(MediaFormat.KEY_BIT_RATE, targetExportVideoBitrate(exportSize))
         setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
     }

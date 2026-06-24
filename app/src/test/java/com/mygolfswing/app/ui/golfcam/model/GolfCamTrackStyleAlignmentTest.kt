@@ -13,6 +13,7 @@ import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
 import com.mygolfswing.app.ui.golfcam.shouldReuseImpactCandidates
 import com.mygolfswing.app.ui.golfcam.shouldOpenExportPreview
+import com.mygolfswing.app.ui.golfcam.targetExportVideoBitrate
 import com.mygolfswing.app.ui.golfcam.targetExportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
@@ -343,6 +344,19 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(2160, landscape4k.height)
         assertEquals(2160, portrait4k.width)
         assertEquals(3840, portrait4k.height)
+    }
+
+    @Test
+    fun targetExportBitrateMatchesIosHdrVideoProcessorResolutionBands() {
+        val landscape1080 = targetExportVideoDimensions(ExportResolution.HD_1080P, isPortrait = false)
+        val portrait1080 = targetExportVideoDimensions(ExportResolution.HD_1080P, isPortrait = true)
+        val landscape4k = targetExportVideoDimensions(ExportResolution.UHD_4K, isPortrait = false)
+        val portrait4k = targetExportVideoDimensions(ExportResolution.UHD_4K, isPortrait = true)
+
+        assertEquals(15_000_000, targetExportVideoBitrate(landscape1080))
+        assertEquals(15_000_000, targetExportVideoBitrate(portrait1080))
+        assertEquals(30_000_000, targetExportVideoBitrate(landscape4k))
+        assertEquals(30_000_000, targetExportVideoBitrate(portrait4k))
     }
 
     @Test

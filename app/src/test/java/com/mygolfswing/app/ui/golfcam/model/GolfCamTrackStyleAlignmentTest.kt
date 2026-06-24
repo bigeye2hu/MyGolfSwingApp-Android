@@ -3,7 +3,11 @@ package com.mygolfswing.app.ui.golfcam.model
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
+import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
+import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
+import com.mygolfswing.app.ui.golfcam.steps.defaultTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.initialImpactFrameIndex
+import com.mygolfswing.app.ui.golfcam.steps.minimumTrimFraction
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -276,6 +280,18 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(1250L, GolfCamFrameTimeline.timeMsForFrame(trimStartMs = 1000L, frameIndex = 15, frameRate = 60.0))
         assertEquals(540, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 60.0))
         assertEquals(270, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 30.0))
+    }
+
+    @Test
+    fun trimDefaultsAndMinimumDurationMatchIosCustomTrimmer() {
+        assertEquals(1f, defaultTrimEndFraction(durationMs = 20_000L), 0f)
+        assertEquals(0.5f, defaultTrimEndFraction(durationMs = 60_000L), 0f)
+        assertEquals(0.025f, minimumTrimFraction(durationMs = 20_000L), 1e-6f)
+
+        assertEquals(0.475f, clampTrimStartFraction(newFraction = 0.90f, endFraction = 0.50f, durationMs = 20_000L), 1e-6f)
+        assertEquals(0.525f, clampTrimEndFraction(newFraction = 0.10f, startFraction = 0.50f, durationMs = 20_000L), 1e-6f)
+        assertEquals(0f, clampTrimStartFraction(newFraction = 0.90f, endFraction = 1.0f, durationMs = 300L), 0f)
+        assertEquals(1f, clampTrimEndFraction(newFraction = 0.10f, startFraction = 0f, durationMs = 300L), 0f)
     }
 
     @Test

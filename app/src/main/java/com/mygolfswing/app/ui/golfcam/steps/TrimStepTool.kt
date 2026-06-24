@@ -55,14 +55,38 @@ import com.mygolfswing.app.ui.golfcam.model.TrimResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
-private const val THUMB_COUNT = 10
+private const val THUMB_COUNT = 15
+private const val DEFAULT_TRIM_MAX_MS = 30_000L
+private const val MIN_TRIM_DURATION_MS = 500L
 
 // 安全边距：条的左右各留 SAFE_MARGIN，让把手远离屏幕边缘手势区
 private val SAFE_MARGIN: Dp = 28.dp
 private val HANDLE_W: Dp = 12.dp
 private val BAR_HEIGHT: Dp = 62.dp
 private val HANDLE_TOUCH_EXTRA: Dp = 16.dp
+
+internal fun defaultTrimEndFraction(durationMs: Long): Float {
+    if (durationMs <= 0L) return 1f
+    return (min(durationMs, DEFAULT_TRIM_MAX_MS).toFloat() / durationMs).coerceIn(0f, 1f)
+}
+
+internal fun minimumTrimFraction(durationMs: Long): Float {
+    if (durationMs <= 0L) return 1f
+    return (MIN_TRIM_DURATION_MS.toFloat() / durationMs).coerceIn(0f, 1f)
+}
+
+internal fun clampTrimStartFraction(newFraction: Float, endFraction: Float, durationMs: Long): Float {
+    val maxStart = max(0f, endFraction - minimumTrimFraction(durationMs))
+    return newFraction.coerceIn(0f, maxStart)
+}
+
+internal fun clampTrimEndFraction(newFraction: Float, startFraction: Float, durationMs: Long): Float {
+    val minEnd = min(1f, startFraction + minimumTrimFraction(durationMs))
+    return newFraction.coerceIn(minEnd, 1f)
+}
 
 /**
  * 步骤 1：视频裁剪。
@@ -74,8 +98,8 @@ fun TrimStepTool(
     durationMs: Long,
     onResult: (TrimResult) -> Unit,
 ) {
-    var startFraction by remember { mutableStateOf(0f) }
-    var endFraction by remember { mutableStateOf(1f) }
+    var startFraction by remember(durationMs) { mutableStateOf(0f) }
+    var endFraction by remember(durationMs) { mutableStateOf(defaultTrimEndFraction(durationMs)) }
 
     LaunchedEffect(startFraction, endFraction, durationMs) {
         if (durationMs > 0L) {
@@ -235,9 +259,9 @@ private fun VideoTrimBar(
                             val newFraction = (change.position.x / barWidthPx).coerceIn(0f, 1f)
                             when (target) {
                                 DragTarget.START ->
-                                    onStartChange(newFraction.coerceAtMost(endFraction - 0.02f))
+                                    onStartChange(clampTrimStartFraction(newFraction, endFraction, durationMs))
                                 DragTarget.END ->
-                                    onEndChange(newFraction.coerceAtLeast(startFraction + 0.02f))
+                                    onEndChange(clampTrimEndFraction(newFraction, startFraction, durationMs))
                             }
                         },
                         onDragEnd = { activeDrag = null },

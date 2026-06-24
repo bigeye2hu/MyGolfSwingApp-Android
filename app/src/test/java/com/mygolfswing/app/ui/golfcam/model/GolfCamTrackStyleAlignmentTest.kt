@@ -588,6 +588,78 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun cloudConfigParsesProductionTrackStylePayloadShape() {
+        val parsed = TrackStyleCloudConfigLoader.parse(
+            JsonObject(
+                mapOf(
+                    "version" to JsonPrimitive("1781963575066"),
+                    "defaultPresetName" to JsonPrimitive("青蓝薄荷"),
+                    "defaultColorHex" to JsonPrimitive("#55F3D8"),
+                    "defaultOpacity" to JsonPrimitive(0.75),
+                    "styleDefaults" to JsonObject(
+                        mapOf(
+                            "widthPct" to JsonPrimitive(40),
+                            "tailHalfLife" to JsonPrimitive(70),
+                            "speedLevel" to JsonPrimitive(0.45),
+                            "showDistance" to JsonPrimitive(false),
+                            "totalDistance" to JsonPrimitive(150),
+                            "distanceUnit" to JsonPrimitive("yards"),
+                        ),
+                    ),
+                    "renderTuning" to JsonObject(
+                        mapOf(
+                            "showOuterGlow" to JsonPrimitive(false),
+                            "showBodyBand" to JsonPrimitive(true),
+                            "showHighlightCore" to JsonPrimitive(true),
+                            "bandAlphaMultiplier" to JsonPrimitive(1.0),
+                            "bodyAlphaBase" to JsonPrimitive(0.10),
+                            "bodyAlphaScale" to JsonPrimitive(0.98),
+                            "glowBlurMultiplier" to JsonPrimitive(0.82),
+                            "outerGlowMultiplier" to JsonPrimitive(0.62),
+                            "fillGlowMultiplier" to JsonPrimitive(0.22),
+                            "highlightWidthRatio" to JsonPrimitive(0.50),
+                            "highlightAlphaMax" to JsonPrimitive(0.90),
+                            "highlightWhiteLiftBase" to JsonPrimitive(0.00),
+                            "highlightWhiteLiftScale" to JsonPrimitive(0.00),
+                            "highlightStart" to JsonPrimitive(0.00),
+                            "highlightEnd" to JsonPrimitive(0.96),
+                            "highlightPeak" to JsonPrimitive(0.35),
+                            "highlightStrength" to JsonPrimitive(1.6),
+                            "widthTaperPower" to JsonPrimitive(1.36),
+                            "apexThinStrength" to JsonPrimitive(0.60),
+                            "apexThinRadius" to JsonPrimitive(0.20),
+                            "highlightFalloffPower" to JsonPrimitive(0.82),
+                        ),
+                    ),
+                    "presets" to JsonArray(
+                        listOf(
+                            preset("玫瑰荧光", "#FF3F91", "#FF5FA8", "#FF8EC3", glowAlpha = 0.68, bandAlpha = 1.0),
+                            preset("青蓝薄荷", "#35DFC7", "#55F3D8", "#8FFFF0", glowAlpha = 0.70, bandAlpha = 1.0),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val style = parsed.defaultStyle
+
+        assertEquals(2, parsed.presets.size)
+        assertEquals("青蓝薄荷", style.colorPreset.name)
+        assertEquals(0xFF55F3D8, parsed.defaultColorHex)
+        assertEquals(0xFF55F3D8, style.colorHex)
+        assertEquals(0.75, style.colorAlpha, 0.0)
+        assertEquals(40.0, style.widthPct, 0.0)
+        assertEquals(70.0, style.tailHalfLife, 0.0)
+        assertEquals(GolfCamSpeedConfig.DEFAULT_LEVEL, style.speedLevel, 0.0)
+        assertFalse(style.showDistance)
+        assertEquals(150.0, style.totalDistance, 0.0)
+        assertEquals(DistanceUnit.YARDS, style.distanceUnit)
+        assertTrue(style.renderTuning.showBodyBand)
+        assertTrue(style.renderTuning.showHighlightCore)
+        assertEquals(0.82f, style.renderTuning.glowBlurMultiplier, 0.0f)
+        assertEquals(0.20f, style.renderTuning.apexThinRadius, 0.0f)
+    }
+
+    @Test
     fun localTrackStyleFallbackMirrorsCloudProductionDefaults() {
         val fallback = TrackStyleCloudConfigLoader.localFallback()
         val style = fallback.defaultStyle

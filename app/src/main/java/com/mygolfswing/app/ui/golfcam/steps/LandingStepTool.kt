@@ -20,8 +20,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +39,6 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -165,44 +162,21 @@ fun LandingStepTool(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            LandingActionChip(icon = Icons.Filled.Schedule, label = "滑动时间轴")
-            LandingActionChip(icon = Icons.Filled.TouchApp, label = "拖动落点")
-            LandingActionChip(icon = Icons.Filled.LocationOn, label = "实时预览", active = true)
-        }
-    }
-}
-
-@Composable
-private fun LandingActionChip(
-    icon: ImageVector,
-    label: String,
-    active: Boolean = false,
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (active) DSColors.fairway.copy(alpha = 0.15f) else DSColors.mistGreen.copy(alpha = 0.55f))
-            .then(
-                if (active) {
-                    Modifier.border(1.dp, DSColors.fairway.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
-                } else {
-                    Modifier
-                },
+            Icon(
+                Icons.Filled.LocationOn,
+                null,
+                tint = DSColors.fairway,
+                modifier = Modifier.size(14.dp),
             )
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(icon, null, tint = if (active) DSColors.fairway else DSColors.shadowGray, modifier = Modifier.size(12.dp))
-        Text(
-            label,
-            color = if (active) DSColors.fairway else DSColors.shadowGray,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
+            Text(
+                "滑动时间轴选择落点时间，拖动画面中的落点标记",
+                color = DSColors.shadowGray,
+                fontSize = 12.sp,
+            )
+        }
     }
 }
 

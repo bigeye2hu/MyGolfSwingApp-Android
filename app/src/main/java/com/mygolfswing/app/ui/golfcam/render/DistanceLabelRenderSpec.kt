@@ -19,7 +19,7 @@ internal object DistanceLabelRenderSpec {
     const val DIRECTION_THRESHOLD_X = 0.5f
     const val SHADOW_ALPHA = 0.8f
 
-    fun scale(videoHeight: Float): Float = (videoHeight / 1080f).coerceAtLeast(1f)
+    fun scale(videoHeight: Float): Float = videoHeight.coerceAtLeast(1f) / 1080f
     fun unitFontPx(videoHeight: Float): Float = 11f * scale(videoHeight)
     fun valueFontPx(videoHeight: Float): Float = 24f * scale(videoHeight)
     fun lineSpacingPx(videoHeight: Float): Float = 2f * scale(videoHeight)

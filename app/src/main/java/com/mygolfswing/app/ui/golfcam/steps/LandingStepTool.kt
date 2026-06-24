@@ -369,6 +369,7 @@ private fun loadLandingThumbnails(
     val retriever = MediaMetadataRetriever()
     return try {
         retriever.setDataSource(context, videoUri)
+        val metadata = retriever.thumbnailVideoMetadata()
         List(LANDING_THUMB_COUNT) { index ->
             val relSec = index * MAX_FLIGHT_SEC / (LANDING_THUMB_COUNT - 1)
             val targetMs = impactTimeMs + (relSec * 1000).toLong()
@@ -376,7 +377,7 @@ private fun loadLandingThumbnails(
             retriever.getFrameAtTime(
                 max(0L, safeMs) * 1000L,
                 MediaMetadataRetriever.OPTION_CLOSEST,
-            )?.toLandingBitmap()
+            )?.rotatedToVisualOrientation(metadata)?.toLandingBitmap()
         }
     } catch (_: Throwable) {
         emptyList()

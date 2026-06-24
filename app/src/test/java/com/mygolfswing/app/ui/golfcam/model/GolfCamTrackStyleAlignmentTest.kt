@@ -19,7 +19,7 @@ import com.mygolfswing.app.ui.golfcam.steps.minimumTrimFraction
 import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadFraction
 import com.mygolfswing.app.ui.golfcam.steps.trimPlayheadSeekTimeMs
 import com.mygolfswing.app.ui.golfcam.steps.trimSeekTimeMs
-import com.mygolfswing.app.ui.golfcam.steps.trimThumbnailRotationDegrees
+import com.mygolfswing.app.ui.golfcam.steps.thumbnailRotationDegrees
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -461,7 +461,7 @@ class GolfCamTrackStyleAlignmentTest {
     fun trimThumbnailsUseVisualOrientationLikeIosPreferredTrackTransform() {
         assertEquals(
             90,
-            trimThumbnailRotationDegrees(
+            thumbnailRotationDegrees(
                 metadataRotationDegrees = 90,
                 rawWidth = 1920,
                 rawHeight = 1080,
@@ -471,7 +471,7 @@ class GolfCamTrackStyleAlignmentTest {
         )
         assertEquals(
             0,
-            trimThumbnailRotationDegrees(
+            thumbnailRotationDegrees(
                 metadataRotationDegrees = 90,
                 rawWidth = 1920,
                 rawHeight = 1080,
@@ -481,7 +481,7 @@ class GolfCamTrackStyleAlignmentTest {
         )
         assertEquals(
             270,
-            trimThumbnailRotationDegrees(
+            thumbnailRotationDegrees(
                 metadataRotationDegrees = 270,
                 rawWidth = 1920,
                 rawHeight = 1080,
@@ -491,7 +491,7 @@ class GolfCamTrackStyleAlignmentTest {
         )
         assertEquals(
             180,
-            trimThumbnailRotationDegrees(
+            thumbnailRotationDegrees(
                 metadataRotationDegrees = 180,
                 rawWidth = 1920,
                 rawHeight = 1080,

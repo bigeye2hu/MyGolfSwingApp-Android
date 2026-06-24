@@ -339,6 +339,7 @@ private fun loadCurveThumbnails(
     val safeFrameRate = GolfCamFrameTimeline.safeFrameRate(frameRate)
     return try {
         retriever.setDataSource(context, videoUri)
+        val metadata = retriever.thumbnailVideoMetadata()
         val frames = buildList {
             var frame = 0
             while (frame < totalFrames) {
@@ -349,6 +350,7 @@ private fun loadCurveThumbnails(
         frames.map { frameIndex ->
             val timeMs = GolfCamFrameTimeline.timeMsForFrame(trimStartMs, frameIndex, safeFrameRate)
             val bitmap = retriever.getFrameAtTime(timeMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+                ?.rotatedToVisualOrientation(metadata)
                 ?.toCurveBitmap()
             CurveThumb(frameIndex = min(frameIndex, totalFrames - 1), bitmap = bitmap)
         }

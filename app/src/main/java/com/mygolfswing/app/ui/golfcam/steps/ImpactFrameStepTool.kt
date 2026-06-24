@@ -245,12 +245,15 @@ private fun FrameFilmstrip(
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(context, videoUri)
+                val metadata = retriever.thumbnailVideoMetadata()
                 (0 until thumbCount).map { i ->
                     val frameMs = startMs + i.toLong() * trimDurationMs / (thumbCount - 1).coerceAtLeast(1)
                     val bmp = retriever.getFrameAtTime(frameMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                     bmp?.let {
-                        val h = 180; val w = (it.width.toFloat() / it.height * h).toInt().coerceAtLeast(1)
-                        Bitmap.createScaledBitmap(it, w, h, false)
+                        val visualBitmap = it.rotatedToVisualOrientation(metadata)
+                        val h = 180
+                        val w = (visualBitmap.width.toFloat() / visualBitmap.height * h).toInt().coerceAtLeast(1)
+                        Bitmap.createScaledBitmap(visualBitmap, w, h, false)
                     }
                 }
             } catch (_: Exception) {

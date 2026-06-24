@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -47,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -151,11 +151,17 @@ fun FlightCurveStepTool(
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            CurveActionChip(icon = Icons.Filled.TouchApp, label = "拖动控制点")
-            CurveActionChip(icon = Icons.Filled.Adjust, label = "匹配弹道")
-            Spacer(modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.TouchApp, null, tint = DSColors.fairway, modifier = Modifier.size(13.dp))
+            Text(
+                "滑动查看球飞行轨迹，调整曲线匹配实际弹道",
+                color = DSColors.shadowGray,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             CurveActionChip(icon = Icons.Filled.Bolt, label = "击球帧", active = true, onClick = { onImpactFrame?.invoke() })
         }
     }

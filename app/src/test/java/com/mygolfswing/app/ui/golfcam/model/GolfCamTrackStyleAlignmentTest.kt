@@ -3,6 +3,7 @@ package com.mygolfswing.app.ui.golfcam.model
 import androidx.compose.ui.graphics.StrokeCap
 import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
+import com.mygolfswing.app.ui.golfcam.steps.initialImpactFrameIndex
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -275,6 +276,20 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(1250L, GolfCamFrameTimeline.timeMsForFrame(trimStartMs = 1000L, frameIndex = 15, frameRate = 60.0))
         assertEquals(540, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 60.0))
         assertEquals(270, GolfCamFrameTimeline.totalFrames(durationMs = 9000L, frameRate = 30.0))
+    }
+
+    @Test
+    fun initialImpactFramePrefersSavedThenBestCandidateThenMiddleFrame() {
+        val candidates = listOf(
+            CandidateImpactFrame(frameIndex = 120, confidence = 0.95f, timeSec = 2.0),
+            CandidateImpactFrame(frameIndex = 48, confidence = 0.80f, timeSec = 0.8),
+        )
+
+        assertEquals(42, initialImpactFrameIndex(savedFrameIndex = 42, candidateFrames = candidates, totalFrames = 180))
+        assertEquals(120, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = candidates, totalFrames = 180))
+        assertEquals(90, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = emptyList(), totalFrames = 180))
+        assertEquals(179, initialImpactFrameIndex(savedFrameIndex = 999, candidateFrames = emptyList(), totalFrames = 180))
+        assertEquals(0, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = candidates, totalFrames = 0))
     }
 
     @Test

@@ -73,6 +73,16 @@ private val CELL_W: Dp = 32.dp
 private val CELL_H: Dp = 45.dp
 private val CELL_GAP: Dp = 2.dp
 
+internal fun initialImpactFrameIndex(
+    savedFrameIndex: Int?,
+    candidateFrames: List<CandidateImpactFrame>,
+    totalFrames: Int,
+): Int {
+    val lastFrame = (totalFrames - 1).coerceAtLeast(0)
+    return (savedFrameIndex ?: candidateFrames.firstOrNull()?.frameIndex ?: (totalFrames / 2))
+        .coerceIn(0, lastFrame)
+}
+
 /**
  * 步骤 2：击球帧选择。
  * UI：缩略图帧轨道（吸附居中）+ 候选帧金色小点 + 上一帧/下一帧按钮
@@ -94,13 +104,15 @@ fun ImpactFrameStepTool(
     val totalFrames = GolfCamFrameTimeline.totalFrames(trimDurationMs, safeFrameRate)
 
     // 初始帧：优先已保存 → 最高候选 → 中间帧
-    val initialFrame = remember(state.impactFrame, candidateFrames) {
-        state.impactFrame?.frameIndex
-            ?: candidateFrames.firstOrNull()?.frameIndex
-            ?: (totalFrames / 2)
+    val initialFrame = remember(state.impactFrame, candidateFrames, totalFrames) {
+        initialImpactFrameIndex(
+            savedFrameIndex = state.impactFrame?.frameIndex,
+            candidateFrames = candidateFrames,
+            totalFrames = totalFrames,
+        )
     }
 
-    var currentFrame by remember(durationMs, safeFrameRate) { mutableIntStateOf(initialFrame) }
+    var currentFrame by remember(startMs, endMs, safeFrameRate, initialFrame) { mutableIntStateOf(initialFrame) }
 
     // step：多少个真实帧 对应 1个缩略图格
     val step = (totalFrames.toFloat() / THUMB_CELL_COUNT).coerceAtLeast(1f)

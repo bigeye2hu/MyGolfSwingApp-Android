@@ -102,11 +102,12 @@ fun ImpactFrameStepTool(
     val endMs = (state.trimResult?.endMs?.takeIf { it > 0L } ?: durationMs).coerceAtLeast(startMs + 1L)
     val trimDurationMs = (endMs - startMs).coerceAtLeast(1L)
     val totalFrames = GolfCamFrameTimeline.totalFrames(trimDurationMs, safeFrameRate)
+    val savedFrameIndexOnEntry = remember(startMs, endMs) { state.impactFrame?.frameIndex }
 
     // 初始帧：优先已保存 → 最高候选 → 中间帧
-    val initialFrame = remember(state.impactFrame, candidateFrames, totalFrames) {
+    val initialFrame = remember(savedFrameIndexOnEntry, candidateFrames, totalFrames) {
         initialImpactFrameIndex(
-            savedFrameIndex = state.impactFrame?.frameIndex,
+            savedFrameIndex = savedFrameIndexOnEntry,
             candidateFrames = candidateFrames,
             totalFrames = totalFrames,
         )

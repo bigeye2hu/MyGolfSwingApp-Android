@@ -447,6 +447,18 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun asyncCandidateCanReplaceAutoMiddleFrameWhenNoSavedImpactFrameOnEntry() {
+        val candidates = listOf(
+            CandidateImpactFrame(frameIndex = 24, confidence = 0.98f, timeSec = 0.4),
+        )
+        val autoMiddleFrameAlreadyWrittenToState = 90
+
+        assertEquals(90, autoMiddleFrameAlreadyWrittenToState)
+        assertEquals(24, initialImpactFrameIndex(savedFrameIndex = null, candidateFrames = candidates, totalFrames = 180))
+        assertEquals(90, initialImpactFrameIndex(savedFrameIndex = autoMiddleFrameAlreadyWrittenToState, candidateFrames = candidates, totalFrames = 180))
+    }
+
+    @Test
     fun trajectoryOverlaySamplerCoversPreviewExportAcceptanceFrames() {
         val bezier = BezierPath(
             p0 = NormalizedPoint(0.08f, 0.78f),

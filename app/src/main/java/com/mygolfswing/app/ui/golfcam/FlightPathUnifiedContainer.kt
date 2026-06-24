@@ -61,6 +61,7 @@ import com.mygolfswing.app.ui.golfcam.model.FlightCurveSelection
 import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
+import com.mygolfswing.app.ui.golfcam.model.ImpactFrameSelection
 import com.mygolfswing.app.ui.golfcam.model.ImpactPositionSelection
 import com.mygolfswing.app.ui.golfcam.model.LandingOutput
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
@@ -195,12 +196,14 @@ fun FlightPathUnifiedContainer(
                     onCandidateFrameSelected = { candidate ->
                         val trim = state.trimResult
                         val startMs = trim?.startMs ?: 0L
-                        val timeMs = startMs + (candidate.timeSec * 1000).toLong()
+                        val endMs = trim?.endMs ?: durationMs
+                        val timeMs = (startMs + (candidate.timeSec * 1000).toLong()).coerceIn(startMs, endMs)
                         player.seekTo(timeMs)
                         player.pause()
-                        state.impactFrame = state.impactFrame?.copy(
+                        state.impactFrame = ImpactFrameSelection(
                             frameIndex = candidate.frameIndex,
                             timeMs = timeMs,
+                            candidateFrames = candidateFrames,
                         )
                     },
                     onImpactPositionChange = { nx, ny ->

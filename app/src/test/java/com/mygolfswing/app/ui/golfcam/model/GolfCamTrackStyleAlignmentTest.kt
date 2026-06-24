@@ -44,9 +44,9 @@ class GolfCamTrackStyleAlignmentTest {
         )
 
         assertEquals(0.164f, p1.x, 1e-6f)
-        assertEquals(0.5704f, p1.y, 1e-6f)
+        assertEquals(0.43712f, p1.y, 1e-6f)
         assertEquals(0.356f, p2.x, 1e-6f)
-        assertEquals(0.39f, p2.y, 1e-6f)
+        assertEquals(0.152f, p2.y, 1e-6f)
     }
 
     @Test
@@ -292,13 +292,13 @@ class GolfCamTrackStyleAlignmentTest {
 
     @Test
     fun curveControlDragClampMatchesIosUnifiedFlowRange() {
-        val topLeft = clampedCurveControlPoint(-500f, -900f, 1000f, 1000f)
+        val topLeft = clampedCurveControlPoint(-500f, -1200f, 1000f, 1000f)
         val bottomRight = clampedCurveControlPoint(1600f, 1800f, 1000f, 1000f)
 
-        assertEquals(0.02f, topLeft.x, 0f)
-        assertEquals(-0.5f, topLeft.y, 0f)
-        assertEquals(0.98f, bottomRight.x, 0f)
-        assertEquals(1.2f, bottomRight.y, 0f)
+        assertEquals(0f, topLeft.x, 0f)
+        assertEquals(-1f, topLeft.y, 0f)
+        assertEquals(1f, bottomRight.x, 0f)
+        assertEquals(1.5f, bottomRight.y, 0f)
     }
 
     @Test

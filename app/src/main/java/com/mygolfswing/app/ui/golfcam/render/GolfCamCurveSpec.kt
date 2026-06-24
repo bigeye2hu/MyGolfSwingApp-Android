@@ -15,12 +15,16 @@ internal object GolfCamCurveSpec {
     private const val CONTROL_P1_X = 0.08f
     private const val CONTROL_P2_X = 0.32f
     private const val CONTROL_P1_Y = 0.56f
-    private const val CONTROL_BASE_LIFT = 0.07f
-    private const val CONTROL_X_LIFT = 0.20f
-    private const val MIN_X = 0.02f
-    private const val MAX_X = 0.98f
-    private const val MIN_Y = -0.5f
-    private const val MAX_Y = 1.2f
+    private const val CONTROL_BASE_LIFT = 0.26f
+    private const val CONTROL_X_LIFT = 0.26f
+    private const val SUGGEST_MIN_X = 0.02f
+    private const val SUGGEST_MAX_X = 0.98f
+    private const val SUGGEST_MIN_Y = -0.5f
+    private const val SUGGEST_MAX_Y = 1.2f
+    private const val DRAG_MIN_X = 0f
+    private const val DRAG_MAX_X = 1f
+    private const val DRAG_MIN_Y = -1f
+    private const val DRAG_MAX_Y = 1.5f
 
     fun suggestedControlPoints(
         start: NormalizedPoint,
@@ -51,8 +55,15 @@ internal object GolfCamCurveSpec {
 
     fun clampPoint(point: NormalizedPoint): NormalizedPoint {
         return NormalizedPoint(
-            x = point.x.coerceIn(MIN_X, MAX_X),
-            y = point.y.coerceIn(MIN_Y, MAX_Y),
+            x = point.x.coerceIn(SUGGEST_MIN_X, SUGGEST_MAX_X),
+            y = point.y.coerceIn(SUGGEST_MIN_Y, SUGGEST_MAX_Y),
+        )
+    }
+
+    fun clampDraggedControlPoint(point: NormalizedPoint): NormalizedPoint {
+        return NormalizedPoint(
+            x = point.x.coerceIn(DRAG_MIN_X, DRAG_MAX_X),
+            y = point.y.coerceIn(DRAG_MIN_Y, DRAG_MAX_Y),
         )
     }
 

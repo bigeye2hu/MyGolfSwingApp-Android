@@ -5,6 +5,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -40,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -150,21 +153,10 @@ fun FlightCurveStepTool(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Icon(Icons.Filled.TouchApp, null, tint = DSColors.fairway, modifier = Modifier.size(12.dp))
-            Text("滑动查看球飞行轨迹，调整曲线匹配实际弹道", color = DSColors.shadowGray, fontSize = 11.sp)
+            CurveActionChip(icon = Icons.Filled.TouchApp, label = "拖动控制点")
+            CurveActionChip(icon = Icons.Filled.Adjust, label = "匹配弹道")
             Spacer(modifier = Modifier.weight(1f))
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(DSColors.fairway.copy(alpha = 0.15f))
-                    .clickable { onImpactFrame?.invoke() }
-                    .padding(horizontal = 9.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(Icons.Filled.Bolt, null, tint = DSColors.fairway, modifier = Modifier.size(12.dp))
-                Text("击球帧", color = DSColors.fairway, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            }
+            CurveActionChip(icon = Icons.Filled.Bolt, label = "击球帧", active = true, onClick = { onImpactFrame?.invoke() })
         }
     }
 }
@@ -195,28 +187,68 @@ private fun ControlPointReadout(label: String, xPct: Float, yPct: Float) {
 @Composable
 private fun FrameStepButton(
     enabled: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     label: String,
     onClick: () -> Unit,
 ) {
+    val contentColor = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.42f)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(50.dp)
             .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) Color.White else DSColors.mistGreen.copy(alpha = 0.52f))
+            .border(
+                width = 1.dp,
+                color = if (enabled) DSColors.fairway.copy(alpha = 0.16f) else Color.Transparent,
+                shape = RoundedCornerShape(8.dp),
+            )
             .clickable(enabled = enabled) { onClick() }
             .padding(vertical = 4.dp),
     ) {
         Icon(
             icon,
             null,
-            tint = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.4f),
+            tint = contentColor,
             modifier = Modifier.size(16.dp),
         )
         Text(
             label,
-            color = if (enabled) DSColors.shadowGray else DSColors.shadowGray.copy(alpha = 0.4f),
+            color = contentColor.copy(alpha = if (enabled) 0.72f else 1f),
             fontSize = 9.sp,
+        )
+    }
+}
+
+@Composable
+private fun CurveActionChip(
+    icon: ImageVector,
+    label: String,
+    active: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (active) DSColors.fairway.copy(alpha = 0.15f) else DSColors.mistGreen.copy(alpha = 0.55f))
+            .then(
+                if (active) {
+                    Modifier.border(1.dp, DSColors.fairway.copy(alpha = 0.18f), RoundedCornerShape(8.dp))
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(enabled = onClick != null) { onClick?.invoke() }
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(icon, null, tint = if (active) DSColors.fairway else DSColors.shadowGray, modifier = Modifier.size(12.dp))
+        Text(
+            label,
+            color = if (active) DSColors.fairway else DSColors.shadowGray,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

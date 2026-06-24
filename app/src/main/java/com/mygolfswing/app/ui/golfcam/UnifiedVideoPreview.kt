@@ -421,23 +421,23 @@ private fun LandingOverlay(
                     detectDragGestures(
                         onDragStart = { offset ->
                             onLandingChange?.invoke(
-                                (offset.x / wPx).coerceIn(0.02f, 0.98f),
-                                (offset.y / hPx).coerceIn(0.02f, 0.98f),
+                                (offset.x / wPx).coerceIn(0f, 1f),
+                                (offset.y / hPx).coerceIn(0f, 1f),
                             )
                         },
                     ) { change, _ ->
                         change.consume()
                         onLandingChange?.invoke(
-                            (change.position.x / wPx).coerceIn(0.02f, 0.98f),
-                            (change.position.y / hPx).coerceIn(0.02f, 0.98f),
+                            (change.position.x / wPx).coerceIn(0f, 1f),
+                            (change.position.y / hPx).coerceIn(0f, 1f),
                         )
                     }
                 }
                 .pointerInput(Unit) {
                     detectTapGestures { offset ->
                         onLandingChange?.invoke(
-                            (offset.x / wPx).coerceIn(0.02f, 0.98f),
-                            (offset.y / hPx).coerceIn(0.02f, 0.98f),
+                            (offset.x / wPx).coerceIn(0f, 1f),
+                            (offset.y / hPx).coerceIn(0f, 1f),
                         )
                     }
                 },

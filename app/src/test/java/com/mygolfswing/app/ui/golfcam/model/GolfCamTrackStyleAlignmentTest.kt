@@ -11,6 +11,7 @@ import com.mygolfswing.app.ui.golfcam.clampedCurveControlPoint
 import com.mygolfswing.app.ui.golfcam.normalizedLandingCoordinate
 import com.mygolfswing.app.ui.golfcam.normalizedVideoCoordinate
 import com.mygolfswing.app.ui.golfcam.shouldReuseImpactCandidates
+import com.mygolfswing.app.ui.golfcam.shouldOpenExportPreview
 import com.mygolfswing.app.ui.golfcam.targetExportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimEndFraction
 import com.mygolfswing.app.ui.golfcam.steps.clampTrimStartFraction
@@ -37,6 +38,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 import kotlin.math.abs
 
 class GolfCamTrackStyleAlignmentTest {
@@ -340,6 +342,12 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(2160, landscape4k.height)
         assertEquals(2160, portrait4k.width)
         assertEquals(3840, portrait4k.height)
+    }
+
+    @Test
+    fun exportedFileOpensPreviewBeforeGallerySave() {
+        assertFalse(shouldOpenExportPreview(null))
+        assertTrue(shouldOpenExportPreview(File("GolfSwing_preview.mp4")))
     }
 
     @Test

@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
@@ -157,6 +158,10 @@ internal fun targetExportVideoDimensions(resolution: ExportResolution, isPortrai
     return resolution.dimensions(isPortrait)
 }
 
+internal fun shouldOpenExportPreview(exportedFile: File?): Boolean {
+    return exportedFile != null
+}
+
 internal fun effectiveExportFrameRotation(
     metadataRotationDegrees: Int,
     frameWidth: Int,
@@ -211,6 +216,8 @@ fun GolfCamOverlayPreviewScreen(
     var showPlaybackButton by remember { mutableStateOf(true) }
     var showExportSettings by remember { mutableStateOf(false) }
     var selectedExportResolution by remember { mutableStateOf(ExportResolution.HD_1080P) }
+    var exportedVideoFile by remember { mutableStateOf<File?>(null) }
+    var savingExport by remember { mutableStateOf(false) }
 
     LaunchedEffect(videoUri) {
         videoConfig = withContext(Dispatchers.IO) {
@@ -384,8 +391,7 @@ fun GolfCamOverlayPreviewScreen(
                                     exportResolution = selectedExportResolution,
                                     isPortrait = isPortrait,
                                     onProgress = { exportProgress = it },
-                                )
-                                exportDone = true
+                                ).also { exportedVideoFile = it }
                             } finally {
                                 exporting = false
                             }
@@ -402,6 +408,32 @@ fun GolfCamOverlayPreviewScreen(
                 isPortrait = isPortrait,
                 onSelect = { selectedExportResolution = it },
                 onDismiss = { showExportSettings = false },
+            )
+        }
+
+        exportedVideoFile?.let { file ->
+            ExportPreviewOverlay(
+                videoFile = file,
+                saving = savingExport,
+                onDismiss = {
+                    file.delete()
+                    exportedVideoFile = null
+                },
+                onSave = {
+                    if (!savingExport) {
+                        scope.launch {
+                            savingExport = true
+                            try {
+                                saveExportedVideoToGallery(context, file)
+                                exportDone = true
+                                file.delete()
+                                exportedVideoFile = null
+                            } finally {
+                                savingExport = false
+                            }
+                        }
+                    }
+                },
             )
         }
     }
@@ -530,6 +562,90 @@ private fun ExportSettingsOverlay(
                     .clickable { onDismiss() }
                     .padding(horizontal = 28.dp, vertical = 10.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun ExportPreviewOverlay(
+    videoFile: File,
+    saving: Boolean,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val context = LocalContext.current
+    val player = remember(videoFile) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.fromFile(videoFile)))
+            repeatMode = Player.REPEAT_MODE_ONE
+            prepare()
+            playWhenReady = true
+        }
+    }
+    DisposableEffect(videoFile) {
+        onDispose { player.release() }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DSColors.inkGreen),
+    ) {
+        AndroidView(
+            factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 16.dp, top = 16.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(DSColors.inkGreen.copy(alpha = 0.72f)),
+        ) {
+            Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 56.dp, vertical = 40.dp)
+                .fillMaxWidth()
+                .height(54.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen)))
+                .clickable(enabled = !saving) { onSave() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Text("保存到相册", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        if (saving) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.60f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(DSColors.inkGreen.copy(alpha = 0.95f))
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    CircularProgressIndicator(color = Color.White)
+                    Text("正在保存到相册...", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                }
+            }
         }
     }
 }
@@ -871,7 +987,7 @@ private suspend fun exportVideoWithTrajectory(
     exportResolution: ExportResolution,
     isPortrait: Boolean,
     onProgress: (Float) -> Unit,
-) = withContext(Dispatchers.IO) {
+): File = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
     retriever.setDataSource(context, videoUri)
 
@@ -1027,7 +1143,14 @@ private suspend fun exportVideoWithTrajectory(
     muxer.release()
     retriever.release()
 
-    // 写入相册
+    onProgress(1f)
+    outputFile
+}
+
+private suspend fun saveExportedVideoToGallery(
+    context: Context,
+    outputFile: File,
+) = withContext(Dispatchers.IO) {
     val values = ContentValues().apply {
         put(MediaStore.Video.Media.DISPLAY_NAME, "GolfSwing_${System.currentTimeMillis()}.mp4")
         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -1047,8 +1170,6 @@ private suspend fun exportVideoWithTrajectory(
             context.contentResolver.update(destUri, values, null, null)
         }
     }
-    outputFile.delete()
-    onProgress(1f)
 }
 
 private fun drawVideoFrameOnCanvas(

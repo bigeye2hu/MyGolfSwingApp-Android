@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Rect
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
@@ -93,6 +94,21 @@ private data class VideoPlaybackConfig(
     val frameRate: Double = 30.0,
     val aspectRatio: Float = 9f / 16f,
 )
+
+internal data class ExportVideoDimensions(
+    val width: Int,
+    val height: Int,
+)
+
+internal fun exportVideoDimensions(rawWidth: Int, rawHeight: Int, rotationDegrees: Int): ExportVideoDimensions {
+    val safeWidth = rawWidth.coerceAtLeast(1)
+    val safeHeight = rawHeight.coerceAtLeast(1)
+    return if (rotationDegrees == 90 || rotationDegrees == 270) {
+        ExportVideoDimensions(width = safeHeight, height = safeWidth)
+    } else {
+        ExportVideoDimensions(width = safeWidth, height = safeHeight)
+    }
+}
 
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
@@ -282,8 +298,12 @@ private suspend fun exportVideoWithTrajectory(
     val retriever = MediaMetadataRetriever()
     retriever.setDataSource(context, videoUri)
 
-    val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1280
-    val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 720
+    val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1280
+    val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 720
+    val rotationDegrees = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
+    val exportSize = exportVideoDimensions(rawWidth = rawWidth, rawHeight = rawHeight, rotationDegrees = rotationDegrees)
+    val width = exportSize.width
+    val height = exportSize.height
     val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 3000L
     val fps = timing.fps.roundToInt().coerceIn(1, 120)
 
@@ -335,7 +355,13 @@ private suspend fun exportVideoWithTrajectory(
 
         val c = surface.lockCanvas(null)
         if (frameBitmap != null) {
-            c.drawBitmap(frameBitmap, 0f, 0f, null)
+            drawVideoFrameOnCanvas(
+                canvas = c,
+                frameBitmap = frameBitmap,
+                width = width,
+                height = height,
+                rotationDegrees = rotationDegrees,
+            )
             frameBitmap.recycle()
         } else {
             c.drawColor(android.graphics.Color.BLACK)
@@ -425,6 +451,48 @@ private suspend fun exportVideoWithTrajectory(
     }
     outputFile.delete()
     onProgress(1f)
+}
+
+private fun drawVideoFrameOnCanvas(
+    canvas: AndroidCanvas,
+    frameBitmap: Bitmap,
+    width: Int,
+    height: Int,
+    rotationDegrees: Int,
+) {
+    val src = Rect(0, 0, frameBitmap.width, frameBitmap.height)
+    val rotation = if (
+        (rotationDegrees == 90 || rotationDegrees == 270) &&
+        frameBitmap.width == width &&
+        frameBitmap.height == height
+    ) {
+        0
+    } else {
+        rotationDegrees
+    }
+
+    canvas.save()
+    when (rotation) {
+        90 -> {
+            canvas.translate(width.toFloat(), 0f)
+            canvas.rotate(90f)
+            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, height, width), null)
+        }
+        180 -> {
+            canvas.translate(width.toFloat(), height.toFloat())
+            canvas.rotate(180f)
+            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, width, height), null)
+        }
+        270 -> {
+            canvas.translate(0f, height.toFloat())
+            canvas.rotate(270f)
+            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, height, width), null)
+        }
+        else -> {
+            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, width, height), null)
+        }
+    }
+    canvas.restore()
 }
 
 private fun drawTrajectoryOnCanvas(

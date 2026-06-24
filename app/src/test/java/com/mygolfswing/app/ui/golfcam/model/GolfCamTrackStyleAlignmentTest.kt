@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
 import androidx.compose.ui.graphics.StrokeCap
+import com.mygolfswing.app.ui.golfcam.exportVideoDimensions
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayFrameSampler
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
@@ -242,6 +243,20 @@ class GolfCamTrackStyleAlignmentTest {
         assertEquals(2560f, portraitInTallScreen.height, 0.01f)
         assertEquals(562.5f, portraitInShortBox.width, 0.01f)
         assertEquals(1000f, portraitInShortBox.height, 0.01f)
+    }
+
+    @Test
+    fun exportVideoDimensionsUseVisualOrientationForRotatedPhoneVideo() {
+        val landscape = exportVideoDimensions(rawWidth = 1920, rawHeight = 1080, rotationDegrees = 0)
+        val portrait90 = exportVideoDimensions(rawWidth = 1920, rawHeight = 1080, rotationDegrees = 90)
+        val portrait270 = exportVideoDimensions(rawWidth = 1920, rawHeight = 1080, rotationDegrees = 270)
+
+        assertEquals(1920, landscape.width)
+        assertEquals(1080, landscape.height)
+        assertEquals(1080, portrait90.width)
+        assertEquals(1920, portrait90.height)
+        assertEquals(1080, portrait270.width)
+        assertEquals(1920, portrait270.height)
     }
 
     @Test

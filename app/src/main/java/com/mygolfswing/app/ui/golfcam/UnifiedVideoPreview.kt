@@ -441,10 +441,14 @@ private fun LandingOverlay(
     onLandingChange: ((Float, Float) -> Unit)?,
 ) {
     val landing = state.landing
-    val nx = landing?.normalizedX ?: 0.5f
-    val ny = landing?.normalizedY ?: 0.5f
+    var nx by remember(landing) { mutableFloatStateOf(landing?.normalizedX ?: 0.5f) }
+    var ny by remember(landing) { mutableFloatStateOf(landing?.normalizedY ?: 0.5f) }
     var isDragging by remember { mutableStateOf(false) }
     var dragGrabOffset by remember { mutableStateOf(Offset.Zero) }
+
+    LaunchedEffect(Unit) {
+        if (landing == null) onLandingChange?.invoke(nx, ny)
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -452,10 +456,10 @@ private fun LandingOverlay(
         val hPx = with(density) { maxHeight.toPx() }
         val markerSizePx = with(density) { 24.dp.toPx() }
         val dragRadiusPx = with(density) { 50.dp.toPx() }
-        val visualCx = nx * wPx
-        val visualCy = ny * hPx - markerSizePx * LANDING_MARKER_ANCHOR_RATIO
-        val visualCenter = Offset(visualCx, visualCy)
-        val currentVisualCenter by rememberUpdatedState(visualCenter)
+        val anchorCenter = Offset(nx * wPx, ny * hPx)
+        val currentAnchorCenter by rememberUpdatedState(anchorCenter)
+        val visualCx = anchorCenter.x
+        val visualCy = anchorCenter.y - markerSizePx * LANDING_MARKER_ANCHOR_RATIO
 
         Canvas(
             modifier = Modifier
@@ -463,10 +467,9 @@ private fun LandingOverlay(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = { offset ->
-                            onLandingChange?.invoke(
-                                normalizedVideoCoordinate(offset.x, wPx),
-                                normalizedLandingCoordinate(offset.y, hPx, markerSizePx),
-                            )
+                            nx = normalizedVideoCoordinate(offset.x, wPx)
+                            ny = normalizedVideoCoordinate(offset.y, hPx)
+                            onLandingChange?.invoke(nx, ny)
                         },
                     )
                 }
@@ -474,7 +477,7 @@ private fun LandingOverlay(
                     var hitDrag = false
                     detectDragGestures(
                         onDragStart = { offset ->
-                            val center = currentVisualCenter
+                            val center = currentAnchorCenter
                             val dx = offset.x - center.x
                             val dy = offset.y - center.y
                             hitDrag = (dx * dx + dy * dy) <= dragRadiusPx * dragRadiusPx
@@ -487,10 +490,9 @@ private fun LandingOverlay(
                         if (hitDrag) {
                             change.consume()
                             val center = change.position - dragGrabOffset
-                            onLandingChange?.invoke(
-                                normalizedVideoCoordinate(center.x, wPx),
-                                normalizedLandingCoordinate(center.y, hPx, markerSizePx),
-                            )
+                            nx = normalizedVideoCoordinate(center.x, wPx)
+                            ny = normalizedVideoCoordinate(center.y, hPx)
+                            onLandingChange?.invoke(nx, ny)
                         }
                     }
                 },

@@ -18,18 +18,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SocialDistance
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Air
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -230,7 +231,8 @@ private fun ColorContent(
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(if (selected) 44.dp else 40.dp)
+                        .size(44.dp)
+                        .padding(if (selected) 0.dp else 2.dp)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(preset.gradientColors.map { Color(it) }))
                         .then(
@@ -248,7 +250,12 @@ private fun ColorContent(
                         },
                 ) {
                     if (selected) {
-                        Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
+                        )
                     }
                 }
             }
@@ -299,50 +306,54 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
         mutableStateOf(GolfCamDistanceConfig.displayText(style.totalDistance))
     }
 
-    fun commitDistance() {
-        val value = distanceText.toDoubleOrNull()
-        if (value != null) {
-            onChange(style.copy(totalDistance = GolfCamDistanceConfig.clamp(value)))
-        }
-    }
-
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("显示距离标注", color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                Text("在球头实时显示飞行距离", color = DSColors.shadowGray, fontSize = 11.sp)
+                Text("飞行距离", color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (style.showDistance) {
+                        "${GolfCamDistanceConfig.displayText(style.totalDistance)} ${style.distanceUnit.displayName}"
+                    } else {
+                        "不显示距离标注"
+                    },
+                    color = DSColors.shadowGray,
+                    fontSize = 11.sp,
+                )
             }
-            Switch(
-                checked = style.showDistance,
-                onCheckedChange = { onChange(style.copy(showDistance = it)) },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = DSColors.fairway,
-                ),
+            DistanceIconButton(
+                icon = if (style.showDistance) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                label = if (style.showDistance) "显示" else "隐藏",
+                active = style.showDistance,
+                onClick = { onChange(style.copy(showDistance = !style.showDistance)) },
             )
         }
         if (style.showDistance) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(DSColors.mistGreen.copy(alpha = 0.55f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                        .background(Color.White)
+                        .border(1.dp, DSColors.fairway.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
                     TextField(
                         value = distanceText,
                         onValueChange = { text ->
-                            distanceText = GolfCamDistanceConfig.inputText(text)
+                            val sanitized = GolfCamDistanceConfig.inputText(text)
+                            distanceText = sanitized
+                            sanitized.toDoubleOrNull()?.let { value ->
+                                onChange(style.copy(totalDistance = GolfCamDistanceConfig.clamp(value)))
+                            }
                         },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -367,43 +378,58 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    Button(
-                        onClick = { commitDistance() },
-                        modifier = Modifier.padding(start = 6.dp),
-                    ) {
-                        Text("✓", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DSColors.mistGreen.copy(alpha = 0.55f))
-                        .clickable {
-                            val nextUnit = style.distanceUnit.toggle()
-                            val converted = GolfCamDistanceConfig.convert(
-                                distance = style.totalDistance,
-                                from = style.distanceUnit,
-                                to = nextUnit,
-                            )
-                            distanceText = GolfCamDistanceConfig.displayText(converted)
-                            onChange(
-                                style.copy(
-                                    distanceUnit = nextUnit,
-                                    totalDistance = converted,
-                                ),
-                            )
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(style.distanceUnit.displayName, color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text("↕", color = DSColors.fairway, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text(style.distanceUnit.toggle().displayName, color = DSColors.shadowGray, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+                DistanceIconButton(
+                    icon = Icons.Filled.SwapHoriz,
+                    label = style.distanceUnit.displayName,
+                    active = true,
+                    onClick = {
+                        val nextUnit = style.distanceUnit.toggle()
+                        val converted = GolfCamDistanceConfig.convert(
+                            distance = style.totalDistance,
+                            from = style.distanceUnit,
+                            to = nextUnit,
+                        )
+                        distanceText = GolfCamDistanceConfig.displayText(converted)
+                        onChange(
+                            style.copy(
+                                distanceUnit = nextUnit,
+                                totalDistance = converted,
+                            ),
+                        )
+                    },
+                )
             }
+        }
+    }
+}
+
+@Composable
+private fun DistanceIconButton(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val background = if (active) {
+        Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen))
+    } else {
+        Brush.linearGradient(listOf(DSColors.mistGreen.copy(alpha = 0.72f), DSColors.mistGreen.copy(alpha = 0.72f)))
+    }
+    val contentColor = if (active) Color.White else DSColors.shadowGray
+
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(background)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp))
+            Text(label, color = contentColor, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }

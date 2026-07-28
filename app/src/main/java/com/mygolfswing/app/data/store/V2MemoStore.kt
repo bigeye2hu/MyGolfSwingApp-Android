@@ -24,8 +24,17 @@ object V2MemoStore {
     private val _allMemos = MutableStateFlow<List<V2Memo>>(emptyList())
     val allMemos: StateFlow<List<V2Memo>> = _allMemos.asStateFlow()
 
+    private val pendingDeletedMemoIds = mutableSetOf<UUID>()
+    private val pendingUpsertMemoIds = mutableSetOf<UUID>()
+
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
     fun resetInMemory() {
         _allMemos.value = emptyList()
+        pendingDeletedMemoIds.clear()
+        pendingUpsertMemoIds.clear()
+        _isSyncing.value = false
     }
 
     @Volatile private var collecting = false
@@ -41,8 +50,29 @@ object V2MemoStore {
                 memos.map { memo ->
                     memo.copy(linkedGoalIds = linkedGoalIdsByMemo[memo.id].orEmpty().distinct())
                 }.filterNot(::isDemoMemo)
-            }.onEach { latest -> _allMemos.value = latest }.collect()
+            }.onEach { latest -> _allMemos.value = mergeObservedMemos(latest) }.collect()
         }
+    }
+
+    private fun mergeObservedMemos(observed: List<V2Memo>): List<V2Memo> {
+        val pendingDeleted = pendingDeletedMemoIds.toSet()
+        val pendingUpserts = pendingUpsertMemoIds.toSet()
+        val visibleObserved = if (pendingDeleted.isEmpty()) observed else observed.filterNot { it.id in pendingDeleted }
+        val memoryById = _allMemos.value.associateBy { it.id }
+        if (memoryById.isEmpty()) return visibleObserved
+        val observedIds = visibleObserved.map { it.id }.toSet()
+        val merged = visibleObserved.map { row ->
+            val mem = memoryById[row.id] ?: return@map row
+            if (mem.updatedAt.isAfter(row.updatedAt)) {
+                mem
+            } else {
+                row
+            }
+        }
+        val memoryOnly = _allMemos.value.filter { memo ->
+            memo.id in pendingUpserts && memo.id !in observedIds && memo.id !in pendingDeleted
+        }
+        return (memoryOnly + merged).sortedByDescending { it.createdAt }
     }
 
     val textMemos: List<V2Memo>
@@ -78,22 +108,74 @@ object V2MemoStore {
         _allMemos.value.sortedByDescending { it.createdAt }.take(limit)
 
     fun create(memo: V2Memo) {
-        scope.launch { repo.upsert(memo) }
+        pendingUpsertMemoIds += memo.id
+        _allMemos.value = (listOf(memo) + _allMemos.value.filterNot { it.id == memo.id })
+            .sortedByDescending { it.createdAt }
+        scope.launch {
+            try {
+                repo.upsert(memo)
+            } finally {
+                pendingUpsertMemoIds -= memo.id
+            }
+        }
+    }
+
+    suspend fun createAndWait(memo: V2Memo): UUID {
+        repo.upsert(memo)
+        _allMemos.value = (listOf(memo) + _allMemos.value.filterNot { it.id == memo.id })
+            .sortedByDescending { it.createdAt }
+        return memo.id
     }
 
     fun update(memo: V2Memo) {
-        scope.launch { repo.upsert(memo.copy(updatedAt = LocalDateTime.now())) }
+        val updated = memo.copy(updatedAt = LocalDateTime.now())
+        pendingUpsertMemoIds += updated.id
+        _allMemos.value = (listOf(updated) + _allMemos.value.filterNot { it.id == updated.id })
+            .sortedByDescending { it.createdAt }
+        scope.launch {
+            try {
+                repo.upsert(updated)
+            } finally {
+                pendingUpsertMemoIds -= updated.id
+            }
+        }
+    }
+
+    suspend fun updateAndWait(memo: V2Memo): UUID {
+        val updated = memo.copy(updatedAt = LocalDateTime.now())
+        repo.upsert(updated)
+        _allMemos.value = (listOf(updated) + _allMemos.value.filterNot { it.id == updated.id })
+            .sortedByDescending { it.createdAt }
+        return updated.id
     }
 
     fun delete(memoId: UUID) {
-        scope.launch { repo.delete(memoId.toString()) }
+        pendingDeletedMemoIds += memoId
+        _allMemos.value = _allMemos.value.filterNot { it.id == memoId }
+        scope.launch {
+            try {
+                repo.delete(memoId.toString())
+            } finally {
+                pendingDeletedMemoIds -= memoId
+            }
+        }
+    }
+
+    suspend fun deleteAndWait(memoId: UUID) {
+        repo.delete(memoId.toString())
+        _allMemos.value = _allMemos.value.filterNot { it.id == memoId }
     }
 
     fun pullFromCloud() {
         scope.launch {
-            runCatching { repo.deleteLocalDemoMemos() }
-            runCatching { repo.pullFromCloud() }
-            runCatching { repo.pushDirty() }
+            _isSyncing.value = true
+            try {
+                runCatching { repo.deleteLocalDemoMemos() }
+                runCatching { repo.pullFromCloud() }
+                runCatching { repo.pushDirty() }
+            } finally {
+                _isSyncing.value = false
+            }
         }
     }
 

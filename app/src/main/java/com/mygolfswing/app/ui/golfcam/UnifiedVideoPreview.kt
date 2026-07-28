@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
@@ -70,21 +71,44 @@ import com.mygolfswing.app.ui.golfcam.render.GolfCamCurveSpec
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryStaticOverlay
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
+import com.mygolfswing.app.ui.golfcam.steps.CURVE_CONTROL_HIT_TARGET_DP
 import kotlinx.coroutines.delay
 
 internal fun normalizedVideoCoordinate(positionPx: Float, dimensionPx: Float): Float {
-    if (dimensionPx <= 0f) return 0f
+    if (dimensionPx <= 0f || !dimensionPx.isFinite() || !positionPx.isFinite()) return 0.5f
     return (positionPx / dimensionPx).coerceIn(0f, 1f)
+}
+
+internal fun normalizedCoordinateOrCenter(value: Float?): Float {
+    return value?.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0.5f
 }
 
 internal fun normalizedLandingCoordinate(
     positionPx: Float,
     dimensionPx: Float,
+    @Suppress("UNUSED_PARAMETER")
     markerSizePx: Float,
 ): Float {
-    return normalizedVideoCoordinate(
-        positionPx + markerSizePx * LANDING_MARKER_ANCHOR_RATIO,
-        dimensionPx,
+    return normalizedVideoCoordinate(positionPx, dimensionPx)
+}
+
+internal fun unifiedPreviewElapsedMs(currentPositionMs: Long, impactTimeMs: Long): Long {
+    return (currentPositionMs - impactTimeMs).coerceAtLeast(0L)
+}
+
+internal fun previewTrajectoryTiming(
+    impactTimeMs: Long,
+    flightTimeSec: Double?,
+    fps: Double,
+): TrajectoryTiming {
+    val safeFlightTimeSec = flightTimeSec
+        ?.takeIf { it.isFinite() }
+        ?.coerceAtLeast(0.5)
+        ?: 3.0
+    return TrajectoryTiming(
+        impactTimeMs = impactTimeMs,
+        landingTimeMs = GolfCamFrameTimeline.timeMsAfterSeconds(impactTimeMs, safeFlightTimeSec),
+        fps = GolfCamFrameTimeline.safeFrameRate(fps),
     )
 }
 
@@ -94,25 +118,21 @@ internal fun clampedCurveControlPoint(
     widthPx: Float,
     heightPx: Float,
 ): NormalizedPoint {
-    if (widthPx <= 0f || heightPx <= 0f) return NormalizedPoint(0.5f, 0.5f)
+    if (widthPx <= 0f || heightPx <= 0f || !widthPx.isFinite() || !heightPx.isFinite() || !xPx.isFinite() || !yPx.isFinite()) {
+        return NormalizedPoint(0.5f, 0.5f)
+    }
     return GolfCamCurveSpec.clampDraggedControlPoint(NormalizedPoint(xPx / widthPx, yPx / heightPx))
 }
 
-private fun Offset.distanceSquaredTo(other: Offset): Float {
-    val dx = x - other.x
-    val dy = y - other.y
-    return dx * dx + dy * dy
-}
-
-private fun visibleCurveHitCenter(
+internal fun visibleCurveHitCenter(
     point: NormalizedPoint,
     widthPx: Float,
     heightPx: Float,
     targetSizePx: Float,
 ): Offset {
     fun clampToVisible(value: Float, dimension: Float): Float {
-        if (dimension <= 0f) return 0f
-        if (dimension <= targetSizePx) return dimension / 2f
+        if (dimension <= 0f || !dimension.isFinite() || !value.isFinite()) return 0f
+        if (dimension <= targetSizePx || !targetSizePx.isFinite()) return dimension / 2f
         val half = targetSizePx / 2f
         return value.coerceIn(half, dimension - half)
     }
@@ -123,6 +143,10 @@ private fun visibleCurveHitCenter(
 }
 
 private const val LANDING_MARKER_ANCHOR_RATIO = 0.25f
+internal const val IMPACT_MARKER_SIZE_DP = 24f
+internal const val IMPACT_DRAG_RADIUS_DP = 50f
+internal const val LANDING_MARKER_SIZE_DP = 24f
+internal const val LANDING_DRAG_RADIUS_DP = 50f
 
 /**
  * 视频预览 + 步骤叠加交互层（对齐 iOS UnifiedVideoPreview）。
@@ -167,14 +191,19 @@ fun UnifiedVideoPreview(
         onDispose { player.removeListener(listener) }
     }
 
-    LaunchedEffect(playing) {
+    LaunchedEffect(player, playing) {
         if (playing) player.play() else player.pause()
     }
 
-    LaunchedEffect(playing) {
-        while (playing) {
-            elapsedMs = player.currentPosition - (state.impactFrame?.timeMs ?: 0L)
-            delay(16L)
+    LaunchedEffect(player, currentStep, state.impactFrame, playing) {
+        while (true) {
+            if (playing || currentStep == GolfCamStep.TRACK_STYLE) {
+                elapsedMs = unifiedPreviewElapsedMs(
+                    currentPositionMs = player.currentPosition,
+                    impactTimeMs = state.impactFrame?.timeMs ?: 0L,
+                )
+            }
+            delay(if (playing) 16L else 33L)
         }
     }
 
@@ -204,6 +233,7 @@ fun UnifiedVideoPreview(
                             useController = false
                         }
                     },
+                    update = { view -> view.player = player },
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(Unit) {
@@ -229,12 +259,9 @@ fun UnifiedVideoPreview(
                         val trackStyle = state.trackStyle?.style
                         if (bezier != null && trackStyle != null) {
                             val timing = state.impactFrame?.let { impact ->
-                                val flightTimeMs = ((state.flightCurve?.landingPoint?.flightTimeSec ?: 3.0) * 1000)
-                                    .toLong()
-                                    .coerceAtLeast(500L)
-                                TrajectoryTiming(
+                                previewTrajectoryTiming(
                                     impactTimeMs = impact.timeMs,
-                                    landingTimeMs = impact.timeMs + flightTimeMs,
+                                    flightTimeSec = state.flightCurve?.landingPoint?.flightTimeSec,
                                     fps = videoFrameRate,
                                 )
                             }
@@ -366,10 +393,9 @@ private fun ImpactPositionOverlay(
     onPositionChange: ((Float, Float) -> Unit)?,
 ) {
     val pos = state.impactPosition
-    var nx by remember(pos) { mutableFloatStateOf(pos?.normalizedX ?: 0.5f) }
-    var ny by remember(pos) { mutableFloatStateOf(pos?.normalizedY ?: 0.5f) }
+    var nx by remember(pos) { mutableFloatStateOf(normalizedCoordinateOrCenter(pos?.normalizedX)) }
+    var ny by remember(pos) { mutableFloatStateOf(normalizedCoordinateOrCenter(pos?.normalizedY)) }
     var isDragging by remember { mutableStateOf(false) }
-    var dragGrabOffset by remember { mutableStateOf(Offset.Zero) }
 
     LaunchedEffect(Unit) {
         if (pos == null) onPositionChange?.invoke(nx, ny)
@@ -383,13 +409,10 @@ private fun ImpactPositionOverlay(
         val density = LocalDensity.current
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
-        val dragRadiusPx = with(density) { 50.dp.toPx() }
-        val markerSizeDp = 28.dp
+        val markerSizeDp = IMPACT_MARKER_SIZE_DP.dp
         val markerHalfPx = with(density) { (markerSizeDp / 2).toPx() }
-        val markerCenter = Offset(nx * wPx, ny * hPx)
-        val currentMarkerCenter by rememberUpdatedState(markerCenter)
 
-        // 双击全局跳位
+        // iOS 体验：可从画面任意位置起拖，标记跟随手势移动；双击仍可快速跳位。
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -403,27 +426,21 @@ private fun ImpactPositionOverlay(
                     )
                 }
                 .pointerInput(Unit) {
-                    var hitDrag = false
                     detectDragGestures(
                         onDragStart = { offset ->
-                            val center = currentMarkerCenter
-                            val dx = offset.x - center.x
-                            val dy = offset.y - center.y
-                            hitDrag = (dx * dx + dy * dy) <= dragRadiusPx * dragRadiusPx
-                            dragGrabOffset = if (hitDrag) offset - center else Offset.Zero
-                            isDragging = hitDrag
+                            nx = normalizedVideoCoordinate(offset.x, wPx)
+                            ny = normalizedVideoCoordinate(offset.y, hPx)
+                            onPositionChange?.invoke(nx, ny)
+                            isDragging = true
                         },
                         onDrag = { change, _ ->
-                            if (hitDrag) {
-                                change.consume()
-                                val center = change.position - dragGrabOffset
-                                nx = normalizedVideoCoordinate(center.x, wPx)
-                                ny = normalizedVideoCoordinate(center.y, hPx)
-                                onPositionChange?.invoke(nx, ny)
-                            }
+                            change.consume()
+                            nx = normalizedVideoCoordinate(change.position.x, wPx)
+                            ny = normalizedVideoCoordinate(change.position.y, hPx)
+                            onPositionChange?.invoke(nx, ny)
                         },
-                        onDragEnd = { isDragging = false; hitDrag = false; dragGrabOffset = Offset.Zero },
-                        onDragCancel = { isDragging = false; hitDrag = false; dragGrabOffset = Offset.Zero },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false },
                     )
                 },
         )
@@ -465,10 +482,9 @@ private fun LandingOverlay(
     onLandingChange: ((Float, Float) -> Unit)?,
 ) {
     val landing = state.landing
-    var nx by remember(landing) { mutableFloatStateOf(landing?.normalizedX ?: 0.5f) }
-    var ny by remember(landing) { mutableFloatStateOf(landing?.normalizedY ?: 0.5f) }
+    var nx by remember(landing) { mutableFloatStateOf(normalizedCoordinateOrCenter(landing?.normalizedX)) }
+    var ny by remember(landing) { mutableFloatStateOf(normalizedCoordinateOrCenter(landing?.normalizedY)) }
     var isDragging by remember { mutableStateOf(false) }
-    var dragGrabOffset by remember { mutableStateOf(Offset.Zero) }
 
     LaunchedEffect(Unit) {
         if (landing == null) onLandingChange?.invoke(nx, ny)
@@ -478,10 +494,8 @@ private fun LandingOverlay(
         val density = LocalDensity.current
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
-        val markerSizePx = with(density) { 24.dp.toPx() }
-        val dragRadiusPx = with(density) { 50.dp.toPx() }
+        val markerSizePx = with(density) { LANDING_MARKER_SIZE_DP.dp.toPx() }
         val anchorCenter = Offset(nx * wPx, ny * hPx)
-        val currentAnchorCenter by rememberUpdatedState(anchorCenter)
         val visualCx = anchorCenter.x
         val visualCy = anchorCenter.y - markerSizePx * LANDING_MARKER_ANCHOR_RATIO
 
@@ -498,27 +512,20 @@ private fun LandingOverlay(
                     )
                 }
                 .pointerInput(Unit) {
-                    var hitDrag = false
                     detectDragGestures(
                         onDragStart = { offset ->
-                            val anchor = currentAnchorCenter
-                            val visualCenter = anchor - Offset(0f, markerSizePx * LANDING_MARKER_ANCHOR_RATIO)
-                            val radiusSquared = dragRadiusPx * dragRadiusPx
-                            hitDrag = offset.distanceSquaredTo(anchor) <= radiusSquared ||
-                                offset.distanceSquaredTo(visualCenter) <= radiusSquared
-                            dragGrabOffset = if (hitDrag) offset - anchor else Offset.Zero
-                            isDragging = hitDrag
-                        },
-                        onDragEnd = { hitDrag = false; isDragging = false; dragGrabOffset = Offset.Zero },
-                        onDragCancel = { hitDrag = false; isDragging = false; dragGrabOffset = Offset.Zero },
-                    ) { change, _ ->
-                        if (hitDrag) {
-                            change.consume()
-                            val center = change.position - dragGrabOffset
-                            nx = normalizedVideoCoordinate(center.x, wPx)
-                            ny = normalizedVideoCoordinate(center.y, hPx)
+                            nx = normalizedVideoCoordinate(offset.x, wPx)
+                            ny = normalizedVideoCoordinate(offset.y, hPx)
                             onLandingChange?.invoke(nx, ny)
-                        }
+                            isDragging = true
+                        },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false },
+                    ) { change, _ ->
+                        change.consume()
+                        nx = normalizedVideoCoordinate(change.position.x, wPx)
+                        ny = normalizedVideoCoordinate(change.position.y, hPx)
+                        onLandingChange?.invoke(nx, ny)
                     }
                 },
         ) {
@@ -563,16 +570,16 @@ private fun FlightCurveOverlay(
     }
 
     var cp1x by remember(prev, impact, landing) {
-        mutableStateOf(prev?.controlPoint1?.x ?: defaults.first.x)
+        mutableFloatStateOf(prev?.controlPoint1?.x ?: defaults.first.x)
     }
     var cp1y by remember(prev, impact, landing) {
-        mutableStateOf(prev?.controlPoint1?.y ?: defaults.first.y)
+        mutableFloatStateOf(prev?.controlPoint1?.y ?: defaults.first.y)
     }
     var cp2x by remember(prev, impact, landing) {
-        mutableStateOf(prev?.controlPoint2?.x ?: defaults.second.x)
+        mutableFloatStateOf(prev?.controlPoint2?.x ?: defaults.second.x)
     }
     var cp2y by remember(prev, impact, landing) {
-        mutableStateOf(prev?.controlPoint2?.y ?: defaults.second.y)
+        mutableFloatStateOf(prev?.controlPoint2?.y ?: defaults.second.y)
     }
     var dragging by remember { mutableStateOf<Int?>(null) }
 
@@ -584,7 +591,7 @@ private fun FlightCurveOverlay(
         val density = LocalDensity.current
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
-        val touchTargetDp = 88.dp
+        val touchTargetDp = CURVE_CONTROL_HIT_TARGET_DP.dp
         val touchTargetPx = with(density) { touchTargetDp.toPx() }
         val cp1HitCenter = visibleCurveHitCenter(NormalizedPoint(cp1x, cp1y), wPx, hPx, touchTargetPx)
         val cp2HitCenter = visibleCurveHitCenter(NormalizedPoint(cp2x, cp2y), wPx, hPx, touchTargetPx)
@@ -602,8 +609,6 @@ private fun FlightCurveOverlay(
 
             drawGolfCamCurveStroke(p0 = p0, p1 = p1, p2 = p2, p3 = p3)
 
-            drawCircle(Color.White.copy(alpha = 0.9f), 4.5.dp.toPx(), p0)
-            drawCircle(Color(0xFF8B5CF6).copy(alpha = 0.9f), 4.5.dp.toPx(), p3)
             drawCurveControlMarker(center = p1, dragging = dragging == 1, label = "P1")
             drawCurveControlMarker(center = p2, dragging = dragging == 2, label = "P2")
         }
@@ -676,7 +681,7 @@ private fun CurveControlHitTarget(
 }
 
 private fun DrawScope.drawLandingMarker(anchor: Offset, active: Boolean) {
-    val markerSize = if (active) 26.dp.toPx() else 24.dp.toPx()
+    val markerSize = if (active) (LANDING_MARKER_SIZE_DP + 2f).dp.toPx() else LANDING_MARKER_SIZE_DP.dp.toPx()
     val anchorOffset = markerSize * LANDING_MARKER_ANCHOR_RATIO
     val cx = anchor.x
     val top = anchor.y - anchorOffset - markerSize / 2f
@@ -697,8 +702,6 @@ private fun DrawScope.drawLandingMarker(anchor: Offset, active: Boolean) {
     }
     drawPath(path = arrowPath(shadowOffset), color = Color.Black.copy(alpha = 0.50f))
     drawPath(path = arrowPath(), color = Color.White)
-    drawCircle(Color.Black.copy(alpha = 0.55f), radius = 4.dp.toPx(), center = anchor + Offset(0f, 1.dp.toPx()))
-    drawCircle(Color.White, radius = 3.dp.toPx(), center = anchor)
 }
 
 private fun DrawScope.drawCurveControlMarker(center: Offset, dragging: Boolean, label: String) {

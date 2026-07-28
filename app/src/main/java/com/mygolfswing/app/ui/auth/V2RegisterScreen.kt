@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -53,6 +55,7 @@ import com.mygolfswing.app.ui.common.V2PresetAvatars
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -88,7 +91,8 @@ fun V2RegisterScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(DSColors.warmWhite)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(rememberScrollState())
+            .imePadding(),
     ) {
         Hero(onBack = onBack)
 
@@ -200,15 +204,22 @@ fun V2RegisterScreen(
                     }
                     scope.launch {
                         loading = true
-                        val r = ServiceLocator.authRepo.registerWithUsername(
-                            username = username.trim(),
-                            password = password,
-                            nickname = nickname.trim(),
-                            avatar = avatarKey,
-                        )
-                        loading = false
-                        r.onSuccess { onRegisterSuccess() }
-                            .onFailure { error = it.message ?: "注册失败" }
+                        try {
+                            val r = ServiceLocator.authRepo.registerWithUsername(
+                                username = username.trim(),
+                                password = password,
+                                nickname = nickname.trim(),
+                                avatar = avatarKey,
+                            )
+                            r.onSuccess { onRegisterSuccess() }
+                                .onFailure { error = authUserError("注册失败，请检查账号信息后重试", it.message) }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            error = authUserError("注册失败，请检查账号信息后重试", e.message)
+                        } finally {
+                            loading = false
+                        }
                     }
                 },
             )
@@ -224,7 +235,7 @@ fun V2RegisterScreen(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp).navigationBarsPadding())
     }
 }
 

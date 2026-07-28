@@ -22,10 +22,10 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-fun Context.openAppSettings() {
+fun Context.openAppSettings(): Boolean {
     val intent = Intent(
         Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
         Uri.fromParts("package", packageName, null),
     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(intent)
+    return runCatching { startActivity(intent) }.isSuccess
 }

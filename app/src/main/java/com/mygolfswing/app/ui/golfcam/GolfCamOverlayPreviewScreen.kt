@@ -14,6 +14,7 @@ import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,10 +46,12 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -78,15 +81,19 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.golfcam.model.ArcLengthTable
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
+import com.mygolfswing.app.ui.golfcam.model.GolfCamVideoConfig
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryAlgorithmKind
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryMotionModel
 import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
+import com.mygolfswing.app.ui.golfcam.model.clampedTrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.DistanceLabelTextMetrics
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryAnimationOverlay
@@ -100,20 +107,22 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
-
-private data class VideoPlaybackConfig(
-    val frameRate: Double = 30.0,
-    val aspectRatio: Float = 9f / 16f,
-    val visualWidth: Int = 1080,
-    val visualHeight: Int = 1920,
-)
 
 internal data class ExportVideoDimensions(
     val width: Int,
     val height: Int,
 )
+
+internal data class ExportVideoTarget(
+    val resolution: ExportResolution,
+    val dimensions: ExportVideoDimensions,
+    val visualDimensions: ExportVideoDimensions,
+) {
+    val isPortrait: Boolean get() = visualDimensions.height >= visualDimensions.width
+}
 
 internal enum class ExportResolution(val displayName: String, val landscapeWidth: Int, val landscapeHeight: Int) {
     HD_1080P("1080p", 1920, 1080),
@@ -140,6 +149,24 @@ internal data class ExportTrimRange(
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(1L)
 }
 
+internal data class ExportTrimRangeUs(
+    val startUs: Long,
+    val endUs: Long,
+)
+
+internal data class PreviewPlaybackClip(
+    val startMs: Long,
+    val endMs: Long?,
+    val durationMs: Long,
+)
+
+internal const val PREVIEW_VIDEO_CARD_CORNER_RADIUS_DP = 18
+internal const val PREVIEW_VIDEO_CARD_BORDER_ALPHA = 0.35f
+internal const val PREVIEW_VIDEO_CARD_BORDER_WIDTH_DP = 1
+internal const val PREVIEW_VIDEO_CARD_SHADOW_RADIUS_DP = 16
+internal const val PREVIEW_BOTTOM_PANEL_HEIGHT_DP = 190
+internal const val EXPORT_SETTINGS_4K_SOURCE_REQUIRED_REASON = "需要4K源视频"
+
 private data class AudioTrackInfo(
     val sourceTrackIndex: Int,
     val format: MediaFormat,
@@ -148,15 +175,73 @@ private data class AudioTrackInfo(
 internal fun exportVideoDimensions(rawWidth: Int, rawHeight: Int, rotationDegrees: Int): ExportVideoDimensions {
     val safeWidth = rawWidth.coerceAtLeast(1)
     val safeHeight = rawHeight.coerceAtLeast(1)
-    return if (rotationDegrees == 90 || rotationDegrees == 270) {
+    val rotation = normalizedVideoRotation(rotationDegrees)
+    return if (rotation == 90 || rotation == 270) {
         ExportVideoDimensions(width = safeHeight, height = safeWidth)
     } else {
         ExportVideoDimensions(width = safeWidth, height = safeHeight)
     }
 }
 
+internal fun metadataIntOrDefault(raw: String?, defaultValue: Int): Int {
+    return raw?.toIntOrNull() ?: defaultValue
+}
+
+internal fun metadataLongOrDefault(raw: String?, defaultValue: Long): Long {
+    return raw?.toLongOrNull() ?: defaultValue
+}
+
 internal fun targetExportVideoDimensions(resolution: ExportResolution, isPortrait: Boolean): ExportVideoDimensions {
     return resolution.dimensions(isPortrait)
+}
+
+internal fun sourceSupportsExportResolution(
+    resolution: ExportResolution,
+    visualWidth: Int,
+    visualHeight: Int,
+): Boolean {
+    if (resolution == ExportResolution.HD_1080P) return true
+    val isPortrait = visualHeight >= visualWidth
+    val required = targetExportVideoDimensions(resolution, isPortrait)
+    return visualWidth >= required.width && visualHeight >= required.height
+}
+
+internal fun coerceExportResolutionForSource(
+    selected: ExportResolution,
+    visualWidth: Int,
+    visualHeight: Int,
+): ExportResolution {
+    return if (sourceSupportsExportResolution(selected, visualWidth, visualHeight)) {
+        selected
+    } else {
+        ExportResolution.HD_1080P
+    }
+}
+
+internal fun resolveExportVideoTarget(
+    selected: ExportResolution,
+    rawWidth: Int,
+    rawHeight: Int,
+    rotationDegrees: Int,
+): ExportVideoTarget {
+    val visualDimensions = exportVideoDimensions(
+        rawWidth = rawWidth,
+        rawHeight = rawHeight,
+        rotationDegrees = normalizedVideoRotation(rotationDegrees),
+    )
+    val resolvedResolution = coerceExportResolutionForSource(
+        selected = selected,
+        visualWidth = visualDimensions.width,
+        visualHeight = visualDimensions.height,
+    )
+    return ExportVideoTarget(
+        resolution = resolvedResolution,
+        dimensions = targetExportVideoDimensions(
+            resolution = resolvedResolution,
+            isPortrait = visualDimensions.height >= visualDimensions.width,
+        ),
+        visualDimensions = visualDimensions,
+    )
 }
 
 internal fun targetExportVideoBitrate(dimensions: ExportVideoDimensions): Int {
@@ -169,11 +254,102 @@ internal fun targetExportVideoBitrate(dimensions: ExportVideoDimensions): Int {
 }
 
 internal fun shouldOpenExportPreview(exportedFile: File?): Boolean {
-    return exportedFile != null
+    return isValidExportPreviewFile(exportedFile)
 }
 
 internal fun exportSaveFailureMessage(error: Throwable): String {
-    return "保存失败：${error.message ?: "未知错误"}"
+    return "保存失败：${exportSaveErrorDetail(error)}"
+}
+
+internal fun exportFailureMessage(error: Throwable): String {
+    return "导出失败：${exportRenderErrorDetail(error)}"
+}
+
+private fun exportRenderErrorDetail(error: Throwable): String {
+    val raw = error.message?.trim()?.takeIf { it.isNotBlank() }
+    val stable = when {
+        raw == null -> "视频导出失败，请稍后重试"
+        raw.contains("编码", ignoreCase = true) ||
+            raw.contains("encoder", ignoreCase = true) ||
+            raw.contains("codec", ignoreCase = true) -> "当前设备暂时无法完成视频编码，请降低清晰度后重试"
+        raw.contains("预览文件", ignoreCase = true) ||
+            raw.contains("preview", ignoreCase = true) ||
+            raw.contains("file", ignoreCase = true) -> "导出文件暂时不可用，请重新导出"
+        else -> "视频导出失败，请稍后重试"
+    }
+    return exportUserError(stable, raw)
+}
+
+private fun exportSaveErrorDetail(error: Throwable): String {
+    val raw = error.message?.trim()?.takeIf { it.isNotBlank() }
+    val stable = when {
+        raw == null -> "保存到相册失败，请稍后重试"
+        raw.contains("预览文件", ignoreCase = true) ||
+            raw.contains("preview", ignoreCase = true) ||
+            raw.contains("file", ignoreCase = true) -> "导出文件暂时不可用，请重新导出"
+        raw.contains("相册", ignoreCase = true) ||
+            raw.contains("MediaStore", ignoreCase = true) ||
+            raw.contains("权限", ignoreCase = true) ||
+            raw.contains("denied", ignoreCase = true) ||
+            raw.contains("permission", ignoreCase = true) -> "系统相册暂时不可写，请检查存储空间或权限后重试"
+        else -> "保存到相册失败，请稍后重试"
+    }
+    return exportUserError(stable, raw)
+}
+
+private fun exportUserError(base: String, debugDetail: String?): String {
+    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+    return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun shouldAllowExportPreviewDismiss(saving: Boolean): Boolean = !saving
+
+internal fun shouldAllowExportSave(
+    saving: Boolean,
+    saveMessage: String?,
+    previewFile: File?,
+): Boolean {
+    return !saving && saveMessage == null && isValidExportPreviewFile(previewFile)
+}
+
+internal fun exportPreviewSaveButtonAlpha(
+    saving: Boolean,
+    saveMessage: String?,
+    previewFile: File?,
+): Float {
+    return if (shouldAllowExportSave(saving, saveMessage, previewFile)) 1f else 0.42f
+}
+
+internal data class ExportSaveSuccessDisposition(
+    val markExportComplete: Boolean,
+    val clearPreviewFile: Boolean,
+    val clearSaveMessage: Boolean,
+    val closeOverview: Boolean,
+)
+
+internal fun exportSaveSuccessDisposition(): ExportSaveSuccessDisposition {
+    return ExportSaveSuccessDisposition(
+        markExportComplete = true,
+        clearPreviewFile = true,
+        clearSaveMessage = true,
+        closeOverview = true,
+    )
+}
+
+internal fun deleteExportPreviewTempFile(file: File?): Boolean {
+    return file?.takeIf { it.exists() }?.delete() ?: false
+}
+
+internal fun isValidExportPreviewFile(file: File?): Boolean {
+    return file?.isFile == true && file.length() > 0L
+}
+
+internal fun mediaStorePendingPublishSucceeded(sdkInt: Int, updatedRows: Int): Boolean {
+    return sdkInt < Build.VERSION_CODES.Q || updatedRows > 0
+}
+
+internal fun shouldCleanupFailedGalleryInsert(insertedUriPresent: Boolean, saveSucceeded: Boolean): Boolean {
+    return insertedUriPresent && !saveSucceeded
 }
 
 internal fun effectiveExportFrameRotation(
@@ -183,10 +359,13 @@ internal fun effectiveExportFrameRotation(
     exportWidth: Int,
     exportHeight: Int,
 ): Int {
-    val rotation = ((metadataRotationDegrees % 360) + 360) % 360
+    val rotation = normalizedVideoRotation(metadataRotationDegrees)
     val frameAlreadyVisual = (rotation == 90 || rotation == 270) &&
-        frameWidth == exportWidth &&
-        frameHeight == exportHeight
+        frameWidth > 0 &&
+        frameHeight > 0 &&
+        exportWidth > 0 &&
+        exportHeight > 0 &&
+        (frameHeight > frameWidth) == (exportHeight > exportWidth)
     return if (frameAlreadyVisual) 0 else rotation
 }
 
@@ -203,6 +382,251 @@ internal fun exportTrimRange(
     return ExportTrimRange(startMs = start, endMs = end)
 }
 
+internal fun previewPlaybackClip(
+    trimStartMs: Long,
+    trimEndMs: Long?,
+    sourceDurationMs: Long?,
+    playerDurationMs: Long? = null,
+): PreviewPlaybackClip {
+    val trustedSourceDuration = sourceDurationMs?.takeIf { it >= 500L }
+    if (trustedSourceDuration != null) {
+        val range = exportTrimRange(trimStartMs, trimEndMs, trustedSourceDuration)
+        return PreviewPlaybackClip(
+            startMs = range.startMs,
+            endMs = range.endMs,
+            durationMs = range.durationMs,
+        )
+    }
+    val start = trimStartMs.coerceAtLeast(0L)
+    val end = trimEndMs?.let { GolfCamFrameTimeline.endExclusiveMsAfterStart(start, it) }
+    val duration = end?.let { GolfCamFrameTimeline.durationMsForRange(start, it) }
+        ?: playerDurationMs?.takeIf { it > 0L }
+        ?: 1L
+    return PreviewPlaybackClip(
+        startMs = start,
+        endMs = end,
+        durationMs = duration.coerceAtLeast(1L),
+    )
+}
+
+internal fun previewImpactTimeMs(absoluteImpactTimeMs: Long, clipStartMs: Long): Long {
+    if (absoluteImpactTimeMs <= clipStartMs) return 0L
+    val delta = absoluteImpactTimeMs - clipStartMs
+    return if (delta >= 0L) delta else Long.MAX_VALUE
+}
+
+internal fun previewProgressFraction(positionMs: Long, durationMs: Long): Float {
+    return (positionMs.toFloat() / durationMs.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+}
+
+internal fun previewProgressDisplayFraction(progress: Float): Float {
+    return if (progress.isFinite()) progress.coerceIn(0f, 1f) else 0f
+}
+
+internal fun exportProgressFraction(completedFrames: Int, totalFrames: Int): Float {
+    if (totalFrames <= 0) return 0f
+    return (completedFrames.coerceAtLeast(0).toFloat() / totalFrames.toFloat()).coerceIn(0f, 1f)
+}
+
+internal fun exportTrajectoryElapsedSeconds(outputFrameTimeMs: Long, previewImpactTimeMs: Long): Double {
+    return saturatingDelta(outputFrameTimeMs, previewImpactTimeMs).toDouble() / 1000.0
+}
+
+internal fun exportFramePresentationTimeUs(frameIndex: Int, fps: Double): Long {
+    val safeFps = GolfCamFrameTimeline.safeFrameRate(fps)
+    return (frameIndex.coerceAtLeast(0) * 1_000_000.0 / safeFps).toLong()
+}
+
+internal fun exportFramePresentationTimeUs(frameIndex: Int, fps: Int): Long {
+    return exportFramePresentationTimeUs(frameIndex = frameIndex, fps = fps.toDouble())
+}
+
+internal fun exportTrajectoryElapsedSecondsFromUs(outputFrameTimeUs: Long, previewImpactTimeMs: Long): Double {
+    val impactTimeUs = exportMillisecondsToMicroseconds(previewImpactTimeMs)
+    return saturatingDelta(outputFrameTimeUs, impactTimeUs).toDouble() / 1_000_000.0
+}
+
+internal fun exportSourceFrameTimeUs(
+    trimStartMs: Long,
+    trimEndMs: Long,
+    frameIndex: Int,
+    fps: Double,
+): Long {
+    val safeStartMs = trimStartMs.coerceAtLeast(0L)
+    val safeEndMs = GolfCamFrameTimeline.endExclusiveMsAfterStart(safeStartMs, trimEndMs)
+    val startUs = exportMillisecondsToMicroseconds(safeStartMs)
+    val endUs = exportMillisecondsToMicroseconds(safeEndMs)
+    val lastSourceUs = if (endUs > startUs) endUs - 1L else startUs
+    val targetUs = saturatingAddUs(startUs, exportFramePresentationTimeUs(frameIndex, fps))
+    return targetUs.coerceIn(startUs, lastSourceUs)
+}
+
+internal fun exportMillisecondsToMicroseconds(ms: Long): Long {
+    if (ms <= 0L) return 0L
+    return if (ms > Long.MAX_VALUE / 1000L) Long.MAX_VALUE else ms * 1000L
+}
+
+internal fun exportTrimRangeUs(range: ExportTrimRange): ExportTrimRangeUs {
+    return ExportTrimRangeUs(
+        startUs = exportMillisecondsToMicroseconds(range.startMs),
+        endUs = exportMillisecondsToMicroseconds(range.endMs),
+    )
+}
+
+internal fun trimmedAudioPresentationTimeUs(
+    sampleTimeUs: Long,
+    trimStartUs: Long,
+    trimEndUs: Long,
+): Long? {
+    return when {
+        sampleTimeUs < trimStartUs -> null
+        sampleTimeUs >= trimEndUs -> null
+        else -> saturatingNonNegativeDeltaUs(sampleTimeUs, trimStartUs)
+    }
+}
+
+private fun saturatingAddUs(baseUs: Long, offsetUs: Long): Long {
+    if (offsetUs <= 0L) return baseUs
+    return if (baseUs > Long.MAX_VALUE - offsetUs) Long.MAX_VALUE else baseUs + offsetUs
+}
+
+private fun saturatingNonNegativeDeltaUs(valueUs: Long, startUs: Long): Long {
+    if (valueUs <= startUs) return 0L
+    val delta = valueUs - startUs
+    return if (delta >= 0L) delta else Long.MAX_VALUE
+}
+
+private fun saturatingDelta(value: Long, base: Long): Long {
+    val delta = value - base
+    return if (((value xor base) and (value xor delta)) < 0L) {
+        if (value < base) Long.MIN_VALUE else Long.MAX_VALUE
+    } else {
+        delta
+    }
+}
+
+internal fun audioCopyBufferSize(formatMaxInputSize: Int?): Int {
+    val fallbackSize = 256 * 1024
+    val minimumSize = 16 * 1024
+    return (formatMaxInputSize ?: fallbackSize).coerceAtLeast(minimumSize)
+}
+
+internal fun audioMuxerPresentationTimeUs(
+    sampleTimeUs: Long,
+    sampleSize: Int,
+    trimStartUs: Long,
+    trimEndUs: Long,
+): Long? {
+    if (sampleSize <= 0) return null
+    return trimmedAudioPresentationTimeUs(
+        sampleTimeUs = sampleTimeUs,
+        trimStartUs = trimStartUs,
+        trimEndUs = trimEndUs,
+    )
+}
+
+internal enum class AudioSampleCopyAction {
+    WRITE,
+    SKIP,
+    END,
+}
+
+internal fun audioSampleCopyAction(sampleSize: Int): AudioSampleCopyAction {
+    return when {
+        sampleSize < 0 -> AudioSampleCopyAction.END
+        sampleSize == 0 -> AudioSampleCopyAction.SKIP
+        else -> AudioSampleCopyAction.WRITE
+    }
+}
+
+internal fun audioMuxerSampleFlags(extractorSampleFlags: Int): Int {
+    var flags = 0
+    if (extractorSampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+        flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+    }
+    if (extractorSampleFlags and MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME != 0) {
+        flags = flags or MediaCodec.BUFFER_FLAG_PARTIAL_FRAME
+    }
+    return flags
+}
+
+internal fun exportTotalFrameCount(durationMs: Long, fps: Double): Int {
+    return GolfCamFrameTimeline.totalFrames(durationMs.coerceAtLeast(1L), fps)
+}
+
+internal fun exportTotalFrameCount(durationMs: Long, fps: Int): Int {
+    return exportTotalFrameCount(durationMs = durationMs, fps = fps.toDouble())
+}
+
+internal enum class PreviewPanelAction {
+    FLIGHT_PATH,
+    CLUB_PATH,
+    TRIM,
+    EXPORT,
+}
+
+internal data class PreviewPanelActionState(
+    val action: PreviewPanelAction,
+    val enabled: Boolean,
+    val deferredBadge: Boolean,
+)
+
+internal fun previewPanelActionStates(
+    exporting: Boolean,
+    exportDone: Boolean,
+    videoConfigTrusted: Boolean = true,
+): List<PreviewPanelActionState> {
+    return listOf(
+        PreviewPanelActionState(PreviewPanelAction.FLIGHT_PATH, enabled = true, deferredBadge = false),
+        PreviewPanelActionState(PreviewPanelAction.CLUB_PATH, enabled = false, deferredBadge = true),
+        PreviewPanelActionState(PreviewPanelAction.TRIM, enabled = false, deferredBadge = true),
+        PreviewPanelActionState(PreviewPanelAction.EXPORT, enabled = videoConfigTrusted && !exporting && !exportDone, deferredBadge = false),
+    )
+}
+
+internal fun normalizedPreviewExportSelection(selection: TrackStyleSelection): TrackStyleSelection {
+    return clampedTrackStyleSelection(selection)
+}
+
+internal fun trustedPreviewVideoConfigOrUnknown(config: GolfCamVideoConfig?): GolfCamVideoConfig {
+    return config?.takeUnless(::shouldDetectGolfCamVideoConfig) ?: GolfCamVideoConfig()
+}
+
+internal data class ExportSettingsUiState(
+    val selectedResolution: ExportResolution,
+    val isSource4K: Boolean,
+    val isPortrait: Boolean,
+    val sourceInfoTrusted: Boolean,
+)
+
+internal fun exportSettingsUiState(
+    selectedResolution: ExportResolution,
+    videoConfig: GolfCamVideoConfig,
+): ExportSettingsUiState {
+    val trusted = !shouldDetectGolfCamVideoConfig(videoConfig)
+    val isPortrait = trusted && videoConfig.visualHeight >= videoConfig.visualWidth
+    val source4K = trusted && sourceSupportsExportResolution(
+        resolution = ExportResolution.UHD_4K,
+        visualWidth = videoConfig.visualWidth,
+        visualHeight = videoConfig.visualHeight,
+    )
+    val resolvedResolution = if (trusted) {
+        coerceExportResolutionForSource(
+            selected = selectedResolution,
+            visualWidth = videoConfig.visualWidth,
+            visualHeight = videoConfig.visualHeight,
+        )
+    } else {
+        ExportResolution.HD_1080P
+    }
+    return ExportSettingsUiState(
+        selectedResolution = resolvedResolution,
+        isSource4K = source4K,
+        isPortrait = isPortrait,
+        sourceInfoTrusted = trusted,
+    )
+}
+
 /**
  * 预览 + 导出屏（对齐 iOS OverlayPreviewView）。
  * 播放带轨迹叠加的视频，可导出为 MP4 保存到相册。
@@ -211,6 +635,7 @@ internal fun exportTrimRange(
 fun GolfCamOverlayPreviewScreen(
     videoUri: Uri,
     selection: TrackStyleSelection,
+    initialVideoConfig: GolfCamVideoConfig? = null,
     impactTimeMs: Long = 0L,
     trimStartMs: Long = 0L,
     trimEndMs: Long? = null,
@@ -226,39 +651,50 @@ fun GolfCamOverlayPreviewScreen(
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf(false) }
-    var videoConfig by remember { mutableStateOf(VideoPlaybackConfig()) }
+    var videoConfig by remember { mutableStateOf(trustedPreviewVideoConfigOrUnknown(initialVideoConfig)) }
     var showPlaybackButton by remember { mutableStateOf(true) }
     var showExportSettings by remember { mutableStateOf(false) }
     var selectedExportResolution by remember { mutableStateOf(ExportResolution.HD_1080P) }
     var exportedVideoFile by remember { mutableStateOf<File?>(null) }
     var savingExport by remember { mutableStateOf(false) }
     var exportSaveMessage by remember { mutableStateOf<String?>(null) }
+    var exportErrorMessage by remember { mutableStateOf<String?>(null) }
+    var deferredPreviewAction by remember { mutableStateOf<PreviewPanelAction?>(null) }
+    val previewSelection = remember(selection) { normalizedPreviewExportSelection(selection) }
+    val videoConfigTrusted = !shouldDetectGolfCamVideoConfig(videoConfig)
+    val exportSettingsState = exportSettingsUiState(selectedExportResolution, videoConfig)
 
-    LaunchedEffect(videoUri) {
-        videoConfig = withContext(Dispatchers.IO) {
-            readVideoPlaybackConfig(context, videoUri)
-        }
+    DisposableEffect(exportedVideoFile) {
+        val tempFile = exportedVideoFile
+        onDispose { deleteExportPreviewTempFile(tempFile) }
     }
 
-    val previewImpactMs = (impactTimeMs - trimStartMs).coerceAtLeast(0L)
-    val flightTimeMs = (selection.flightCurve.landingPoint.flightTimeSec * 1000)
-        .toLong()
-        .coerceAtLeast(500L)
-    val timing = TrajectoryTiming(
+    LaunchedEffect(videoUri, initialVideoConfig) {
+        val trustedInitialConfig = initialVideoConfig?.takeUnless(::shouldDetectGolfCamVideoConfig)
+        videoConfig = trustedInitialConfig ?: withContext(Dispatchers.IO) { detectGolfCamVideoConfig(context, videoUri) }
+    }
+
+    val playbackClip = previewPlaybackClip(
+        trimStartMs = trimStartMs,
+        trimEndMs = trimEndMs,
+        sourceDurationMs = videoConfig.durationMs,
+    )
+    val previewImpactMs = previewImpactTimeMs(impactTimeMs, playbackClip.startMs)
+    val timing = previewTrajectoryTiming(
         impactTimeMs = previewImpactMs,
-        landingTimeMs = previewImpactMs + flightTimeMs,
+        flightTimeSec = previewSelection.flightCurve.landingPoint.flightTimeSec,
         fps = videoConfig.frameRate,
     )
 
-    val player = remember(videoUri, trimStartMs, trimEndMs) {
+    val player = remember(videoUri, playbackClip.startMs, playbackClip.endMs) {
         ExoPlayer.Builder(context).build().apply {
-            val mediaItem = if (trimStartMs > 0L || trimEndMs != null) {
+            val mediaItem = if (playbackClip.startMs > 0L || playbackClip.endMs != null) {
                 MediaItem.Builder()
                     .setUri(videoUri)
                     .setClippingConfiguration(
                         MediaItem.ClippingConfiguration.Builder()
-                            .setStartPositionMs(trimStartMs.coerceAtLeast(0L))
-                            .apply { trimEndMs?.let { setEndPositionMs(it.coerceAtLeast(trimStartMs + 1L)) } }
+                            .setStartPositionMs(playbackClip.startMs)
+                            .apply { playbackClip.endMs?.let { setEndPositionMs(it) } }
                             .build(),
                     )
                     .build()
@@ -270,15 +706,15 @@ fun GolfCamOverlayPreviewScreen(
             repeatMode = Player.REPEAT_MODE_ONE
         }
     }
-    DisposableEffect(Unit) { onDispose { player.release() } }
+    DisposableEffect(player) { onDispose { player.release() } }
 
-    LaunchedEffect(playing) {
+    LaunchedEffect(player, playing) {
         if (playing) player.play() else player.pause()
     }
     LaunchedEffect(player, previewImpactMs) {
         while (true) {
             previewPositionMs = player.currentPosition.coerceAtLeast(0L)
-            elapsedMs = (previewPositionMs - previewImpactMs).coerceAtLeast(0L)
+            elapsedMs = unifiedPreviewElapsedMs(previewPositionMs, previewImpactMs)
             delay(33L)
         }
     }
@@ -289,21 +725,27 @@ fun GolfCamOverlayPreviewScreen(
         }
     }
 
-    val clippedDurationMs = remember(trimStartMs, trimEndMs, player.duration) {
-        val fromTrim = trimEndMs?.let { (it - trimStartMs).coerceAtLeast(1L) }
-        val playerDuration = player.duration.takeIf { it > 0L }
-        fromTrim ?: playerDuration ?: 1L
+    val clippedDurationMs = remember(trimStartMs, trimEndMs, videoConfig.durationMs, player.duration) {
+        previewPlaybackClip(
+            trimStartMs = trimStartMs,
+            trimEndMs = trimEndMs,
+            sourceDurationMs = videoConfig.durationMs,
+            playerDurationMs = player.duration,
+        ).durationMs
     }
-    val playbackProgress = (previewPositionMs.toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
-    val impactProgress = (previewImpactMs.toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
-    val landingProgress = ((previewImpactMs + flightTimeMs).toFloat() / clippedDurationMs.toFloat()).coerceIn(0f, 1f)
-    val isPortrait = videoConfig.visualHeight >= videoConfig.visualWidth
-    val isSource4K = max(videoConfig.visualWidth, videoConfig.visualHeight) >= 3800
+    val playbackProgress = previewProgressFraction(previewPositionMs, clippedDurationMs)
+    val impactProgress = previewProgressFraction(previewImpactMs, clippedDurationMs)
+    val landingProgress = previewProgressFraction(timing.landingTimeMs, clippedDurationMs)
+    LaunchedEffect(exportSettingsState.selectedResolution) {
+        if (selectedExportResolution != exportSettingsState.selectedResolution) {
+            selectedExportResolution = exportSettingsState.selectedResolution
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
         Column(modifier = Modifier.fillMaxSize()) {
             PreviewTopBar(
-                selectedResolution = selectedExportResolution,
+                selectedResolution = exportSettingsState.selectedResolution,
                 onDismiss = onDismiss,
                 onSettings = { showExportSettings = true },
             )
@@ -325,12 +767,23 @@ fun GolfCamOverlayPreviewScreen(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .size(displaySize.width.dp, displaySize.height.dp)
-                    .shadow(16.dp, RoundedCornerShape(18.dp), ambientColor = Color.Black.copy(alpha = 0.10f), spotColor = Color.Black.copy(alpha = 0.12f))
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color.Black),
+                    .shadow(
+                        PREVIEW_VIDEO_CARD_SHADOW_RADIUS_DP.dp,
+                        RoundedCornerShape(PREVIEW_VIDEO_CARD_CORNER_RADIUS_DP.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.10f),
+                        spotColor = Color.Black.copy(alpha = 0.12f),
+                    )
+                    .clip(RoundedCornerShape(PREVIEW_VIDEO_CARD_CORNER_RADIUS_DP.dp))
+                    .background(Color.Black)
+                    .border(
+                        width = PREVIEW_VIDEO_CARD_BORDER_WIDTH_DP.dp,
+                        color = Color.White.copy(alpha = PREVIEW_VIDEO_CARD_BORDER_ALPHA),
+                        shape = RoundedCornerShape(PREVIEW_VIDEO_CARD_CORNER_RADIUS_DP.dp),
+                    ),
             ) {
                 AndroidView(
                     factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
+                    update = { view -> view.player = player },
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(Unit) {
@@ -341,9 +794,9 @@ fun GolfCamOverlayPreviewScreen(
                 )
 
                 TrajectoryAnimationOverlay(
-                    bezier = selection.flightCurve.bezierPath,
+                    bezier = previewSelection.flightCurve.bezierPath,
                     timing = timing,
-                    style = selection.style,
+                    style = previewSelection.style,
                     playing = playing,
                     elapsedMs = elapsedMs,
                 )
@@ -382,32 +835,44 @@ fun GolfCamOverlayPreviewScreen(
                 exporting = exporting,
                 exportProgress = exportProgress,
                 exportDone = exportDone,
+                videoConfigTrusted = videoConfigTrusted,
+                exportErrorMessage = exportErrorMessage,
                 onTogglePlay = {
                     playing = !playing
                     showPlaybackButton = true
                 },
                 onEditFlightPath = onReEdit,
+                onDeferredAction = { deferredPreviewAction = it },
                 onExport = {
-                    if (!exporting && !exportDone) {
+                    if (videoConfigTrusted && !exporting && !exportDone) {
                         scope.launch {
                             exporting = true
                             exportProgress = 0f
+                            exportErrorMessage = null
                             player.pause()
                             playing = false
                             showPlaybackButton = true
                             try {
-                                exportVideoWithTrajectory(
+                                val exportedFile = exportVideoWithTrajectory(
                                     context = context,
                                     videoUri = videoUri,
-                                    selection = selection,
+                                    selection = previewSelection,
                                     timing = timing,
                                     trimStartMs = trimStartMs,
                                     trimEndMs = trimEndMs,
-                                    exportResolution = selectedExportResolution,
-                                    isPortrait = isPortrait,
-                                    onProgress = { exportProgress = it },
-                                ).also { exportedVideoFile = it }
+                                    exportResolution = exportSettingsState.selectedResolution,
+                                    onProgress = { exportProgress = previewProgressDisplayFraction(it) },
+                                )
+                                if (!shouldOpenExportPreview(exportedFile)) {
+                                    deleteExportPreviewTempFile(exportedFile)
+                                    error("导出预览文件不可用")
+                                }
+                                exportedVideoFile = exportedFile
                                 exportSaveMessage = null
+                                exportErrorMessage = null
+                            } catch (error: Throwable) {
+                                exportProgress = 0f
+                                exportErrorMessage = exportFailureMessage(error)
                             } finally {
                                 exporting = false
                             }
@@ -417,12 +882,26 @@ fun GolfCamOverlayPreviewScreen(
             )
         }
 
+        deferredPreviewAction?.let { action ->
+            PreviewDeferredActionDialog(
+                action = action,
+                onDismiss = { deferredPreviewAction = null },
+                onReEdit = {
+                    deferredPreviewAction = null
+                    onReEdit()
+                },
+            )
+        }
+
         if (showExportSettings) {
             ExportSettingsOverlay(
-                selectedResolution = selectedExportResolution,
-                isSource4K = isSource4K,
-                isPortrait = isPortrait,
-                onSelect = { selectedExportResolution = it },
+                selectedResolution = exportSettingsState.selectedResolution,
+                isSource4K = exportSettingsState.isSource4K,
+                isPortrait = exportSettingsState.isPortrait,
+                sourceInfoTrusted = exportSettingsState.sourceInfoTrusted,
+                onSelect = { requestedResolution ->
+                    selectedExportResolution = exportSettingsUiState(requestedResolution, videoConfig).selectedResolution
+                },
                 onDismiss = { showExportSettings = false },
             )
         }
@@ -433,21 +912,26 @@ fun GolfCamOverlayPreviewScreen(
                 saving = savingExport,
                 saveMessage = exportSaveMessage,
                 onDismiss = {
-                    file.delete()
+                    deleteExportPreviewTempFile(file)
                     exportedVideoFile = null
                     exportSaveMessage = null
                 },
                 onClearSaveMessage = { exportSaveMessage = null },
                 onSave = {
-                    if (!savingExport) {
+                    if (shouldAllowExportSave(savingExport, exportSaveMessage, file)) {
                         scope.launch {
                             savingExport = true
                             exportSaveMessage = null
                             try {
                                 saveExportedVideoToGallery(context, file)
-                                exportDone = true
-                                file.delete()
-                                exportedVideoFile = null
+                                val disposition = exportSaveSuccessDisposition()
+                                if (disposition.markExportComplete) exportDone = true
+                                if (disposition.clearPreviewFile) {
+                                    deleteExportPreviewTempFile(file)
+                                    exportedVideoFile = null
+                                }
+                                if (disposition.clearSaveMessage) exportSaveMessage = null
+                                if (disposition.closeOverview) onDismiss()
                             } catch (error: Throwable) {
                                 exportSaveMessage = exportSaveFailureMessage(error)
                             } finally {
@@ -457,6 +941,10 @@ fun GolfCamOverlayPreviewScreen(
                     }
                 },
             )
+        }
+
+        if (exporting) {
+            ExportingProgressOverlay(progress = exportProgress)
         }
     }
 }
@@ -516,6 +1004,7 @@ private fun ExportSettingsOverlay(
     selectedResolution: ExportResolution,
     isSource4K: Boolean,
     isPortrait: Boolean,
+    sourceInfoTrusted: Boolean,
     onSelect: (ExportResolution) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -564,7 +1053,11 @@ private fun ExportSettingsOverlay(
                     resolution = ExportResolution.UHD_4K,
                     selected = selectedResolution == ExportResolution.UHD_4K,
                     available = isSource4K,
-                    reason = if (isSource4K) null else "需要4K源视频",
+                    reason = when {
+                        isSource4K -> null
+                        !sourceInfoTrusted -> "正在识别源视频信息"
+                        else -> EXPORT_SETTINGS_4K_SOURCE_REQUIRED_REASON
+                    },
                     isPortrait = isPortrait,
                     onSelect = onSelect,
                 )
@@ -609,6 +1102,11 @@ private fun ExportPreviewOverlay(
     DisposableEffect(videoFile) {
         onDispose { player.release() }
     }
+    BackHandler(enabled = true) {
+        if (shouldAllowExportPreviewDismiss(saving)) onDismiss()
+    }
+    val saveButtonEnabled = shouldAllowExportSave(saving, saveMessage, videoFile)
+    val saveButtonAlpha = exportPreviewSaveButtonAlpha(saving, saveMessage, videoFile)
 
     Box(
         modifier = Modifier
@@ -617,11 +1115,13 @@ private fun ExportPreviewOverlay(
     ) {
         AndroidView(
             factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
+            update = { view -> view.player = player },
             modifier = Modifier.fillMaxSize(),
         )
 
         IconButton(
             onClick = onDismiss,
+            enabled = shouldAllowExportPreviewDismiss(saving),
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
@@ -641,13 +1141,20 @@ private fun ExportPreviewOverlay(
                 .fillMaxWidth()
                 .height(54.dp)
                 .clip(RoundedCornerShape(14.dp))
-                .background(Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen)))
-                .clickable(enabled = !saving) { onSave() },
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            DSColors.fairway.copy(alpha = saveButtonAlpha),
+                            DSColors.deepGreen.copy(alpha = saveButtonAlpha),
+                        ),
+                    ),
+                )
+                .clickable(enabled = saveButtonEnabled) { onSave() },
             contentAlignment = Alignment.Center,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                Text("保存到相册", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White.copy(alpha = saveButtonAlpha), modifier = Modifier.size(18.dp))
+                Text("保存到相册", color = Color.White.copy(alpha = saveButtonAlpha), fontSize = 17.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -714,6 +1221,64 @@ private fun ExportPreviewOverlay(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ExportingProgressOverlay(
+    progress: Float,
+) {
+    val safeProgress = previewProgressDisplayFraction(progress)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.46f))
+            .clickable { },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 40.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xFF1F2F27).copy(alpha = 0.96f))
+                .padding(horizontal = 30.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { safeProgress },
+                    color = DSColors.fairway,
+                    trackColor = Color.White.copy(alpha = 0.18f),
+                    strokeWidth = 5.dp,
+                    modifier = Modifier.size(58.dp),
+                )
+                Text(
+                    text = "${(safeProgress * 100f).roundToInt()}%",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("正在导出视频", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "请保持本页打开，完成后会进入导出预览",
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+            LinearProgressIndicator(
+                progress = { safeProgress },
+                modifier = Modifier
+                    .width(210.dp)
+                    .height(7.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = DSColors.fairway,
+                trackColor = Color.White.copy(alpha = 0.16f),
+            )
         }
     }
 }
@@ -790,13 +1355,27 @@ private fun PreviewBottomPanel(
     exporting: Boolean,
     exportProgress: Float,
     exportDone: Boolean,
+    videoConfigTrusted: Boolean,
+    exportErrorMessage: String?,
     onTogglePlay: () -> Unit,
     onEditFlightPath: () -> Unit,
+    onDeferredAction: (PreviewPanelAction) -> Unit,
     onExport: () -> Unit,
 ) {
+    val actionStates = previewPanelActionStates(
+        exporting = exporting,
+        exportDone = exportDone,
+        videoConfigTrusted = videoConfigTrusted,
+    )
+        .associateBy { it.action }
+    fun stateFor(action: PreviewPanelAction): PreviewPanelActionState {
+        return actionStates.getValue(action)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .height(PREVIEW_BOTTOM_PANEL_HEIGHT_DP.dp)
             .shadow(16.dp, RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.08f))
             .background(DSColors.cardWhite)
             .navigationBarsPadding()
@@ -818,14 +1397,18 @@ private fun PreviewBottomPanel(
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("正在导出视频...", color = DSColors.inkGreen, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 LinearProgressIndicator(
-                    progress = { exportProgress },
+                    progress = { previewProgressDisplayFraction(exportProgress) },
                     modifier = Modifier.fillMaxWidth(),
                     color = DSColors.fairway,
                     trackColor = DSColors.mistGreen,
                 )
             }
+        } else if (!videoConfigTrusted) {
+            Text("正在识别视频信息，完成后可导出", color = DSColors.shadowGray, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         } else if (exportDone) {
             Text("已保存到相册", color = DSColors.fairway, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        } else if (exportErrorMessage != null) {
+            Text(exportErrorMessage, color = Color(0xFFB95D4D), fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
 
         Row(
@@ -836,6 +1419,7 @@ private fun PreviewBottomPanel(
                 title = "飞行轨迹",
                 icon = Icons.AutoMirrored.Filled.ShowChart,
                 tint = DSColors.fairway,
+                enabled = stateFor(PreviewPanelAction.FLIGHT_PATH).enabled,
                 onClick = onEditFlightPath,
                 modifier = Modifier.weight(1f),
             )
@@ -843,16 +1427,18 @@ private fun PreviewBottomPanel(
                 title = "杆头轨迹",
                 icon = Icons.Filled.Edit,
                 tint = Color(0xFF3E8FA5),
-                devBadge = true,
-                enabled = false,
+                devBadge = stateFor(PreviewPanelAction.CLUB_PATH).deferredBadge,
+                enabled = stateFor(PreviewPanelAction.CLUB_PATH).enabled,
+                onClick = { onDeferredAction(PreviewPanelAction.CLUB_PATH) },
                 modifier = Modifier.weight(1f),
             )
             PreviewFunctionButton(
                 title = "裁剪",
                 icon = Icons.Filled.ContentCut,
                 tint = DSColors.trophyGold,
-                devBadge = true,
-                enabled = false,
+                devBadge = stateFor(PreviewPanelAction.TRIM).deferredBadge,
+                enabled = stateFor(PreviewPanelAction.TRIM).enabled,
+                onClick = { onDeferredAction(PreviewPanelAction.TRIM) },
                 modifier = Modifier.weight(1f),
             )
             PreviewFunctionButton(
@@ -860,7 +1446,7 @@ private fun PreviewBottomPanel(
                 icon = Icons.Filled.Download,
                 tint = DSColors.fairway,
                 primary = true,
-                enabled = !exporting && !exportDone,
+                enabled = stateFor(PreviewPanelAction.EXPORT).enabled,
                 onClick = onExport,
                 modifier = Modifier.weight(1f),
             )
@@ -892,7 +1478,7 @@ private fun PreviewProgressBar(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .fillMaxWidth(playbackProgress.coerceIn(0f, 1f))
+                    .fillMaxWidth(previewProgressDisplayFraction(playbackProgress))
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .background(Brush.horizontalGradient(listOf(DSColors.fairway, DSColors.leafGreen))),
@@ -942,7 +1528,7 @@ private fun KeyTimeMarker(
     markerWidth: androidx.compose.ui.unit.Dp,
     containerWidth: androidx.compose.ui.unit.Dp,
 ) {
-    val safeProgress = progress.coerceIn(0f, 1f)
+    val safeProgress = previewProgressDisplayFraction(progress)
     val left = (containerWidth - markerWidth) * safeProgress
     Column(
         modifier = Modifier
@@ -986,13 +1572,14 @@ private fun PreviewFunctionButton(
     onClick: () -> Unit = {},
 ) {
     val buttonShape = RoundedCornerShape(16.dp)
+    val clickable = enabled || devBadge
     val backgroundColor = when {
-        !enabled -> Color(0xFFF7F8F4)
+        !enabled && !devBadge -> Color(0xFFF7F8F4)
         primary -> DSColors.mistGreen.copy(alpha = 0.85f)
         else -> Color(0xFFF3F7F0)
     }
     val borderColor = when {
-        !enabled -> DSColors.shadowGray.copy(alpha = 0.15f)
+        !enabled && !devBadge -> DSColors.shadowGray.copy(alpha = 0.15f)
         primary -> tint.copy(alpha = 0.58f)
         else -> tint.copy(alpha = 0.22f)
     }
@@ -1006,7 +1593,7 @@ private fun PreviewFunctionButton(
                 color = borderColor,
                 shape = buttonShape,
             )
-            .clickable(enabled = enabled) { onClick() }
+            .clickable(enabled = clickable) { onClick() }
             .padding(vertical = 11.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(7.dp),
@@ -1023,7 +1610,7 @@ private fun PreviewFunctionButton(
                     )
                     .clip(CircleShape)
                     .background(
-                        if (!enabled) {
+                        if (!enabled && !devBadge) {
                             Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                         } else if (primary) {
                             Brush.linearGradient(listOf(tint, DSColors.deepGreen))
@@ -1036,7 +1623,7 @@ private fun PreviewFunctionButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (!enabled) DSColors.shadowGray.copy(alpha = 0.45f) else if (primary) Color.White else tint,
+                    tint = if (!enabled && !devBadge) DSColors.shadowGray.copy(alpha = 0.45f) else if (primary) Color.White else tint,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1056,7 +1643,7 @@ private fun PreviewFunctionButton(
         }
         Text(
             title,
-            color = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
+            color = if (enabled || devBadge) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
             fontSize = 12.sp,
             fontWeight = if (primary) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 1,
@@ -1065,8 +1652,41 @@ private fun PreviewFunctionButton(
     }
 }
 
-private fun formatPreviewTime(ms: Long): String {
-    return "%.1fs".format(ms.coerceAtLeast(0L) / 1000.0)
+@Composable
+private fun PreviewDeferredActionDialog(
+    action: PreviewPanelAction,
+    onDismiss: () -> Unit,
+    onReEdit: () -> Unit,
+) {
+    val title = when (action) {
+        PreviewPanelAction.CLUB_PATH -> "杆头轨迹"
+        PreviewPanelAction.TRIM -> "裁剪"
+        else -> "功能说明"
+    }
+    val body = when (action) {
+        PreviewPanelAction.CLUB_PATH -> "当前预览以飞行轨迹为主。需要调整击球帧、落点、曲线或样式时，可以返回编辑流程继续修改后再导出。"
+        PreviewPanelAction.TRIM -> "预览页暂不直接修改裁剪区间。你可以返回编辑流程，在裁剪步骤重新选择有效片段，再回到预览导出。"
+        else -> "可以返回编辑流程继续调整后再导出。"
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            TextButton(onClick = onReEdit) {
+                Text("返回编辑", color = DSColors.fairway)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了", color = DSColors.shadowGray)
+            }
+        },
+    )
+}
+
+internal fun formatPreviewTime(ms: Long): String {
+    return String.format(Locale.US, "%.1fs", ms.coerceAtLeast(0L) / 1000.0)
 }
 
 // ─── 视频导出（逐帧渲染轨迹叠加）─────────────────────────────────────────────────
@@ -1079,172 +1699,235 @@ private suspend fun exportVideoWithTrajectory(
     trimStartMs: Long,
     trimEndMs: Long?,
     exportResolution: ExportResolution,
-    isPortrait: Boolean,
     onProgress: (Float) -> Unit,
 ): File = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
-    retriever.setDataSource(context, videoUri)
-
-    val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 1280
-    val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 720
-    val rotationDegrees = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
-    val exportSize = targetExportVideoDimensions(exportResolution, isPortrait)
-    val width = exportSize.width
-    val height = exportSize.height
-    val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 3000L
-    val trimRange = exportTrimRange(
-        trimStartMs = trimStartMs,
-        trimEndMs = trimEndMs,
-        sourceDurationMs = durationMs,
-    )
-    val fps = timing.fps.roundToInt().coerceIn(1, 120)
-
-    val bezier = selection.flightCurve.bezierPath
-    val legacyProgressAtTime = if (selection.style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
-        null
-    } else {
-        val model = TrajectoryMotionModel(
-            bezier = bezier,
-            timing = timing,
-            params = TrajectoryMotionModel.parametersFromStyle(selection.style),
-        )
-        model::progressAtTime
-    }
-    val arcTable = ArcLengthTable(bezier)
-
-    // 输出文件
-    val outputFile = File(context.cacheDir, "trajectory_export_${System.currentTimeMillis()}.mp4")
-
-    val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-        setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-        setInteger(MediaFormat.KEY_BIT_RATE, targetExportVideoBitrate(exportSize))
-        setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-    }
-
-    val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-    encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-    val surface = encoder.createInputSurface()
-    encoder.start()
-
-    val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-    val audioTrackInfo = findAudioTrackInfo(context, videoUri)
-    val audioMuxerTrackIndex = audioTrackInfo?.let { info ->
-        runCatching { muxer.addTrack(info.format) }.getOrNull()
-    } ?: -1
-    var videoTrackIndex = -1
+    var retrieverReleased = false
+    var encoder: MediaCodec? = null
+    var encoderStarted = false
+    var surface: android.view.Surface? = null
+    var muxer: MediaMuxer? = null
     var muxerStarted = false
+    var outputFile: File? = null
+    var exportSucceeded = false
 
-    val totalFrames = (trimRange.durationMs * fps / 1000).toInt().coerceAtLeast(1)
-    val bufferInfo = MediaCodec.BufferInfo()
+    try {
+        val exportSelection = normalizedPreviewExportSelection(selection)
+        retriever.setDataSource(context, videoUri)
 
-    // 逐帧渲染
-    for (frameIdx in 0 until totalFrames) {
-        val outputFrameTimeMs = frameIdx * 1000L / fps
-        val sourceFrameTimeMs = trimRange.startMs + outputFrameTimeMs
-        val elapsedSec = (outputFrameTimeMs - timing.impactTimeMs).toDouble() / 1000.0
-
-        // 提取原始视频帧
-        val frameBitmap = retriever.getFrameAtTime(
-            sourceFrameTimeMs * 1000L,
-            MediaMetadataRetriever.OPTION_CLOSEST,
+        val rawWidth = metadataIntOrDefault(
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH),
+            defaultValue = 1280,
         )
+        val rawHeight = metadataIntOrDefault(
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT),
+            defaultValue = 720,
+        )
+        val rotationDegrees = metadataIntOrDefault(
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION),
+            defaultValue = 0,
+        )
+        val exportTarget = resolveExportVideoTarget(
+            selected = exportResolution,
+            rawWidth = rawWidth,
+            rawHeight = rawHeight,
+            rotationDegrees = rotationDegrees,
+        )
+        val exportSize = exportTarget.dimensions
+        val width = exportSize.width
+        val height = exportSize.height
+        val durationMs = metadataLongOrDefault(
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION),
+            defaultValue = 3000L,
+        )
+        val trimRange = exportTrimRange(
+            trimStartMs = trimStartMs,
+            trimEndMs = trimEndMs,
+            sourceDurationMs = durationMs,
+        )
+        val exportFrameRate = GolfCamFrameTimeline.safeFrameRate(timing.fps)
+        val encoderFps = exportFrameRate.roundToInt().coerceIn(1, 120)
 
-        val c = surface.lockCanvas(null)
-        if (frameBitmap != null) {
-            drawVideoFrameOnCanvas(
-                canvas = c,
-                frameBitmap = frameBitmap,
-                width = width,
-                height = height,
-                rotationDegrees = rotationDegrees,
-            )
-            frameBitmap.recycle()
+        val bezier = exportSelection.flightCurve.bezierPath
+        val legacyProgressAtTime = if (exportSelection.style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+            null
         } else {
-            c.drawColor(android.graphics.Color.BLACK)
+            val model = TrajectoryMotionModel(
+                bezier = bezier,
+                timing = timing,
+                params = TrajectoryMotionModel.parametersFromStyle(exportSelection.style),
+            )
+            model::progressAtTime
+        }
+        val arcTable = ArcLengthTable(bezier)
+
+        // 输出文件
+        outputFile = File(context.cacheDir, "trajectory_export_${System.currentTimeMillis()}.mp4")
+
+        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE, targetExportVideoBitrate(exportSize))
+            setInteger(MediaFormat.KEY_FRAME_RATE, encoderFps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
 
-        // 绘制轨迹叠加
-        drawTrajectoryOnCanvas(c, bezier, arcTable, selection.style, elapsedSec, width.toFloat(), height.toFloat(), timing, legacyProgressAtTime)
+        encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        surface = encoder.createInputSurface()
+        encoder.start()
+        encoderStarted = true
 
-        surface.unlockCanvasAndPost(c)
+        muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val audioTrackInfo = findAudioTrackInfo(context, videoUri)
+        val audioMuxerTrackIndex = audioTrackInfo?.let { info ->
+            runCatching { muxer.addTrack(info.format) }.getOrNull()
+        } ?: -1
+        var videoTrackIndex = -1
 
-        // 从编码器取输出
-        var outputDone = false
-        while (!outputDone) {
+        val totalFrames = exportTotalFrameCount(trimRange.durationMs, exportFrameRate)
+        val bufferInfo = MediaCodec.BufferInfo()
+        var videoSampleIndex = 0
+
+        // 逐帧渲染
+        for (frameIdx in 0 until totalFrames) {
+            val outputFrameTimeUs = exportFramePresentationTimeUs(frameIdx, exportFrameRate)
+            val sourceFrameTimeUs = exportSourceFrameTimeUs(
+                trimStartMs = trimRange.startMs,
+                trimEndMs = trimRange.endMs,
+                frameIndex = frameIdx,
+                fps = exportFrameRate,
+            )
+            val elapsedSec = exportTrajectoryElapsedSecondsFromUs(outputFrameTimeUs, timing.impactTimeMs)
+
+            // 提取原始视频帧
+            val frameBitmap = retriever.getFrameAtTime(
+                sourceFrameTimeUs,
+                MediaMetadataRetriever.OPTION_CLOSEST,
+            )
+
+            val c = surface.lockCanvas(null)
+            if (frameBitmap != null) {
+                drawVideoFrameOnCanvas(
+                    canvas = c,
+                    frameBitmap = frameBitmap,
+                    width = width,
+                    height = height,
+                    rotationDegrees = rotationDegrees,
+                )
+                frameBitmap.recycle()
+            } else {
+                c.drawColor(android.graphics.Color.BLACK)
+            }
+
+            // 绘制轨迹叠加
+            drawTrajectoryOnCanvas(c, bezier, arcTable, exportSelection.style, elapsedSec, width.toFloat(), height.toFloat(), timing, legacyProgressAtTime)
+
+            surface.unlockCanvasAndPost(c)
+
+            // 从编码器取输出
+            var outputDone = false
+            while (!outputDone) {
+                val outIdx = encoder.dequeueOutputBuffer(bufferInfo, 10_000L)
+                when {
+                    outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        if (!muxerStarted) {
+                            videoTrackIndex = muxer.addTrack(encoder.outputFormat)
+                            muxer.start()
+                            muxerStarted = true
+                        }
+                    }
+                    outIdx >= 0 -> {
+                        val buf = encoder.getOutputBuffer(outIdx) ?: run {
+                            encoder.releaseOutputBuffer(outIdx, false); outputDone = true; continue
+                        }
+                        if (muxerStarted && bufferInfo.size > 0 &&
+                            bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
+                        ) {
+                            bufferInfo.presentationTimeUs = exportFramePresentationTimeUs(videoSampleIndex, exportFrameRate)
+                            muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
+                            videoSampleIndex++
+                        }
+                        encoder.releaseOutputBuffer(outIdx, false)
+                        outputDone = true
+                    }
+                    else -> outputDone = true
+                }
+            }
+
+            onProgress(exportProgressFraction(completedFrames = frameIdx + 1, totalFrames = totalFrames))
+        }
+
+        // 信号 EOS
+        encoder.signalEndOfInputStream()
+        var eosReached = false
+        while (!eosReached) {
             val outIdx = encoder.dequeueOutputBuffer(bufferInfo, 10_000L)
-            when {
-                outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    if (!muxerStarted) {
-                        videoTrackIndex = muxer.addTrack(encoder.outputFormat)
-                        muxer.start()
-                        muxerStarted = true
-                    }
+            if (outIdx >= 0) {
+                val buf = encoder.getOutputBuffer(outIdx)
+                if (buf != null && muxerStarted && bufferInfo.size > 0 &&
+                    bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
+                ) {
+                    bufferInfo.presentationTimeUs = exportFramePresentationTimeUs(videoSampleIndex, exportFrameRate)
+                    muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
+                    videoSampleIndex++
                 }
-                outIdx >= 0 -> {
-                    val buf = encoder.getOutputBuffer(outIdx) ?: run {
-                        encoder.releaseOutputBuffer(outIdx, false); outputDone = true; continue
-                    }
-                    bufferInfo.presentationTimeUs = outputFrameTimeMs * 1000L
-                    if (muxerStarted && bufferInfo.size > 0 &&
-                        bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
-                    ) {
-                        muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
-                    }
-                    encoder.releaseOutputBuffer(outIdx, false)
-                    outputDone = true
-                }
-                else -> outputDone = true
+                encoder.releaseOutputBuffer(outIdx, false)
+                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eosReached = true
+            } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED && !muxerStarted) {
+                videoTrackIndex = muxer.addTrack(encoder.outputFormat)
+                muxer.start(); muxerStarted = true
             }
         }
 
-        onProgress(frameIdx.toFloat() / totalFrames)
-    }
+        encoder.stop()
+        encoderStarted = false
+        encoder.release()
+        encoder = null
+        surface.release()
+        surface = null
 
-    // 信号 EOS
-    encoder.signalEndOfInputStream()
-    var eosReached = false
-    while (!eosReached) {
-        val outIdx = encoder.dequeueOutputBuffer(bufferInfo, 10_000L)
-        if (outIdx >= 0) {
-            val buf = encoder.getOutputBuffer(outIdx)
-            if (buf != null && muxerStarted && bufferInfo.size > 0 &&
-                bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0
-            ) {
-                muxer.writeSampleData(videoTrackIndex, buf, bufferInfo)
-            }
-            encoder.releaseOutputBuffer(outIdx, false)
-            if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eosReached = true
-        } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED && !muxerStarted) {
-            videoTrackIndex = muxer.addTrack(encoder.outputFormat)
-            muxer.start(); muxerStarted = true
+        if (muxerStarted && audioTrackInfo != null && audioMuxerTrackIndex >= 0) {
+            val trimRangeUs = exportTrimRangeUs(trimRange)
+            copyAudioTrackToMuxer(
+                context = context,
+                videoUri = videoUri,
+                audioTrackInfo = audioTrackInfo,
+                muxer = muxer,
+                muxerTrackIndex = audioMuxerTrackIndex,
+                trimStartUs = trimRangeUs.startUs,
+                trimEndUs = trimRangeUs.endUs,
+            )
         }
-    }
+        if (muxerStarted) {
+            muxer.stop()
+            muxerStarted = false
+        }
+        muxer.release()
+        muxer = null
+        retriever.release()
+        retrieverReleased = true
 
-    encoder.stop(); encoder.release()
-    if (muxerStarted && audioTrackInfo != null && audioMuxerTrackIndex >= 0) {
-        copyAudioTrackToMuxer(
-            context = context,
-            videoUri = videoUri,
-            audioTrackInfo = audioTrackInfo,
-            muxer = muxer,
-            muxerTrackIndex = audioMuxerTrackIndex,
-            trimStartUs = trimRange.startMs * 1000L,
-            trimEndUs = trimRange.endMs * 1000L,
-        )
+        onProgress(1f)
+        exportSucceeded = true
+        return@withContext outputFile
+    } finally {
+        if (!exportSucceeded) outputFile?.delete()
+        if (encoderStarted) runCatching { encoder?.stop() }
+        runCatching { encoder?.release() }
+        runCatching { surface?.release() }
+        if (muxerStarted) runCatching { muxer?.stop() }
+        runCatching { muxer?.release() }
+        if (!retrieverReleased) runCatching { retriever.release() }
     }
-    if (muxerStarted) muxer.stop()
-    muxer.release()
-    retriever.release()
-
-    onProgress(1f)
-    outputFile
 }
 
 private suspend fun saveExportedVideoToGallery(
     context: Context,
     outputFile: File,
 ) = withContext(Dispatchers.IO) {
+    check(isValidExportPreviewFile(outputFile)) { "导出预览文件不可用" }
+    var insertedUri: Uri? = null
+    var saveSucceeded = false
     val values = ContentValues().apply {
         put(MediaStore.Video.Media.DISPLAY_NAME, "GolfSwing_${System.currentTimeMillis()}.mp4")
         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -1253,18 +1936,35 @@ private suspend fun saveExportedVideoToGallery(
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
     }
-    val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-        ?: error("无法创建相册文件")
+    try {
+        val uri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            ?: error("无法创建相册文件")
+        insertedUri = uri
 
-    context.contentResolver.openOutputStream(uri)?.use { out ->
-        outputFile.inputStream().copyTo(out)
-    } ?: error("无法写入相册文件")
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            outputFile.inputStream().copyTo(out)
+        } ?: error("无法写入相册文件")
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        values.clear()
-        values.put(MediaStore.Video.Media.IS_PENDING, 0)
-        context.contentResolver.update(uri, values, null, null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.clear()
+            values.put(MediaStore.Video.Media.IS_PENDING, 0)
+            val updatedRows = context.contentResolver.update(uri, values, null, null)
+            check(mediaStorePendingPublishSucceeded(Build.VERSION.SDK_INT, updatedRows)) {
+                "无法完成相册保存"
+            }
+        }
+        saveSucceeded = true
+    } catch (error: Throwable) {
+        if (shouldCleanupFailedGalleryInsert(insertedUriPresent = insertedUri != null, saveSucceeded = saveSucceeded)) {
+            cleanupFailedGalleryInsert(context, insertedUri)
+        }
+        throw error
     }
+}
+
+private fun cleanupFailedGalleryInsert(context: Context, uri: Uri?) {
+    if (uri == null) return
+    runCatching { context.contentResolver.delete(uri, null, null) }
 }
 
 private fun drawVideoFrameOnCanvas(
@@ -1339,25 +2039,43 @@ private fun copyAudioTrackToMuxer(
         extractor.setDataSource(context, videoUri, null)
         extractor.selectTrack(audioTrackInfo.sourceTrackIndex)
         extractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-        val maxInputSize = if (audioTrackInfo.format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+        val maxInputSize = audioCopyBufferSize(if (audioTrackInfo.format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
             audioTrackInfo.format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
         } else {
-            256 * 1024
-        }.coerceAtLeast(16 * 1024)
+            null
+        })
         val buffer = ByteBuffer.allocate(maxInputSize)
         val info = MediaCodec.BufferInfo()
 
         while (true) {
             val sampleTimeUs = extractor.sampleTime
-            if (sampleTimeUs < 0 || sampleTimeUs > trimEndUs) break
-            if (sampleTimeUs < trimStartUs) {
+            if (sampleTimeUs < 0 || sampleTimeUs >= trimEndUs) break
+            val presentationTimeUs = trimmedAudioPresentationTimeUs(
+                sampleTimeUs = sampleTimeUs,
+                trimStartUs = trimStartUs,
+                trimEndUs = trimEndUs,
+            )
+            if (presentationTimeUs == null) {
                 extractor.advance()
                 continue
             }
             buffer.clear()
             val sampleSize = extractor.readSampleData(buffer, 0)
-            if (sampleSize <= 0) break
-            info.set(0, sampleSize, sampleTimeUs - trimStartUs, extractor.sampleFlags)
+            when (audioSampleCopyAction(sampleSize)) {
+                AudioSampleCopyAction.END -> break
+                AudioSampleCopyAction.SKIP -> {
+                    if (!extractor.advance()) break
+                    continue
+                }
+                AudioSampleCopyAction.WRITE -> Unit
+            }
+            val muxerPresentationTimeUs = audioMuxerPresentationTimeUs(
+                sampleTimeUs = sampleTimeUs,
+                sampleSize = sampleSize,
+                trimStartUs = trimStartUs,
+                trimEndUs = trimEndUs,
+            ) ?: break
+            info.set(0, sampleSize, muxerPresentationTimeUs, audioMuxerSampleFlags(extractor.sampleFlags))
             muxer.writeSampleData(muxerTrackIndex, buffer, info)
             extractor.advance()
         }
@@ -1407,16 +2125,15 @@ private fun drawTrajectoryOnCanvas(
             headProgress = snapshot.headProgress,
             apexProgress = snapshot.apexProgress,
         )
-        val glowAlpha = style.glowOpacity.toFloat().coerceIn(0f, 1f)
         val glowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             this.style = android.graphics.Paint.Style.FILL
         }
-        val glowAlphas = TrajectoryOverlayRenderSpec.headGlowAlphas(glowAlpha)
+        val glowAlphas = TrajectoryOverlayRenderSpec.headGlowAlphas(style.glowOpacity.toFloat())
         glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.outer)
         canvas.drawCircle(headX, headY, headGlowRadius * 1.8f, glowPaint)
         glowPaint.color = trackColorWithAlpha(style.primaryColorArgb(), glowAlphas.body)
         canvas.drawCircle(headX, headY, headGlowRadius, glowPaint)
-        glowPaint.color = android.graphics.Color.argb((255 * glowAlphas.core).toInt().coerceIn(0, 255), 255, 255, 255)
+        glowPaint.color = android.graphics.Color.argb(TrajectoryOverlayRenderSpec.alphaByte(glowAlphas.core), 255, 255, 255)
         canvas.drawCircle(headX, headY, headGlowRadius * 0.4f, glowPaint)
     }
 
@@ -1433,53 +2150,9 @@ private fun drawTrajectoryOnCanvas(
     }
 }
 
-private fun readVideoPlaybackConfig(context: Context, videoUri: Uri): VideoPlaybackConfig {
-    var visualWidth = 1080
-    var visualHeight = 1920
-    val aspectRatio = runCatching {
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(context, videoUri)
-            val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toInt() ?: 9
-            val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toInt() ?: 16
-            val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt() ?: 0
-            val width = if (rotation == 90 || rotation == 270) rawHeight else rawWidth
-            val height = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
-            visualWidth = width.coerceAtLeast(1)
-            visualHeight = height.coerceAtLeast(1)
-            width.toFloat() / height.coerceAtLeast(1).toFloat()
-        } finally {
-            retriever.release()
-        }
-    }.getOrDefault(9f / 16f).coerceAtLeast(0.01f)
-
-    val extractor = MediaExtractor()
-    val frameRate = try {
-        extractor.setDataSource(context, videoUri, null)
-        for (trackIndex in 0 until extractor.trackCount) {
-            val format = extractor.getTrackFormat(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
-            if (mime.startsWith("video/") && format.containsKey(MediaFormat.KEY_FRAME_RATE)) {
-                return VideoPlaybackConfig(
-                    frameRate = format.getInteger(MediaFormat.KEY_FRAME_RATE).coerceIn(1, 120).toDouble(),
-                    aspectRatio = aspectRatio,
-                    visualWidth = visualWidth,
-                    visualHeight = visualHeight,
-                )
-            }
-        }
-        30.0
-    } catch (_: Exception) {
-        30.0
-    } finally {
-        extractor.release()
-    }
-    return VideoPlaybackConfig(frameRate = frameRate, aspectRatio = aspectRatio, visualWidth = visualWidth, visualHeight = visualHeight)
-}
-
 private fun trackColorWithAlpha(argb: Long, alpha: Float): Int {
     return android.graphics.Color.argb(
-        (alpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255),
+        TrajectoryOverlayRenderSpec.alphaByte(alpha),
         ((argb ushr 16) and 0xFF).toInt(),
         ((argb ushr 8) and 0xFF).toInt(),
         (argb and 0xFF).toInt(),

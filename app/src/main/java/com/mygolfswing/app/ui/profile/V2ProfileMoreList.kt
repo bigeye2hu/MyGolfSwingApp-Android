@@ -12,14 +12,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,10 +35,18 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 
+private fun Modifier.profileListCardShadow(shape: RoundedCornerShape): Modifier = shadow(
+    elevation = 8.dp,
+    shape = shape,
+    ambientColor = DSColors.fairway.copy(alpha = 0.08f),
+    spotColor = DSColors.fairway.copy(alpha = 0.08f),
+)
+
 @Composable
 fun V2ProfileMoreList(
     modifier: Modifier = Modifier,
     onStorageTap: () -> Unit = {},
+    onResetCreditsTap: () -> Unit = {},
     onAIConfigTap: () -> Unit = {},
     onFeedbackTap: () -> Unit = {},
     onUserAgreementTap: () -> Unit = {},
@@ -54,6 +63,7 @@ fun V2ProfileMoreList(
     ) {
         MoreFunctionsCard(
             onStorageTap = onStorageTap,
+            onResetCreditsTap = onResetCreditsTap,
             onAIConfigTap = onAIConfigTap,
             onFeedbackTap = onFeedbackTap,
             onUserAgreementTap = onUserAgreementTap,
@@ -76,7 +86,7 @@ private fun DeveloperToolsCard(onCloudAuditTap: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(20.dp))
+            .profileListCardShadow(RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
             .background(DSColors.cardWhite),
     ) {
@@ -102,6 +112,7 @@ private fun DeveloperToolsCard(onCloudAuditTap: () -> Unit) {
 @Composable
 private fun MoreFunctionsCard(
     onStorageTap: () -> Unit,
+    onResetCreditsTap: () -> Unit,
     onAIConfigTap: () -> Unit,
     onFeedbackTap: () -> Unit,
     onUserAgreementTap: () -> Unit,
@@ -110,7 +121,7 @@ private fun MoreFunctionsCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(20.dp))
+            .profileListCardShadow(RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
             .background(DSColors.cardWhite),
     ) {
@@ -119,20 +130,25 @@ private fun MoreFunctionsCard(
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             color = DSColors.inkGreen,
-            modifier = Modifier.padding(horizontal = DSSpacing.lg, vertical = DSSpacing.lg),
+            modifier = Modifier
+                .padding(horizontal = DSSpacing.lg)
+                .padding(top = DSSpacing.lg, bottom = DSSpacing.md),
         )
 
         Row(
             modifier = Modifier
                 .clickable { onStorageTap() },
         ) {
-            Item(icon = Icons.Filled.SdStorage, bg = Color(0xFF9B59B6), title = "存储空间", subtitle = "管理本地缓存", showDivider = true)
+            Item(icon = Icons.Filled.Storage, bg = Color(0xFF9B59B6), title = "存储空间", subtitle = "管理本地缓存", showDivider = true)
+        }
+        Row(modifier = Modifier.clickable { onResetCreditsTap() }) {
+            Item(icon = Icons.Filled.Refresh, bg = DSColors.deepGreen, title = "积分重置", subtitle = "校准余额与本地缓存", showDivider = true)
         }
         Row(modifier = Modifier.clickable { onAIConfigTap() }) {
             Item(icon = Icons.Filled.Memory, bg = DSColors.fairway, title = "AI 接口配置", subtitle = "挥呗 AI", showDivider = true)
         }
         Row(modifier = Modifier.clickable { onFeedbackTap() }) {
-            Item(icon = Icons.Filled.ChatBubbleOutline, bg = Color(0xFFF39C12), title = "意见反馈", subtitle = "帮助我们做得更好", showDivider = true)
+            Item(icon = Icons.Filled.Forum, bg = Color(0xFFF39C12), title = "意见反馈", subtitle = "帮助我们做得更好", showDivider = true)
         }
         Row(modifier = Modifier.clickable { onUserAgreementTap() }) {
             Item(icon = Icons.Filled.Description, bg = Color(0xFF8E8E93), title = "用户协议", subtitle = "了解服务条款", showDivider = true)
@@ -162,30 +178,33 @@ private fun Item(
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(bg),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen)
-                Text(text = subtitle, fontSize = 11.sp, color = DSColors.shadowGray)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
+                Text(text = subtitle, fontSize = 12.sp, color = DSColors.shadowGray)
             }
             Icon(
                 imageVector = Icons.Filled.ChevronRight,
                 contentDescription = null,
                 tint = DSColors.shadowGray.copy(alpha = 0.7f),
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(13.dp),
             )
         }
         if (showDivider) {
             Box(
                 modifier = Modifier
-                    .padding(start = 64.dp)
+                    .padding(start = DSSpacing.lg + 40.dp + DSSpacing.md)
                     .height(1.dp)
                     .fillMaxWidth()
-                    .background(Color(0x10000000)),
+                    .background(Color(0xFFF0F7F4)),
             )
         }
     }
@@ -196,11 +215,12 @@ private fun AccountSecurityCard(onTap: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp))
+            .profileListCardShadow(RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite)
             .clickable { onTap() }
-            .padding(horizontal = DSSpacing.lg, vertical = 18.dp),
+            .padding(horizontal = DSSpacing.lg)
+            .height(64.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(DSSpacing.md),
     ) {
@@ -215,7 +235,7 @@ private fun AccountSecurityCard(onTap: () -> Unit) {
                 imageVector = Icons.Filled.Security,
                 contentDescription = null,
                 tint = DSColors.fairway,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
         }
         Text(text = "账号与安全", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen, modifier = Modifier.weight(1f))
@@ -223,7 +243,7 @@ private fun AccountSecurityCard(onTap: () -> Unit) {
             imageVector = Icons.Filled.ChevronRight,
             contentDescription = null,
             tint = DSColors.shadowGray.copy(alpha = 0.7f),
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(13.dp),
         )
     }
 }
@@ -233,14 +253,14 @@ private fun LogoutCard(onTap: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp))
+            .profileListCardShadow(RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite)
             .clickable { onTap() }
-            .padding(vertical = 18.dp),
+            .height(64.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = "退出登录", color = DSColors.flagRed, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(text = "退出登录", color = DSColors.flagRed, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -249,11 +269,11 @@ private fun LoginEntryCard(onTap: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp))
+            .profileListCardShadow(RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.fairway)
             .clickable { onTap() }
-            .padding(vertical = 18.dp),
+            .height(64.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(text = "立即登录 / 注册", color = DSColors.warmWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)

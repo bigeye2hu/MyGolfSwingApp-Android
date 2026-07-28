@@ -30,51 +30,53 @@ internal object GolfCamCurveSpec {
         start: NormalizedPoint,
         end: NormalizedPoint,
     ): Pair<NormalizedPoint, NormalizedPoint> {
-        val dx = end.x - start.x
+        val safeStart = normalizedPointOrCenter(start)
+        val safeEnd = normalizedPointOrCenter(end)
+        val dx = safeEnd.x - safeStart.x
         val horizontal = abs(dx)
         if (horizontal < 0.01f) {
             val lift = 0.14f
-            return clampPoint(NormalizedPoint(start.x, start.y - lift * 0.55f)) to
-                clampPoint(NormalizedPoint(start.x, minOf(start.y, end.y) - lift))
+            return clampPoint(NormalizedPoint(safeStart.x, safeStart.y - lift * 0.55f)) to
+                clampPoint(NormalizedPoint(safeStart.x, minOf(safeStart.y, safeEnd.y) - lift))
         }
 
-        val topReference = minOf(start.y, end.y)
+        val topReference = minOf(safeStart.y, safeEnd.y)
         val lift = maxOf(CONTROL_BASE_LIFT, CONTROL_BASE_LIFT + horizontal * CONTROL_X_LIFT)
         val handleY = maxOf(0.04f, topReference - lift)
 
         val p2 = NormalizedPoint(
-            x = start.x + dx * CONTROL_P2_X,
+            x = safeStart.x + dx * CONTROL_P2_X,
             y = handleY,
         )
         val p1 = NormalizedPoint(
-            x = start.x + dx * CONTROL_P1_X,
-            y = start.y + (handleY - start.y) * CONTROL_P1_Y,
+            x = safeStart.x + dx * CONTROL_P1_X,
+            y = safeStart.y + (handleY - safeStart.y) * CONTROL_P1_Y,
         )
         return clampPoint(p1) to clampPoint(p2)
     }
 
     fun clampPoint(point: NormalizedPoint): NormalizedPoint {
         return NormalizedPoint(
-            x = point.x.coerceIn(SUGGEST_MIN_X, SUGGEST_MAX_X),
-            y = point.y.coerceIn(SUGGEST_MIN_Y, SUGGEST_MAX_Y),
+            x = finiteFloat(point.x, fallback = 0.5f).coerceIn(SUGGEST_MIN_X, SUGGEST_MAX_X),
+            y = finiteFloat(point.y, fallback = 0f).coerceIn(SUGGEST_MIN_Y, SUGGEST_MAX_Y),
         )
     }
 
     fun clampDraggedControlPoint(point: NormalizedPoint): NormalizedPoint {
         return NormalizedPoint(
-            x = point.x.coerceIn(DRAG_MIN_X, DRAG_MAX_X),
-            y = point.y.coerceIn(DRAG_MIN_Y, DRAG_MAX_Y),
+            x = finiteFloat(point.x, fallback = 0.5f).coerceIn(DRAG_MIN_X, DRAG_MAX_X),
+            y = finiteFloat(point.y, fallback = 0f).coerceIn(DRAG_MIN_Y, DRAG_MAX_Y),
         )
     }
 
     fun foregroundWidth(index: Int, segments: Int = SEGMENTS): Float {
-        val t = index.toFloat() / maxOf(1, segments - 1)
+        val t = segmentProgress(index, segments).toFloat()
         val launchFullness = (1f - t).toDouble().pow(1.05).toFloat()
         return 1.15f + launchFullness * 5.35f
     }
 
     fun segmentColor(index: Int, segments: Int = SEGMENTS): Color {
-        val t = index.toDouble() / maxOf(1, segments - 1)
+        val t = segmentProgress(index, segments)
         val brightness = t.pow(0.85)
         val opacity = 0.24 + brightness * 0.72
         val color = if (t < 0.42) {
@@ -91,6 +93,22 @@ internal object GolfCamCurveSpec {
     }
 
     private data class Rgb(val r: Double, val g: Double, val b: Double)
+
+    private fun finiteFloat(value: Float, fallback: Float): Float {
+        return value.takeIf { it.isFinite() } ?: fallback
+    }
+
+    private fun normalizedPointOrCenter(point: NormalizedPoint): NormalizedPoint {
+        return NormalizedPoint(
+            x = finiteFloat(point.x, fallback = 0.5f).coerceIn(0f, 1f),
+            y = finiteFloat(point.y, fallback = 0.5f).coerceIn(0f, 1f),
+        )
+    }
+
+    private fun segmentProgress(index: Int, segments: Int): Double {
+        val last = maxOf(1, segments - 1)
+        return (index.toDouble() / last.toDouble()).coerceIn(0.0, 1.0)
+    }
 
     private fun interpolateRgb(a: Rgb, b: Rgb, amount: Double): Rgb {
         val t = amount.coerceIn(0.0, 1.0)

@@ -16,10 +16,14 @@ internal data class DistanceLabelLayout(
 
 internal object DistanceLabelRenderSpec {
     const val OFFSET_RATIO = 0.035f
-    const val DIRECTION_THRESHOLD_X = 0.5f
+    const val DIRECTION_THRESHOLD_X = 0.0005f
     const val SHADOW_ALPHA = 0.8f
 
-    fun scale(videoHeight: Float): Float = videoHeight.coerceAtLeast(1f) / 1080f
+    private fun finiteFloat(value: Float, fallback: Float): Float {
+        return value.takeIf { it.isFinite() } ?: fallback
+    }
+
+    fun scale(videoHeight: Float): Float = finiteFloat(videoHeight, fallback = 1f).coerceAtLeast(1f) / 1080f
     fun unitFontPx(videoHeight: Float): Float = 11f * scale(videoHeight)
     fun valueFontPx(videoHeight: Float): Float = 24f * scale(videoHeight)
     fun lineSpacingPx(videoHeight: Float): Float = 2f * scale(videoHeight)
@@ -27,8 +31,9 @@ internal object DistanceLabelRenderSpec {
     fun shadowBlurRadiusPx(videoHeight: Float): Float = 3f * scale(videoHeight)
 
     fun isFlyingLeft(currentX: Float, previousX: Float?): Boolean {
-        val previous = previousX ?: return true
-        val dx = currentX - previous
+        val current = currentX.takeIf { it.isFinite() } ?: return true
+        val previous = previousX?.takeIf { it.isFinite() } ?: return true
+        val dx = current - previous
         return if (kotlin.math.abs(dx) > DIRECTION_THRESHOLD_X) dx < 0f else true
     }
 
@@ -39,14 +44,24 @@ internal object DistanceLabelRenderSpec {
         isFlyingLeft: Boolean,
         metrics: DistanceLabelTextMetrics,
     ): DistanceLabelLayout {
-        val offset = videoHeight * OFFSET_RATIO
-        val labelX = headX + if (isFlyingLeft) -offset else offset
-        val labelY = headY - offset
-        val totalHeight = metrics.unitHeight + lineSpacingPx(videoHeight) + metrics.valueHeight
-        val unitLeft = labelX - metrics.unitWidth / 2f
+        val safeHeight = finiteFloat(videoHeight, fallback = 1f).coerceAtLeast(1f)
+        val safeHeadX = finiteFloat(headX, fallback = 0f)
+        val safeHeadY = finiteFloat(headY, fallback = 0f)
+        val safeMetrics = DistanceLabelTextMetrics(
+            unitWidth = finiteFloat(metrics.unitWidth, fallback = 0f).coerceAtLeast(0f),
+            unitHeight = finiteFloat(metrics.unitHeight, fallback = 0f).coerceAtLeast(0f),
+            valueWidth = finiteFloat(metrics.valueWidth, fallback = 0f).coerceAtLeast(0f),
+            valueHeight = finiteFloat(metrics.valueHeight, fallback = 0f).coerceAtLeast(0f),
+        )
+        val offset = safeHeight * OFFSET_RATIO
+        val labelX = safeHeadX + if (isFlyingLeft) -offset else offset
+        val labelY = safeHeadY - offset
+        val lineSpacing = lineSpacingPx(safeHeight)
+        val totalHeight = safeMetrics.unitHeight + lineSpacing + safeMetrics.valueHeight
+        val unitLeft = labelX - safeMetrics.unitWidth / 2f
         val unitTop = labelY - totalHeight / 2f
-        val valueLeft = labelX - metrics.valueWidth / 2f
-        val valueTop = unitTop + metrics.unitHeight + lineSpacingPx(videoHeight)
+        val valueLeft = labelX - safeMetrics.valueWidth / 2f
+        val valueTop = unitTop + safeMetrics.unitHeight + lineSpacing
         return DistanceLabelLayout(
             unitLeft = unitLeft,
             unitTop = unitTop,

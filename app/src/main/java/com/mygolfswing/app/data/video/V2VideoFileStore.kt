@@ -8,6 +8,7 @@ import androidx.core.content.FileProvider
 import com.mygolfswing.app.data.ServiceLocator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -128,6 +129,60 @@ object V2VideoFileStore {
             true
         }.getOrDefault(false)
         if (!moved) return@withContext null
+        val (duration, w, h, thumb) = extractMetadata(context, userId, target)
+        ImportResult(
+            absolutePath = target.absolutePath,
+            thumbnailPath = thumb,
+            durationSec = duration,
+            widthPx = w,
+            heightPx = h,
+            sizeBytes = target.length(),
+        )
+    }
+
+    /**
+     * 下载远端视频到 App 私有目录，并走同一套 metadata / thumbnail 提取流程。
+     *
+     * @param onProgress emits 0.0..1.0 when response exposes content length; callers should treat -1 as indeterminate.
+     */
+    suspend fun downloadRemoteVideo(
+        context: Context,
+        url: String,
+        onProgress: (Double) -> Unit = {},
+    ): ImportResult? = withContext(Dispatchers.IO) {
+        val userId = ServiceLocator.session.current().userId ?: return@withContext null
+        val cleaned = url.trim().takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            ?: return@withContext null
+        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val target = File(videoDir(context, userId), "download_$ts.mp4")
+        val request = Request.Builder().url(cleaned).get().build()
+        val ok = runCatching {
+            ServiceLocator.net.httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@runCatching false
+                val body = response.body ?: return@runCatching false
+                val total = body.contentLength()
+                var copied = 0L
+                body.byteStream().use { input ->
+                    FileOutputStream(target).use { out ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            out.write(buffer, 0, read)
+                            copied += read
+                            if (total > 0L) onProgress((copied.toDouble() / total.toDouble()).coerceIn(0.0, 1.0))
+                            else onProgress(-1.0)
+                        }
+                    }
+                }
+                true
+            }
+        }.getOrDefault(false)
+        if (!ok || !target.exists() || target.length() == 0L) {
+            deleteFileCountingFreedBytes(target)
+            return@withContext null
+        }
+        onProgress(1.0)
         val (duration, w, h, thumb) = extractMetadata(context, userId, target)
         ImportResult(
             absolutePath = target.absolutePath,

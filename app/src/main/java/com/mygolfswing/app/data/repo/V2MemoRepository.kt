@@ -358,11 +358,18 @@ class V2MemoRepository(
         val tags = parseTagsJson(o["tagNames"]?.jsonPrimitive?.contentOrNull)
         val priority = o["priority"]?.jsonPrimitive?.contentOrNull ?: "medium"
         val pinnedAt = parseCloudMemoMillis(o["pinnedAt"])
-        return V2Memo.textMemo(title = title, body = summary, tags = tags).copy(
+        val topic = V2MemoBridge.inferTopic(category = null, tags = tags, title = title)
+        return V2Memo.textMemo(
+            title = title,
+            body = summary,
+            topic = topic,
+            tags = tags,
+            accent = V2MemoBridge.inferAccent(source = source, priority = priority, tags = tags),
+        ).copy(
             id = id,
             createdAt = createdAt,
             updatedAt = updatedAt,
-            metaText = null,
+            metaText = source.takeIf { it.equals("ai", ignoreCase = true) }?.let { "AI 洞察" },
             priorityRaw = priority,
             pinState = if (pinnedAt != null) V2PinState.PINNED else V2PinState.NONE,
         )

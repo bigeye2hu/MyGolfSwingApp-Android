@@ -1,8 +1,13 @@
 package com.mygolfswing.app.ui.auth
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +16,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,15 +53,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -103,7 +114,8 @@ fun V2ResetPasswordScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .imePadding(),
         ) {
             Hero(onBack = onBack)
             AuthCard(
@@ -159,13 +171,20 @@ fun V2ResetPasswordScreen(
                                 }
                                 scope.launch {
                                     loading = true
-                                    val r = ServiceLocator.authRepo.sendSmsCode(
-                                        phone,
-                                        purpose = com.mygolfswing.app.data.repo.V2AuthRepository.SmsPurpose.RESET_PASSWORD,
-                                    )
-                                    loading = false
-                                    r.onSuccess { countdown = 60 }
-                                        .onFailure { error = it.message ?: "发送失败" }
+                                    try {
+                                        val r = ServiceLocator.authRepo.sendSmsCode(
+                                            phone,
+                                            purpose = com.mygolfswing.app.data.repo.V2AuthRepository.SmsPurpose.RESET_PASSWORD,
+                                        )
+                                        r.onSuccess { countdown = 60 }
+                                            .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Throwable) {
+                                        error = authUserError("验证码发送失败，请稍后重试", e.message)
+                                    } finally {
+                                        loading = false
+                                    }
                                 }
                             },
                             enabled = phone.length == 11 && countdown == 0 && !loading,
@@ -200,21 +219,26 @@ fun V2ResetPasswordScreen(
                         }
                         scope.launch {
                             loading = true
-                            val r = ServiceLocator.authRepo.resetPasswordWithSms(phone, code, newPw)
-                            if (r.isSuccess) {
-                                // 重置后自动用新密码登录
-                                val login = ServiceLocator.authRepo.loginWithUsername(phone, newPw)
-                                login.onSuccess {
-                                    loading = false
-                                    showSuccess = true
-                                }
-                                    .onFailure {
-                                        loading = false
-                                        error = "重置成功，请回到登录页用新密码登录"
+                            try {
+                                val r = ServiceLocator.authRepo.resetPasswordWithSms(phone, code, newPw)
+                                if (r.isSuccess) {
+                                    // 重置后自动用新密码登录
+                                    val login = ServiceLocator.authRepo.loginWithUsername(phone, newPw)
+                                    login.onSuccess {
+                                        showSuccess = true
                                     }
-                            } else {
+                                        .onFailure {
+                                            error = "重置成功，请回到登录页用新密码登录"
+                                        }
+                                } else {
+                                    error = authUserError("重置失败，请检查验证码和新密码后重试", r.exceptionOrNull()?.message)
+                                }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Throwable) {
+                                error = authUserError("重置失败，请检查验证码和新密码后重试", e.message)
+                            } finally {
                                 loading = false
-                                error = r.exceptionOrNull()?.message ?: "重置失败"
                             }
                         }
                     },
@@ -225,6 +249,7 @@ fun V2ResetPasswordScreen(
                     .padding(horizontal = DSSpacing.lg)
                     .offset(y = (-16).dp),
             )
+            Spacer(Modifier.height(8.dp).navigationBarsPadding())
         }
         if (showSuccess) {
             ResetSuccessOverlay()
@@ -302,6 +327,7 @@ private fun PasswordField(
 
 @Composable
 private fun TipsCard(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -312,9 +338,37 @@ private fun TipsCard(modifier: Modifier = Modifier) {
     ) {
         Text("温馨提示", color = AuthPalette.labelText, style = DSTypography.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
         Text("• 如果账号未绑定手机号，请联系客服重置密码", color = AuthPalette.placeholder, style = DSTypography.caption)
-        Text("• 客服邮箱：372931693@qq.com", color = AuthPalette.placeholder, style = DSTypography.caption)
-        Text("• 客服电话：二胡 18851310088", color = AuthPalette.placeholder, style = DSTypography.caption)
+        SupportLinkText(
+            text = "• 客服邮箱：$SUPPORT_EMAIL",
+            onClick = {
+                if (!context.openSupportEmail()) {
+                    Toast.makeText(context, "邮件应用暂时无法打开，请手动发送到 $SUPPORT_EMAIL", Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
+        SupportLinkText(
+            text = "• 客服电话：二胡 $SUPPORT_PHONE",
+            onClick = {
+                if (!context.openSupportPhone()) {
+                    Toast.makeText(context, "拨号应用暂时无法打开，请手动拨打 $SUPPORT_PHONE", Toast.LENGTH_SHORT).show()
+                }
+            },
+        )
     }
+}
+
+@Composable
+private fun SupportLinkText(text: String, onClick: () -> Unit) {
+    Text(
+        text = text,
+        color = DSColors.fairway,
+        style = DSTypography.caption.copy(textDecoration = TextDecoration.Underline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+    )
 }
 
 @Composable
@@ -371,3 +425,21 @@ private fun validate(phone: String, code: String, newPw: String, confirmPw: Stri
     if (newPw != confirmPw) return "两次输入的密码不一致"
     return null
 }
+
+private const val SUPPORT_EMAIL = "372931693@qq.com"
+private const val SUPPORT_PHONE = "18851310088"
+
+private fun Context.openSupportEmail(): Boolean = runCatching {
+    val intent = Intent(Intent.ACTION_SENDTO).apply {
+        data = Uri.parse("mailto:$SUPPORT_EMAIL")
+        putExtra(Intent.EXTRA_SUBJECT, "挥呗账号密码重置协助")
+    }
+    startActivity(intent)
+}.isSuccess
+
+private fun Context.openSupportPhone(): Boolean = runCatching {
+    val intent = Intent(Intent.ACTION_DIAL).apply {
+        data = Uri.parse("tel:$SUPPORT_PHONE")
+    }
+    startActivity(intent)
+}.isSuccess

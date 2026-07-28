@@ -51,6 +51,7 @@ internal fun decodeSwingSessionJson(sessionJson: String, json: Json): V2SwingSes
                 timestamp = LocalDateTime.parse(o["timestamp"]!!.jsonPrimitive.content),
                 durationSec = o["durationSec"]!!.jsonPrimitive.doubleOrNull ?: return@runCatching null,
                 retention = V2SwingClipRetention.fromWire(o["retention"]?.jsonPrimitive?.contentOrNull),
+                sourceLabel = o["sourceLabel"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
             )
         }.getOrNull()
     } ?: emptyList()
@@ -70,7 +71,13 @@ class V2SwingSessionRepository(
             dao.observeAll(uid).map { rows -> rows.mapNotNull { decode(it) } }
         }
 
-    suspend fun addClip(userId: String, videoPath: String, thumbnailPath: String?, durationSec: Double) =
+    suspend fun addClip(
+        userId: String,
+        videoPath: String,
+        thumbnailPath: String?,
+        durationSec: Double,
+        sourceLabel: String? = null,
+    ): UUID =
         withContext(Dispatchers.IO) {
             val today = LocalDate.now()
             val existing = dao.getByDay(userId, today.toEpochDay())
@@ -80,9 +87,11 @@ class V2SwingSessionRepository(
                 videoPath = videoPath,
                 thumbnailPath = thumbnailPath,
                 durationSec = durationSec,
+                sourceLabel = sourceLabel?.takeIf { it.isNotBlank() },
             )
             val updated = session.copy(clips = session.clips + clip)
             dao.upsert(encode(updated))
+            clip.id
         }
 
     suspend fun updateClipRetention(clipId: UUID, retention: V2SwingClipRetention) = withContext(Dispatchers.IO) {
@@ -109,13 +118,13 @@ class V2SwingSessionRepository(
             val decoded = decode(row) ?: return@forEach
             val removed = decoded.clips.filter { it.id in clipIds }
             if (removed.isEmpty()) return@forEach
-            removed.forEach { it.deleteFiles() }
             val updatedClips = decoded.clips.filterNot { it.id in clipIds }
             if (updatedClips.isEmpty()) {
                 dao.deleteById(decoded.id.toString())
             } else {
                 dao.upsert(encode(decoded.copy(clips = updatedClips)))
             }
+            removed.forEach { it.deleteFiles() }
         }
     }
 
@@ -148,6 +157,7 @@ class V2SwingSessionRepository(
                         "timestamp" to JsonPrimitive(c.timestamp.toString()),
                         "durationSec" to JsonPrimitive(c.durationSec),
                         "retention" to JsonPrimitive(c.retention.wire),
+                        "sourceLabel" to JsonPrimitive(c.sourceLabel ?: ""),
                     ),
                 )
             },

@@ -31,10 +31,13 @@ object V2GoalStore {
     private val _goals = MutableStateFlow<List<V2Goal>>(emptyList())
     val goals: StateFlow<List<V2Goal>> = _goals.asStateFlow()
 
+    private val pendingDeletedGoalIds = mutableSetOf<UUID>()
+
     private val memoStore = V2MemoStore
 
     fun resetInMemory() {
         _goals.value = emptyList()
+        pendingDeletedGoalIds.clear()
     }
 
     /**
@@ -57,9 +60,11 @@ object V2GoalStore {
      * Room 推送可能早于 [upsert] 完成，避免覆盖 [checkIn] 等操作的乐观更新（对齐 iOS 先 save 再 reload）。
      */
     private fun mergeRoomGoals(room: List<V2Goal>): List<V2Goal> {
+        val pendingDeleted = pendingDeletedGoalIds.toSet()
+        val visibleRoom = if (pendingDeleted.isEmpty()) room else room.filterNot { it.id in pendingDeleted }
         val memoryById = _goals.value.associateBy { it.id }
-        if (memoryById.isEmpty()) return room
-        return room.map { row ->
+        if (memoryById.isEmpty()) return visibleRoom
+        return visibleRoom.map { row ->
             val mem = memoryById[row.id] ?: return@map row
             if (mem.updatedAt.isAfter(row.updatedAt)) mem else row
         }
@@ -148,14 +153,59 @@ object V2GoalStore {
         }
     }
 
+    suspend fun createAndWait(goal: V2Goal): UUID {
+        val incoming = if (goal.todayFocus) {
+            goal
+        } else if (_goals.value.none { it.todayFocus }) {
+            goal.copy(todayFocus = true)
+        } else {
+            goal
+        }
+        if (incoming.todayFocus) {
+            _goals.value.filter { it.todayFocus }.forEach {
+                repo.upsert(it.copy(todayFocus = false, updatedAt = LocalDateTime.now()))
+            }
+        }
+        repo.upsert(incoming)
+        val goals = _goals.value.map {
+            if (incoming.todayFocus && it.todayFocus && it.id != incoming.id) {
+                it.copy(todayFocus = false, updatedAt = LocalDateTime.now())
+            } else {
+                it
+            }
+        }
+        _goals.value = listOf(incoming) + goals.filterNot { it.id == incoming.id }
+        return incoming.id
+    }
+
     fun update(goal: V2Goal) {
         scope.launch {
             repo.upsert(goal.copy(updatedAt = LocalDateTime.now()))
         }
     }
 
+    suspend fun updateAndWait(goal: V2Goal): UUID {
+        val updated = goal.copy(updatedAt = LocalDateTime.now())
+        repo.upsert(updated)
+        _goals.value = _goals.value.map { if (it.id == updated.id) updated else it }
+        return updated.id
+    }
+
     fun delete(goalId: UUID) {
-        scope.launch { repo.delete(goalId.toString()) }
+        pendingDeletedGoalIds += goalId
+        _goals.value = _goals.value.filterNot { it.id == goalId }
+        scope.launch {
+            try {
+                repo.delete(goalId.toString())
+            } finally {
+                pendingDeletedGoalIds -= goalId
+            }
+        }
+    }
+
+    suspend fun deleteAndWait(goalId: UUID) {
+        repo.delete(goalId.toString())
+        _goals.value = _goals.value.filterNot { it.id == goalId }
     }
 
     /**
@@ -199,80 +249,89 @@ object V2GoalStore {
 
     fun pause(goalId: UUID) {
         val g = _goals.value.firstOrNull { it.id == goalId } ?: return
-        scope.launch { repo.upsert(g.copy(status = V2Goal.Status.PAUSED, updatedAt = LocalDateTime.now())) }
+        if (g.status != V2Goal.Status.ACTIVE) return
+        val updated = g.copy(status = V2Goal.Status.PAUSED, updatedAt = LocalDateTime.now())
+        _goals.value = _goals.value.map { if (it.id == goalId) updated else it }
+        scope.launch { repo.upsert(updated) }
     }
 
     fun resume(goalId: UUID) {
         val g = _goals.value.firstOrNull { it.id == goalId } ?: return
-        scope.launch { repo.upsert(g.copy(status = V2Goal.Status.ACTIVE, updatedAt = LocalDateTime.now())) }
+        if (g.status != V2Goal.Status.PAUSED) return
+        val updated = g.copy(status = V2Goal.Status.ACTIVE, updatedAt = LocalDateTime.now())
+        _goals.value = _goals.value.map { if (it.id == goalId) updated else it }
+        scope.launch { repo.upsert(updated) }
     }
 
     fun setFocused(goalId: UUID) {
-        scope.launch {
-            _goals.value.forEach { g ->
-                val want = g.id == goalId
-                if (g.todayFocus != want) {
-                    repo.upsert(g.copy(todayFocus = want, updatedAt = LocalDateTime.now()))
-                }
+        val now = LocalDateTime.now()
+        val changed = _goals.value.mapNotNull { g ->
+            val want = g.id == goalId
+            if (g.todayFocus == want) {
+                null
+            } else {
+                g.copy(todayFocus = want, updatedAt = now)
             }
         }
+        if (changed.isEmpty()) return
+        val changedById = changed.associateBy { it.id }
+        _goals.value = _goals.value.map { changedById[it.id] ?: it }
+        scope.launch { changed.forEach { repo.upsert(it) } }
     }
 
     fun linkMemo(memoId: UUID, toGoalId: UUID) {
         val g = _goals.value.firstOrNull { it.id == toGoalId } ?: return
-        scope.launch {
-            repo.upsert(
-                g.copy(
-                    derivedFromMemoIds = (g.derivedFromMemoIds + memoId).distinct(),
-                    updatedAt = LocalDateTime.now(),
-                ),
-            )
-        }
+        val updated = g.copy(
+            derivedFromMemoIds = (g.derivedFromMemoIds + memoId).distinct(),
+            updatedAt = LocalDateTime.now(),
+        )
+        if (updated.derivedFromMemoIds == g.derivedFromMemoIds) return
+        _goals.value = _goals.value.map { if (it.id == toGoalId) updated else it }
+        scope.launch { repo.upsert(updated) }
     }
 
     fun unlinkMemo(memoId: UUID, fromGoalId: UUID) {
         val g = _goals.value.firstOrNull { it.id == fromGoalId } ?: return
-        scope.launch {
-            repo.upsert(
-                g.copy(
-                    derivedFromMemoIds = g.derivedFromMemoIds.filterNot { id -> id == memoId },
-                    updatedAt = LocalDateTime.now(),
-                ),
-            )
-        }
+        val updated = g.copy(
+            derivedFromMemoIds = g.derivedFromMemoIds.filterNot { id -> id == memoId },
+            updatedAt = LocalDateTime.now(),
+        )
+        if (updated.derivedFromMemoIds == g.derivedFromMemoIds) return
+        _goals.value = _goals.value.map { if (it.id == fromGoalId) updated else it }
+        scope.launch { repo.upsert(updated) }
     }
 
     fun replaceLinkedMemos(goalId: UUID, memoIds: List<UUID>) {
         val g = _goals.value.firstOrNull { it.id == goalId } ?: return
-        scope.launch {
-            repo.upsert(
-                g.copy(
-                    derivedFromMemoIds = memoIds.distinct(),
-                    updatedAt = LocalDateTime.now(),
-                ),
-            )
-        }
+        val updated = g.copy(
+            derivedFromMemoIds = memoIds.distinct(),
+            updatedAt = LocalDateTime.now(),
+        )
+        if (updated.derivedFromMemoIds == g.derivedFromMemoIds) return
+        _goals.value = _goals.value.map { if (it.id == goalId) updated else it }
+        scope.launch { repo.upsert(updated) }
     }
 
     fun replaceMemoLinks(memoId: UUID, goalIds: Set<UUID>) {
         val selected = goalIds.toSet()
-        _goals.value.forEach { goal ->
+        val now = LocalDateTime.now()
+        val changed = _goals.value.mapNotNull { goal ->
             val hasMemo = memoId in goal.derivedFromMemoIds
             val shouldHaveMemo = goal.id in selected
-            if (hasMemo == shouldHaveMemo) return@forEach
-            scope.launch {
-                repo.upsert(
-                    goal.copy(
-                        derivedFromMemoIds = if (shouldHaveMemo) {
-                            (goal.derivedFromMemoIds + memoId).distinct()
-                        } else {
-                            goal.derivedFromMemoIds.filterNot { it == memoId }
-                        },
-                        updatedAt = LocalDateTime.now(),
-                    ),
-                )
-            }
+            if (hasMemo == shouldHaveMemo) return@mapNotNull null
+            goal.copy(
+                derivedFromMemoIds = if (shouldHaveMemo) {
+                    (goal.derivedFromMemoIds + memoId).distinct()
+                } else {
+                    goal.derivedFromMemoIds.filterNot { it == memoId }
+                },
+                updatedAt = now,
+            )
         }
+        if (changed.isEmpty()) return
+        val changedById = changed.associateBy { it.id }
+        _goals.value = _goals.value.map { changedById[it.id] ?: it }
+        scope.launch { changed.forEach { repo.upsert(it) } }
     }
 
     /**

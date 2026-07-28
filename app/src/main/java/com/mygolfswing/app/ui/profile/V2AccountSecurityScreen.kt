@@ -19,16 +19,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -53,9 +55,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -77,7 +81,10 @@ fun V2AccountSecurityScreen(
     var confirmLogout by remember { mutableStateOf(false) }
     var showNicknameEditor by remember { mutableStateOf(false) }
     var showPhoneEditor by remember { mutableStateOf(false) }
+    var phoneEditorHadPhone by remember { mutableStateOf(false) }
     var loggingOut by remember { mutableStateOf(false) }
+    var successMessage by remember { mutableStateOf<String?>(null) }
+    var logoutError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     val isTestUser = V2DeveloperToolsAccess.isCloudAuditEnabled(profile)
@@ -97,6 +104,7 @@ fun V2AccountSecurityScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
+                .v2NavigationBarPadding()
                 .padding(horizontal = 20.dp)
                 .padding(top = 12.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -108,7 +116,10 @@ fun V2AccountSecurityScreen(
                 phone = profile.phone,
                 createdAt = profile.createdAt,
                 onEditNickname = { showNicknameEditor = true },
-                onEditPhone = { showPhoneEditor = true },
+                onEditPhone = {
+                    phoneEditorHadPhone = !profile.phone.isNullOrBlank()
+                    showPhoneEditor = true
+                },
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -134,7 +145,7 @@ fun V2AccountSecurityScreen(
                     )
                     GroupDivider()
                     SettingsActionRow(
-                        icon = Icons.Filled.PrivacyTip,
+                        icon = Icons.Filled.Security,
                         title = "隐私政策",
                         onClick = onOpenPrivacy,
                     )
@@ -186,7 +197,7 @@ fun V2AccountSecurityScreen(
             }
 
             ActionCard(onClick = onOpenAccountDeletion) {
-                SettingsIconBox(icon = Icons.Filled.DeleteOutline, tint = DSColors.flagRed)
+                SettingsIconBox(icon = Icons.Filled.Delete, tint = DSColors.flagRed)
                 Text(
                     text = "删除账号",
                     fontSize = 16.sp,
@@ -218,9 +229,16 @@ fun V2AccountSecurityScreen(
                     confirmLogout = false
                     scope.launch {
                         loggingOut = true
-                        V2ProfileStore.logoutAndWait()
-                        loggingOut = false
-                        onLogoutComplete()
+                        try {
+                            V2ProfileStore.logoutAndWait()
+                            onLogoutComplete()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (_: Throwable) {
+                            logoutError = "退出登录失败，请稍后重试"
+                        } finally {
+                            loggingOut = false
+                        }
                     }
                 }) {
                     Text("退出", color = DSColors.flagRed)
@@ -234,6 +252,19 @@ fun V2AccountSecurityScreen(
         )
     }
 
+    logoutError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { logoutError = null },
+            title = { Text("退出失败", style = DSTypography.titleMedium) },
+            text = { Text(message, style = DSTypography.body) },
+            confirmButton = {
+                TextButton(onClick = { logoutError = null }) {
+                    Text("好", color = DSColors.fairway)
+                }
+            },
+        )
+    }
+
     if (showNicknameEditor) {
         V2NicknameEditorDialog(
             initial = profile.nickname,
@@ -241,6 +272,7 @@ fun V2AccountSecurityScreen(
             onSaved = {
                 showNicknameEditor = false
                 V2ProfileStore.refresh(force = true)
+                successMessage = "昵称已更新"
             },
         )
     }
@@ -253,6 +285,20 @@ fun V2AccountSecurityScreen(
             onSaved = {
                 showPhoneEditor = false
                 V2ProfileStore.refresh(force = true)
+                successMessage = if (phoneEditorHadPhone) "手机号换绑成功" else "手机号绑定成功"
+            },
+        )
+    }
+
+    successMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { successMessage = null },
+            title = { Text("操作成功", style = DSTypography.titleMedium) },
+            text = { Text(message, style = DSTypography.body) },
+            confirmButton = {
+                TextButton(onClick = { successMessage = null }) {
+                    Text("确定", color = DSColors.fairway)
+                }
             },
         )
     }
@@ -274,7 +320,7 @@ private fun BasicInfoSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = Icons.Filled.Person,
+                imageVector = Icons.Filled.AccountBox,
                 contentDescription = null,
                 tint = DSColors.inkGreen,
                 modifier = Modifier.size(14.dp),
@@ -306,7 +352,7 @@ private fun BasicInfoSection(
             )
             CardDivider()
             InfoRow(
-                icon = Icons.Filled.AlternateEmail,
+                icon = Icons.Filled.Email,
                 title = "邮箱",
                 subtitle = email?.takeIf { it.isNotBlank() } ?: "未绑定",
             )

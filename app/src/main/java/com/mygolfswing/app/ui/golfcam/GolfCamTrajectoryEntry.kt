@@ -1,6 +1,8 @@
 package com.mygolfswing.app.ui.golfcam
 
+import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateFloatAsState
@@ -26,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +50,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -53,9 +58,72 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.R
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.GolfCamVideoConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
+import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowStateStore
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
+import com.mygolfswing.app.ui.golfcam.steps.GolfCamThumbnailCache
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+
+private const val MIN_PRELOAD_VIDEO_DURATION_MS = 500L
+
+internal const val GOLF_CAM_IMPORT_RESTORE_MESSAGE = "正在恢复上次编辑进度"
+internal const val GOLF_CAM_IMPORT_DETECT_MESSAGE = "正在识别视频比例与帧率"
+internal const val GOLF_CAM_IMPORT_GENERATE_PREVIEW_MESSAGE = "正在生成预览"
+internal const val GOLF_CAM_IMPORT_VIDEO_CONFIG_ERROR_MESSAGE = "无法读取视频参数，请换一个视频或稍后重试"
+
+internal fun shouldDetectGolfCamVideoConfig(config: GolfCamVideoConfig?): Boolean {
+    return config == null ||
+        config.durationMs < 500L ||
+        config.frameRate !in 1.0..120.0 ||
+        config.visualWidth <= 1 ||
+        config.visualHeight <= 1
+}
+
+internal fun golfCamThumbnailPreloadDurationMs(config: GolfCamVideoConfig?): Long? {
+    return config?.durationMs?.takeIf { it >= MIN_PRELOAD_VIDEO_DURATION_MS }
+}
+
+internal fun workflowPreviewVideoConfig(config: GolfCamVideoConfig?): GolfCamVideoConfig? {
+    val source = config ?: return null
+    if (source.durationMs < MIN_PRELOAD_VIDEO_DURATION_MS) return null
+    if (shouldDetectGolfCamVideoConfig(source)) return null
+    val visualWidth = source.visualWidth
+    val visualHeight = source.visualHeight
+    val frameRate = source.frameRate.takeIf { it in 1.0..120.0 } ?: 30.0
+    return source.copy(
+        frameRate = frameRate,
+        visualWidth = visualWidth,
+        visualHeight = visualHeight,
+    )
+}
+
+internal data class GolfCamEntryPreviewState(
+    val selection: TrackStyleSelection,
+    val videoConfig: GolfCamVideoConfig,
+    val impactTimeMs: Long,
+    val trimStartMs: Long,
+    val trimEndMs: Long?,
+)
+
+internal fun previewStateFromWorkflow(state: GolfCamWorkflowState): GolfCamEntryPreviewState? {
+    val videoConfig = workflowPreviewVideoConfig(state.videoConfig) ?: return null
+    if (!state.isComplete) return null
+    val trim = state.trimResult ?: return null
+    val impact = state.impactFrame ?: return null
+    val selection = state.trackStyle ?: return null
+    return GolfCamEntryPreviewState(
+        selection = selection,
+        videoConfig = videoConfig,
+        impactTimeMs = impact.timeMs,
+        trimStartMs = trim.startMs,
+        trimEndMs = trim.endMs,
+    )
+}
 
 /**
  * GolfCam 轨迹绘制主入口（对齐 iOS V2TrajectorySourceSheet + handleTrajectoryVideoSelected）。
@@ -69,35 +137,111 @@ import kotlin.math.roundToInt
 fun GolfCamTrajectoryEntry(
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val state = remember { GolfCamWorkflowState() }
     var pickedUri: Uri? by rememberSaveable { mutableStateOf<Uri?>(null) }
     var showPreview by remember { mutableStateOf(false) }
-    var lastSelection by remember { mutableStateOf<TrackStyleSelection?>(null) }
-    var lastImpactTimeMs by remember { mutableStateOf(0L) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var pickerError by remember { mutableStateOf<String?>(null) }
+    val previewState = previewStateFromWorkflow(state)
 
     val videoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
+        contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri != null) {
-            statusMessage = "正在准备轨迹绘制流程"
-            if (pickedUri != uri) state.clearAll()
-            pickedUri = uri
-            state.videoUri = uri
-            showPreview = false
-            statusMessage = null
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            pickerError = null
+            statusMessage = GOLF_CAM_IMPORT_RESTORE_MESSAGE
+            scope.launch {
+                try {
+                    if (pickedUri != uri) state.clearAll()
+                    state.videoUri = uri
+                    val restored = GolfCamWorkflowStateStore.restore(uri, state)
+                    if (shouldDetectGolfCamVideoConfig(state.videoConfig)) {
+                        statusMessage = GOLF_CAM_IMPORT_DETECT_MESSAGE
+                        val detectedConfig = withContext(Dispatchers.IO) { detectGolfCamVideoConfig(context, uri) }
+                        state.updateVideoConfig(detectedConfig)
+                    }
+                    pickedUri = uri
+                    val restoredPreviewReady = restored && previewStateFromWorkflow(state) != null
+                    if (restoredPreviewReady) {
+                        statusMessage = GOLF_CAM_IMPORT_GENERATE_PREVIEW_MESSAGE
+                    }
+                    showPreview = restoredPreviewReady
+                    statusMessage = null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    state.clearAll()
+                    pickedUri = null
+                    showPreview = false
+                    statusMessage = null
+                    pickerError = GOLF_CAM_IMPORT_VIDEO_CONFIG_ERROR_MESSAGE
+                }
+            }
         }
     }
 
+    fun openVideoPicker(showInlineError: Boolean = true) {
+        pickerError = null
+        runCatching {
+            videoPicker.launch(arrayOf("video/*"))
+        }.onFailure {
+            statusMessage = null
+            val message = "无法打开相册，请稍后重试"
+            if (showInlineError) {
+                pickerError = message
+            } else {
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    LaunchedEffect(
+        pickedUri,
+        state.trimResult,
+        state.videoConfig,
+        state.impactFrame,
+        state.impactPosition,
+        state.landing,
+        state.flightCurve,
+        state.trackStyle,
+    ) {
+        val uri = pickedUri ?: return@LaunchedEffect
+        if (state.videoConfig != null ||
+            state.trimResult != null ||
+            state.impactFrame != null ||
+            state.impactPosition != null ||
+            state.landing != null ||
+            state.flightCurve != null ||
+            state.trackStyle != null
+        ) {
+            GolfCamWorkflowStateStore.save(uri, state)
+        }
+    }
+
+    LaunchedEffect(pickedUri, golfCamThumbnailPreloadDurationMs(state.videoConfig)) {
+        val uri = pickedUri ?: return@LaunchedEffect
+        val preloadDurationMs = golfCamThumbnailPreloadDurationMs(state.videoConfig) ?: return@LaunchedEffect
+        GolfCamThumbnailCache.preloadVideo(context, uri, preloadDurationMs)
+    }
+
     when {
-        showPreview && pickedUri != null && lastSelection != null -> {
+        showPreview && pickedUri != null && previewState != null -> {
             val uri = pickedUri ?: return
             GolfCamOverlayPreviewScreen(
                 videoUri = uri,
-                selection = lastSelection!!,
-                impactTimeMs = lastImpactTimeMs,
-                trimStartMs = state.trimResult?.startMs ?: 0L,
-                trimEndMs = state.trimResult?.endMs,
+                selection = previewState.selection,
+                initialVideoConfig = previewState.videoConfig,
+                impactTimeMs = previewState.impactTimeMs,
+                trimStartMs = previewState.trimStartMs,
+                trimEndMs = previewState.trimEndMs,
                 onDismiss = onDismiss,
                 onReEdit = { showPreview = false },
             )
@@ -107,18 +251,13 @@ fun GolfCamTrajectoryEntry(
             FlightPathUnifiedContainer(
                 videoUri = uri,
                 state = state,
-                initialStep = state.completedStep,
+                initialStep = state.resumeStep,
                 onComplete = { selection ->
-                    lastSelection = selection
-                    lastImpactTimeMs = state.impactFrame?.timeMs ?: 0L
-                    showPreview = true
+                    state.updateTrackStyle(selection)
+                    showPreview = previewStateFromWorkflow(state) != null
                 },
                 onReselect = {
-                    // 清空状态，重新打开相册
-                    state.clearAll()
-                    pickedUri = null
-                    showPreview = false
-                    videoPicker.launch("video/*")
+                    openVideoPicker(showInlineError = false)
                 },
                 onCancel = onDismiss,
             )
@@ -126,7 +265,8 @@ fun GolfCamTrajectoryEntry(
         else -> {
             TrajectorySourceSheet(
                 statusMessage = statusMessage,
-                onPickVideo = { videoPicker.launch("video/*") },
+                errorMessage = pickerError,
+                onPickVideo = { openVideoPicker() },
                 onDismiss = onDismiss,
             )
         }
@@ -138,6 +278,7 @@ fun GolfCamTrajectoryEntry(
 @Composable
 private fun TrajectorySourceSheet(
     statusMessage: String?,
+    errorMessage: String?,
     onPickVideo: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -189,6 +330,7 @@ private fun TrajectorySourceSheet(
                     } else Modifier,
                 ),
             statusMessage = statusMessage,
+            errorMessage = errorMessage,
             isBusy = isBusy,
             onPickVideo = onPickVideo,
             onDismiss = onDismiss,
@@ -200,6 +342,7 @@ private fun TrajectorySourceSheet(
 private fun SheetCard(
     modifier: Modifier,
     statusMessage: String?,
+    errorMessage: String?,
     isBusy: Boolean,
     onPickVideo: () -> Unit,
     onDismiss: () -> Unit,
@@ -236,6 +379,7 @@ private fun SheetCard(
                     subtitle = "导入击球视频，进入 V2 六步轨迹绘制流程",
                     onClick = onPickVideo,
                 )
+                errorMessage?.let { PickerErrorStrip(it) }
                 InfoStrip()
             }
         }
@@ -355,6 +499,27 @@ private fun SourceButton(title: String, subtitle: String, onClick: () -> Unit) {
 }
 
 // ─── 信息条 ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PickerErrorStrip(message: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(DSColors.flagRed.copy(alpha = 0.08f))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Filled.ErrorOutline, null, tint = DSColors.flagRed, modifier = Modifier.size(14.dp))
+        Text(
+            message,
+            color = DSColors.flagRed,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+    }
+}
 
 @Composable
 private fun InfoStrip() {

@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.SportsScore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,7 +38,7 @@ fun V2HomeDecorativeFooter(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(
-            imageVector = Icons.Outlined.Flag,
+            imageVector = Icons.Outlined.SportsScore,
             contentDescription = null,
             tint = DSColors.deepGreen.copy(alpha = 0.55f),
             modifier = Modifier

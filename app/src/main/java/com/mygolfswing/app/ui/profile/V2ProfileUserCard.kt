@@ -9,16 +9,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,7 +48,12 @@ fun V2ProfileUserCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp))
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = DSColors.fairway.copy(alpha = 0.08f),
+                spotColor = DSColors.fairway.copy(alpha = 0.08f),
+            )
             .clip(RoundedCornerShape(24.dp))
             .background(DSColors.cardWhite)
             .padding(DSSpacing.lg + 4.dp),
@@ -71,12 +77,14 @@ fun V2ProfileUserCard(
                 )
                 EditButton(onTap = onEditTap)
             }
-            Text(
-                text = profile.username,
-                fontSize = 13.sp,
-                color = DSColors.shadowGray,
-                maxLines = 1,
-            )
+            if (profile.username.isNotBlank()) {
+                Text(
+                    text = profile.username,
+                    fontSize = 13.sp,
+                    color = DSColors.shadowGray,
+                    maxLines = 1,
+                )
+            }
             Spacer(modifier = Modifier.size(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
                 MembershipChip(text = profile.membershipTier)
@@ -97,7 +105,12 @@ private fun AvatarBlock(avatarUrl: String?, showVerified: Boolean, onTap: () -> 
         Box(
             modifier = Modifier
                 .size(85.dp)
-                .shadow(elevation = 4.dp, shape = CircleShape)
+                .shadow(
+                    elevation = 4.dp,
+                    shape = CircleShape,
+                    ambientColor = Color(0xFFE0A82E).copy(alpha = 0.3f),
+                    spotColor = Color(0xFFE0A82E).copy(alpha = 0.3f),
+                )
                 .clip(CircleShape)
                 .background(
                     Brush.linearGradient(listOf(Color(0xFFE0A82E), Color(0xFFF5C842))),
@@ -120,10 +133,10 @@ private fun AvatarBlock(avatarUrl: String?, showVerified: Boolean, onTap: () -> 
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Filled.Person,
+                        imageVector = Icons.Filled.AccountCircle,
                         contentDescription = "头像",
-                        tint = DSColors.shadowGray.copy(alpha = 0.55f),
-                        modifier = Modifier.size(48.dp),
+                        tint = DSColors.shadowGray.copy(alpha = 0.4f),
+                        modifier = Modifier.size(56.dp),
                     )
                 }
             }
@@ -131,7 +144,8 @@ private fun AvatarBlock(avatarUrl: String?, showVerified: Boolean, onTap: () -> 
         if (showVerified) {
             VerifiedBadge(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd),
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 2.dp, y = 2.dp),
             )
         }
     }
@@ -142,6 +156,12 @@ private fun VerifiedBadge(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .size(24.dp)
+            .shadow(
+                elevation = 3.dp,
+                shape = CircleShape,
+                ambientColor = DSColors.fairway.copy(alpha = 0.2f),
+                spotColor = DSColors.fairway.copy(alpha = 0.2f),
+            )
             .clip(CircleShape)
             .background(DSColors.fairway)
             .border(width = 2.dp, color = DSColors.warmWhite, shape = CircleShape),
@@ -151,7 +171,7 @@ private fun VerifiedBadge(modifier: Modifier = Modifier) {
             imageVector = Icons.Filled.Check,
             contentDescription = null,
             tint = Color.White,
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(10.dp),
         )
     }
 }
@@ -170,7 +190,7 @@ private fun EditButton(onTap: () -> Unit) {
             imageVector = Icons.Filled.Edit,
             contentDescription = "编辑",
             tint = DSColors.fairway,
-            modifier = Modifier.size(14.dp),
+            modifier = Modifier.size(13.dp),
         )
     }
 }
@@ -188,10 +208,10 @@ private fun MembershipChip(text: String) {
             .padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Icon(
-            imageVector = Icons.Filled.EmojiEvents,
+            imageVector = Icons.Filled.WorkspacePremium,
             contentDescription = null,
             tint = Color.White,
-            modifier = Modifier.size(11.dp),
+            modifier = Modifier.size(10.dp),
         )
         Text(text = text, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
     }
@@ -211,7 +231,7 @@ private fun CreditsChip(credits: Int) {
             imageVector = Icons.Filled.Star,
             contentDescription = null,
             tint = DSColors.trophyGold,
-            modifier = Modifier.size(11.dp),
+            modifier = Modifier.size(10.dp),
         )
         Text(text = "$credits 积分", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = DSColors.fairway)
     }

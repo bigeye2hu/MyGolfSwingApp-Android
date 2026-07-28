@@ -3,6 +3,7 @@ package com.mygolfswing.app.ui.golfcam.steps
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
+import com.mygolfswing.app.ui.golfcam.normalizedVideoRotation
 
 internal data class ThumbnailVideoMetadata(
     val rawWidth: Int,
@@ -25,14 +26,17 @@ internal fun thumbnailRotationDegrees(
     frameWidth: Int,
     frameHeight: Int,
 ): Int {
-    val rotation = ((metadataRotationDegrees % 360) + 360) % 360
+    val rotation = normalizedVideoRotation(metadataRotationDegrees)
     val visualWidth = if (rotation == 90 || rotation == 270) rawHeight else rawWidth
     val visualHeight = if (rotation == 90 || rotation == 270) rawWidth else rawHeight
     val alreadyVisual = rawWidth > 0 &&
         rawHeight > 0 &&
         (rotation == 90 || rotation == 270) &&
-        frameWidth == visualWidth &&
-        frameHeight == visualHeight
+        frameWidth > 0 &&
+        frameHeight > 0 &&
+        visualWidth > 0 &&
+        visualHeight > 0 &&
+        (frameHeight > frameWidth) == (visualHeight > visualWidth)
     return if (alreadyVisual) 0 else rotation
 }
 

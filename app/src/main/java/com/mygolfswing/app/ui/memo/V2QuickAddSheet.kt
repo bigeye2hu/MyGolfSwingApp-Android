@@ -3,7 +3,6 @@ package com.mygolfswing.app.ui.memo
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,17 +32,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.R
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 
 /**
  * V2 快速添加 sheet（对齐 iOS `V2MemoCreateSheet` + Figma 188:1821）。
@@ -68,11 +70,14 @@ fun V2QuickAddSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Color.White,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = null,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .v2NavigationBarPadding()
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -110,7 +115,10 @@ fun V2QuickAddSheet(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            CancelButton(onClick = onDismiss)
+            CancelButton(
+                onClick = onDismiss,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
     }
 }
@@ -223,10 +231,14 @@ private fun QuickAddCard(
     Box(
         modifier = modifier
             .height(168.dp)
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(16.dp), clip = false)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.linearGradient(colors = fallbackGradient)),
+        )
         Image(
             painter = painterResource(imageRes),
             contentDescription = null,
@@ -252,12 +264,16 @@ private fun QuickAddCard(
             IconBadge(icon = icon)
             Spacer(modifier = Modifier.weight(1f))
             Row(verticalAlignment = Alignment.Bottom) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Text(
                         text = title,
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
+                        style = TextStyle(shadow = QuickAddCardTextShadow),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -265,23 +281,47 @@ private fun QuickAddCard(
                         text = subtitle,
                         color = Color.White.copy(alpha = 0.82f),
                         fontSize = 11.sp,
+                        style = TextStyle(shadow = QuickAddCardTextShadow),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.95f),
-                    modifier = Modifier
-                        .size(14.dp)
-                        .padding(bottom = 2.dp),
-                )
+                QuickAddChevron()
             }
         }
     }
 }
+
+@Composable
+private fun QuickAddChevron() {
+    Box(
+        modifier = Modifier
+            .padding(bottom = 2.dp)
+            .size(12.dp),
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.Black.copy(alpha = 0.45f),
+            modifier = Modifier
+                .size(12.dp)
+                .padding(top = 1.dp),
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.95f),
+            modifier = Modifier.size(12.dp),
+        )
+    }
+}
+
+private val QuickAddCardTextShadow = Shadow(
+    color = Color.Black.copy(alpha = 0.45f),
+    offset = Offset(0f, 1f),
+    blurRadius = 2f,
+)
 
 @Composable
 private fun IconBadge(icon: ImageVector) {
@@ -289,10 +329,14 @@ private fun IconBadge(icon: ImageVector) {
         modifier = Modifier
             .size(36.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.22f))
-            .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+            .background(Color.White.copy(alpha = 0.36f)),
         contentAlignment = Alignment.Center,
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.White.copy(alpha = 0.22f)),
+        )
         Icon(
             imageVector = icon,
             contentDescription = null,
@@ -303,9 +347,9 @@ private fun IconBadge(icon: ImageVector) {
 }
 
 @Composable
-private fun CancelButton(onClick: () -> Unit) {
+private fun CancelButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFFF2EFE8))

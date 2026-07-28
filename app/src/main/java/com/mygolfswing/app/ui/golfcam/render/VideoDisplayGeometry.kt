@@ -7,9 +7,13 @@ internal data class VideoDisplaySize(
 
 internal object VideoDisplayGeometry {
     fun fit(containerWidth: Float, containerHeight: Float, videoAspectRatio: Float): VideoDisplaySize {
-        val safeWidth = containerWidth.coerceAtLeast(1f)
-        val safeHeight = containerHeight.coerceAtLeast(1f)
-        val aspect = videoAspectRatio.coerceAtLeast(0.01f)
+        fun finiteFloat(value: Float, fallback: Float): Float {
+            return value.takeIf { it.isFinite() } ?: fallback
+        }
+
+        val safeWidth = finiteFloat(containerWidth, fallback = 1f).coerceAtLeast(1f)
+        val safeHeight = finiteFloat(containerHeight, fallback = 1f).coerceAtLeast(1f)
+        val aspect = finiteFloat(videoAspectRatio, fallback = 1f).coerceAtLeast(0.01f)
         val widthBasedHeight = safeWidth / aspect
         val heightBasedWidth = safeHeight * aspect
         return if (widthBasedHeight <= safeHeight) {

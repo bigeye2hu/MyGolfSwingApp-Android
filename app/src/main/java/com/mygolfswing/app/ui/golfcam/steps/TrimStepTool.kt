@@ -1,6 +1,5 @@
 package com.mygolfswing.app.ui.golfcam.steps
 
-import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -25,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -51,22 +52,31 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.TrimResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-private const val THUMB_COUNT = 15
+internal const val TRIM_THUMBNAIL_COUNT = 15
+internal const val TRIM_SAFE_MARGIN_DP = 28
+internal const val TRIM_HANDLE_WIDTH_DP = 12
+internal const val TRIM_BAR_HEIGHT_DP = 56
+internal const val TRIM_HANDLE_TOUCH_EXTRA_DP = 16
+internal const val TRIM_DIM_OVERLAY_ALPHA = 0.60f
+internal const val TRIM_SELECTION_BORDER_STROKE_PX = 1.5f
+internal const val TRIM_SELECTION_FILL_ALPHA = 0.08f
+internal const val TRIM_SELECTION_CORNER_RADIUS_DP = 6
+internal const val TRIM_STRIP_CORNER_RADIUS_DP = 4
 private const val DEFAULT_TRIM_MAX_MS = 30_000L
 private const val MIN_TRIM_DURATION_MS = 500L
 
 // 安全边距：条的左右各留 SAFE_MARGIN，让把手远离屏幕边缘手势区
-private val SAFE_MARGIN: Dp = 28.dp
-private val HANDLE_W: Dp = 12.dp
-private val BAR_HEIGHT: Dp = 62.dp
-private val HANDLE_TOUCH_EXTRA: Dp = 16.dp
+private val SAFE_MARGIN: Dp = TRIM_SAFE_MARGIN_DP.dp
+private val HANDLE_W: Dp = TRIM_HANDLE_WIDTH_DP.dp
+private val BAR_HEIGHT: Dp = TRIM_BAR_HEIGHT_DP.dp
+private val HANDLE_TOUCH_EXTRA: Dp = TRIM_HANDLE_TOUCH_EXTRA_DP.dp
 
 internal fun defaultTrimEndFraction(durationMs: Long): Float {
     if (durationMs <= 0L) return 1f
@@ -78,14 +88,21 @@ internal fun minimumTrimFraction(durationMs: Long): Float {
     return (MIN_TRIM_DURATION_MS.toFloat() / durationMs).coerceIn(0f, 1f)
 }
 
+internal fun trimFractionOrDefault(fraction: Float, fallback: Float): Float {
+    val safeFallback = if (fallback.isFinite()) fallback.coerceIn(0f, 1f) else 0f
+    return (fraction.takeIf { it.isFinite() } ?: safeFallback).coerceIn(0f, 1f)
+}
+
 internal fun clampTrimStartFraction(newFraction: Float, endFraction: Float, durationMs: Long): Float {
-    val maxStart = max(0f, endFraction - minimumTrimFraction(durationMs))
-    return newFraction.coerceIn(0f, maxStart)
+    val safeEnd = trimFractionOrDefault(endFraction, defaultTrimEndFraction(durationMs))
+    val maxStart = max(0f, safeEnd - minimumTrimFraction(durationMs))
+    return trimFractionOrDefault(newFraction, fallback = 0f).coerceIn(0f, maxStart)
 }
 
 internal fun clampTrimEndFraction(newFraction: Float, startFraction: Float, durationMs: Long): Float {
-    val minEnd = min(1f, startFraction + minimumTrimFraction(durationMs))
-    return newFraction.coerceIn(minEnd, 1f)
+    val safeStart = trimFractionOrDefault(startFraction, fallback = 0f)
+    val minEnd = min(1f, safeStart + minimumTrimFraction(durationMs))
+    return trimFractionOrDefault(newFraction, fallback = 1f).coerceIn(minEnd, 1f)
 }
 
 internal fun initialTrimFractions(durationMs: Long, saved: TrimResult?): Pair<Float, Float> {
@@ -103,7 +120,7 @@ internal fun initialTrimFractions(durationMs: Long, saved: TrimResult?): Pair<Fl
 
 internal fun trimSeekTimeMs(durationMs: Long, fraction: Float): Long {
     if (durationMs <= 0L) return 0L
-    return (fraction.coerceIn(0f, 1f) * durationMs).toLong().coerceIn(0L, durationMs)
+    return (trimFractionOrDefault(fraction, fallback = 0f) * durationMs).toLong().coerceIn(0L, durationMs)
 }
 
 internal fun trimPlayheadFraction(
@@ -114,7 +131,9 @@ internal fun trimPlayheadFraction(
 ): Float? {
     if (durationMs <= 0L) return null
     val currentFraction = (currentTimeMs.toFloat() / durationMs).coerceIn(0f, 1f)
-    return if (currentFraction in startFraction..endFraction) currentFraction else null
+    val safeStart = trimFractionOrDefault(startFraction, fallback = 0f)
+    val safeEnd = trimFractionOrDefault(endFraction, fallback = 1f).coerceAtLeast(safeStart)
+    return if (currentFraction in safeStart..safeEnd) currentFraction else null
 }
 
 internal fun trimPlayheadSeekTimeMs(
@@ -123,8 +142,61 @@ internal fun trimPlayheadSeekTimeMs(
     startFraction: Float,
     endFraction: Float,
 ): Long {
-    val clampedFraction = fraction.coerceIn(startFraction, endFraction)
+    val safeStart = trimFractionOrDefault(startFraction, fallback = 0f)
+    val safeEnd = trimFractionOrDefault(endFraction, fallback = 1f).coerceAtLeast(safeStart)
+    val clampedFraction = trimFractionOrDefault(fraction, fallback = safeStart).coerceIn(safeStart, safeEnd)
     return trimSeekTimeMs(durationMs, clampedFraction)
+}
+
+internal fun trimResultFromFractions(
+    durationMs: Long,
+    startFraction: Float,
+    endFraction: Float,
+): TrimResult? {
+    if (durationMs <= 0L) return null
+    val minDurationMs = min(durationMs, MIN_TRIM_DURATION_MS)
+    var safeEndFraction = trimFractionOrDefault(endFraction, fallback = defaultTrimEndFraction(durationMs))
+    val safeStartFraction = clampTrimStartFraction(
+        newFraction = trimFractionOrDefault(startFraction, fallback = 0f),
+        endFraction = safeEndFraction,
+        durationMs = durationMs,
+    )
+    safeEndFraction = clampTrimEndFraction(
+        newFraction = safeEndFraction,
+        startFraction = safeStartFraction,
+        durationMs = durationMs,
+    )
+    var startMs = trimSeekTimeMs(durationMs, safeStartFraction)
+    var endMs = trimSeekTimeMs(durationMs, safeEndFraction)
+    if (endMs - startMs < minDurationMs) {
+        val minimumEndMs = GolfCamFrameTimeline.timeMsAfter(startMs, minDurationMs)
+        if (minimumEndMs <= durationMs) {
+            endMs = minimumEndMs
+        } else {
+            startMs = (endMs - minDurationMs).coerceAtLeast(0L)
+        }
+    }
+    val minimumEndMs = GolfCamFrameTimeline.timeMsAfter(startMs, minDurationMs)
+    return TrimResult(startMs = startMs, endMs = endMs.coerceIn(minimumEndMs, durationMs))
+}
+
+internal fun trimThumbnailSampleTimesUs(
+    durationMs: Long,
+    thumbnailCount: Int = TRIM_THUMBNAIL_COUNT,
+): List<Long> {
+    if (durationMs <= 0L || thumbnailCount <= 0) return emptyList()
+    return golfCamThumbnailSampleTimesMs(
+        startMs = 0L,
+        endMs = durationMs,
+        maxThumbnails = thumbnailCount,
+    ).map { sampleTimeMs -> golfCamThumbnailRetrieverTimeUs(sampleTimeMs) }
+}
+
+internal fun formatTrimTimeLabel(ms: Long): String {
+    val totalSec = ms.coerceAtLeast(0L) / 1000.0
+    val min = (totalSec / 60).toInt()
+    val sec = totalSec % 60
+    return String.format(Locale.US, "%d:%04.1f", min, sec)
 }
 
 /**
@@ -140,19 +212,23 @@ fun TrimStepTool(
     onSeek: ((Long) -> Unit)? = null,
     onResult: (TrimResult) -> Unit,
 ) {
-    val initialFractions = remember(durationMs) { initialTrimFractions(durationMs, savedTrimResult) }
-    var startFraction by remember(durationMs) { mutableStateOf(initialFractions.first) }
-    var endFraction by remember(durationMs) { mutableStateOf(initialFractions.second) }
+    val initialFractions = remember(videoUri, durationMs, savedTrimResult?.startMs, savedTrimResult?.endMs) {
+        initialTrimFractions(durationMs, savedTrimResult)
+    }
+    var startFraction by remember(videoUri, durationMs) { mutableFloatStateOf(initialFractions.first) }
+    var endFraction by remember(videoUri, durationMs) { mutableFloatStateOf(initialFractions.second) }
+
+    LaunchedEffect(initialFractions) {
+        startFraction = initialFractions.first
+        endFraction = initialFractions.second
+    }
 
     LaunchedEffect(startFraction, endFraction, durationMs) {
-        if (durationMs > 0L) {
-            onResult(
-                TrimResult(
-                    startMs = (startFraction * durationMs).toLong(),
-                    endMs = (endFraction * durationMs).toLong(),
-                ),
-            )
-        }
+        trimResultFromFractions(
+            durationMs = durationMs,
+            startFraction = startFraction,
+            endFraction = endFraction,
+        )?.let(onResult)
     }
 
     if (durationMs <= 0L) {
@@ -244,30 +320,38 @@ private fun VideoTrimBar(
     onPlayheadSeek: (Long) -> Unit,
 ) {
     val context = LocalContext.current
-    var thumbnails by remember(videoUri) { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
+    val thumbnailSampleTimesMs = remember(durationMs) {
+        trimThumbnailSampleTimesUs(durationMs).map { it / 1000L }
+    }
+    var thumbnails by remember(videoUri, thumbnailSampleTimesMs) {
+        mutableStateOf(
+            GolfCamThumbnailCache.cachedTimelineThumbnails(videoUri, thumbnailSampleTimesMs)
+                .map { it?.asImageBitmap() },
+        )
+    }
 
-    LaunchedEffect(videoUri, durationMs) {
+    LaunchedEffect(videoUri, thumbnailSampleTimesMs) {
         if (durationMs <= 0L) return@LaunchedEffect
-        thumbnails = withContext(Dispatchers.IO) {
-            val retriever = MediaMetadataRetriever()
-            try {
-                retriever.setDataSource(context, videoUri)
-                val metadata = retriever.thumbnailVideoMetadata()
-                (0 until THUMB_COUNT).map { i ->
-                    val timeUs = i.toLong() * durationMs * 1000L / (THUMB_COUNT - 1)
-                    val bmp = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    bmp?.let {
-                        val visualBitmap = it.rotatedToVisualOrientation(metadata)
-                        val targetH = 160
-                        val targetW = (visualBitmap.width.toFloat() / visualBitmap.height * targetH).toInt().coerceAtLeast(1)
-                        Bitmap.createScaledBitmap(visualBitmap, targetW, targetH, false).asImageBitmap()
-                    }
-                }
-            } catch (_: Exception) {
-                List(THUMB_COUNT) { null }
-            } finally {
-                retriever.release()
-            }
+        val prioritySampleTimeMs = golfCamThumbnailPrioritySampleTimeMs(
+            thumbnailSampleTimesMs,
+            currentTimeMs.coerceIn(0L, durationMs),
+        )
+        val exactCachedSampleTimes = GolfCamThumbnailCache.cachedExactSampleTimes(videoUri, thumbnailSampleTimesMs)
+        thumbnails = GolfCamThumbnailCache.cachedTimelineThumbnails(videoUri, thumbnailSampleTimesMs)
+            .map { it?.asImageBitmap() }
+        GolfCamThumbnailCache.loadTimelineThumbnails(
+            context = context,
+            videoUri = videoUri,
+            sampleTimesMs = thumbnailSampleTimesMs,
+            priorityTimeMs = prioritySampleTimeMs,
+            skipCachedSampleTimesMs = exactCachedSampleTimes,
+            frameOption = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+        ) { index, bitmap ->
+            thumbnails = golfCamFillMissingThumbnailSlotsFromNearest(
+                thumbnails.toMutableList().also { current ->
+                    if (index in current.indices) current[index] = bitmap.asImageBitmap()
+                },
+            )
         }
     }
 
@@ -292,7 +376,7 @@ private fun VideoTrimBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(BAR_HEIGHT)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(TRIM_STRIP_CORNER_RADIUS_DP.dp))
                 .background(Color(0xFF111111))
                 .drawBehind {
                     if (thumbnails.isNotEmpty()) drawThumbnails(thumbnails, size)
@@ -402,7 +486,7 @@ private fun DrawScope.drawThumbnails(thumbnails: List<ImageBitmap?>, canvasSize:
 private fun DrawScope.drawDimOverlay(startFraction: Float, endFraction: Float, canvasSize: Size) {
     val startX = startFraction * canvasSize.width
     val endX = endFraction * canvasSize.width
-    val dim = Color.Black.copy(alpha = 0.58f)
+    val dim = Color.Black.copy(alpha = TRIM_DIM_OVERLAY_ALPHA)
     if (startX > 0f) drawRect(dim, Offset.Zero, Size(startX, canvasSize.height))
     if (endX < canvasSize.width) drawRect(dim, Offset(endX, 0f), Size(canvasSize.width - endX, canvasSize.height))
 }
@@ -415,14 +499,29 @@ private fun DrawScope.drawSelectionBorder(
 ) {
     val startX = startFraction * canvasSize.width
     val endX = endFraction * canvasSize.width
-    val stroke = 3f
-    // 上下绿色边线（把手之间）
-    drawLine(DSColors.fairway, Offset(startX + handleWPx / 2, stroke / 2), Offset(endX - handleWPx / 2, stroke / 2), stroke)
-    drawLine(
-        DSColors.fairway,
-        Offset(startX + handleWPx / 2, canvasSize.height - stroke / 2),
-        Offset(endX - handleWPx / 2, canvasSize.height - stroke / 2),
-        stroke,
+    val stroke = TRIM_SELECTION_BORDER_STROKE_PX
+    val selectedStartX = startX.coerceIn(0f, canvasSize.width)
+    val selectedEndX = endX.coerceIn(selectedStartX, canvasSize.width)
+    val selectedWidth = max(handleWPx * 2f, selectedEndX - selectedStartX)
+        .coerceAtMost(canvasSize.width - selectedStartX)
+    val corner = TRIM_SELECTION_CORNER_RADIUS_DP.dp.toPx()
+    val topLeft = Offset(selectedStartX + stroke / 2f, stroke / 2f)
+    val size = Size(
+        width = (selectedWidth - stroke).coerceAtLeast(0f),
+        height = (canvasSize.height - stroke).coerceAtLeast(0f),
+    )
+    drawRoundRect(
+        color = DSColors.fairway.copy(alpha = TRIM_SELECTION_FILL_ALPHA),
+        topLeft = Offset(selectedStartX, 0f),
+        size = Size(selectedWidth, canvasSize.height),
+        cornerRadius = CornerRadius(corner, corner),
+    )
+    drawRoundRect(
+        color = DSColors.fairway.copy(alpha = 0.86f),
+        topLeft = topLeft,
+        size = size,
+        cornerRadius = CornerRadius(corner, corner),
+        style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
     )
 }
 
@@ -465,9 +564,4 @@ private fun TimeLabel(
     }
 }
 
-private fun formatMs(ms: Long): String {
-    val totalSec = ms / 1000.0
-    val min = (totalSec / 60).toInt()
-    val sec = totalSec % 60
-    return "%d:%04.1f".format(min, sec)
-}
+private fun formatMs(ms: Long): String = formatTrimTimeLabel(ms)

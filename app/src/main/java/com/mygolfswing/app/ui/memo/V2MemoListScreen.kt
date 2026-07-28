@@ -39,6 +39,7 @@ fun V2MemoListScreen(
     onOpenVideoList: () -> Unit,
     onOpenTextList: () -> Unit,
     onOpenSwingCalendar: () -> Unit,
+    onOpenSwingClip: (UUID) -> Unit = {},
     onOpenJustSwing: () -> Unit = onOpenSwingCalendar,
     onOpenAllMemos: () -> Unit,
     onSwitchToAI: () -> Unit = {},
@@ -96,9 +97,7 @@ fun V2MemoListScreen(
                     items(videoRow, key = { it.id }) { memo ->
                         V2MemoMixedCard(
                             memo = memo,
-                            modifier = Modifier
-                                .clickable { onOpenMemo(memo.id) }
-                                .padding(bottom = 4.dp),
+                            modifier = Modifier.clickable { onOpenMemo(memo.id) },
                         )
                     }
                 }
@@ -128,9 +127,7 @@ fun V2MemoListScreen(
                     items(textRow, key = { it.id }) { memo ->
                         V2MemoTextCard(
                             memo = memo,
-                            modifier = Modifier
-                                .clickable { onOpenMemo(memo.id) }
-                                .padding(bottom = 4.dp),
+                            modifier = Modifier.clickable { onOpenMemo(memo.id) },
                         )
                     }
                 }
@@ -158,7 +155,11 @@ fun V2MemoListScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     swingItems.forEach { item ->
-                        V2MemoSwingSessionCard(item = item, onTap = onOpenSwingCalendar)
+                        V2MemoSwingSessionCard(
+                            item = item,
+                            onTap = onOpenSwingCalendar,
+                            onClipTap = onOpenSwingClip,
+                        )
                     }
                 }
             }
@@ -167,5 +168,6 @@ fun V2MemoListScreen(
         item {
             V2MemoHomeFooter(totalCount = totalCount, onViewAll = onOpenAllMemos)
         }
+        item { Spacer(Modifier.height(32.dp)) }
     }
 }

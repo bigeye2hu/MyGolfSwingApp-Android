@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SwingSessionEntity::class,
         GolfProfileEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class V2Database : RoomDatabase() {
@@ -37,7 +37,7 @@ abstract class V2Database : RoomDatabase() {
                 V2Database::class.java,
                 "v2-mygolfswing.db",
             )
-                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { instance = it }
         }
@@ -76,6 +76,12 @@ abstract class V2Database : RoomDatabase() {
                 db.execSQL("DROP TABLE v2_plaza_saved")
                 db.execSQL("ALTER TABLE v2_plaza_saved_new RENAME TO v2_plaza_saved")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_v2_plaza_saved_userId_savedAt ON v2_plaza_saved(userId, savedAt)")
+            }
+        }
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE v2_ai_message ADD COLUMN attachmentsJson TEXT NOT NULL DEFAULT '[]'")
             }
         }
     }

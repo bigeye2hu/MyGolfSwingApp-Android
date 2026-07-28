@@ -16,11 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Person as PersonOutlined
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -94,7 +90,7 @@ fun V2BottomTabBar(
                         tab = V2Tab.HOME,
                         selected = selected == V2Tab.HOME,
                         iconSelected = Icons.Filled.Home,
-                        iconUnselected = Icons.Outlined.Home,
+                        iconUnselected = Icons.Filled.Home,
                         label = "首页",
                         onClick = { onSelect(V2Tab.HOME) },
                         modifier = Modifier.weight(1f),
@@ -103,7 +99,7 @@ fun V2BottomTabBar(
                         tab = V2Tab.MEMO,
                         selected = selected == V2Tab.MEMO,
                         iconSelected = Icons.Filled.Layers,
-                        iconUnselected = Icons.Outlined.Layers,
+                        iconUnselected = Icons.Filled.Layers,
                         label = "Memo",
                         onClick = { onSelect(V2Tab.MEMO) },
                         modifier = Modifier.weight(1f),
@@ -114,7 +110,7 @@ fun V2BottomTabBar(
                         tab = V2Tab.PLAZA,
                         selected = selected == V2Tab.PLAZA,
                         iconSelected = Icons.Filled.Explore,
-                        iconUnselected = Icons.Outlined.Explore,
+                        iconUnselected = Icons.Filled.Explore,
                         label = "广场",
                         onClick = { onSelect(V2Tab.PLAZA) },
                         modifier = Modifier.weight(1f),
@@ -122,8 +118,8 @@ fun V2BottomTabBar(
                     TabItem(
                         tab = V2Tab.ME,
                         selected = selected == V2Tab.ME,
-                        iconSelected = Icons.Filled.Person,
-                        iconUnselected = Icons.Outlined.Person,
+                        iconSelected = Icons.Outlined.PersonOutlined,
+                        iconUnselected = Icons.Outlined.PersonOutlined,
                         label = "我",
                         onClick = { onSelect(V2Tab.ME) },
                         modifier = Modifier.weight(1f),
@@ -166,7 +162,7 @@ private fun TabItem(
             imageVector = if (selected) iconSelected else iconUnselected,
             contentDescription = label,
             tint = tint,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier.size(19.dp),
         )
         Text(
             text = label,

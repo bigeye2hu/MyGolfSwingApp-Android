@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.repo
 
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.store.V2UserScopedCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -31,28 +32,40 @@ enum class V2AccountDeletionStep(val label: String) {
 class V2AccountDeletionRepository {
     suspend fun deleteAccount(
         onStep: (V2AccountDeletionStep) -> Unit = {},
-    ): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            val uid = ServiceLocator.session.current().userId ?: error("未登录")
+    ): Result<Unit> = try {
+        val uid = withContext(Dispatchers.IO) {
+            ServiceLocator.session.current().userId
+        } ?: error("未登录")
 
-            onStep(V2AccountDeletionStep.PREPARING)
-            delay(300)
+        onStep(V2AccountDeletionStep.PREPARING)
+        delay(300)
 
-            onStep(V2AccountDeletionStep.CLOUD_DATA)
+        onStep(V2AccountDeletionStep.CLOUD_DATA)
+        withContext(Dispatchers.IO) {
             callAccountManagement("deleteUserData", uid)
+        }
 
-            onStep(V2AccountDeletionStep.LOCAL_CONVERSATIONS)
+        onStep(V2AccountDeletionStep.LOCAL_CONVERSATIONS)
+        withContext(Dispatchers.IO) {
             ServiceLocator.db.aiChat().clearAll(uid)
+        }
 
-            onStep(V2AccountDeletionStep.LOCAL_MEMOS)
+        onStep(V2AccountDeletionStep.LOCAL_MEMOS)
+        withContext(Dispatchers.IO) {
             ServiceLocator.db.memos().clearForUser(uid)
+        }
 
-            onStep(V2AccountDeletionStep.LOCAL_SWINGS)
+        onStep(V2AccountDeletionStep.LOCAL_SWINGS)
+        withContext(Dispatchers.IO) {
             ServiceLocator.db.swingSessions().clear(uid)
+        }
 
-            onStep(V2AccountDeletionStep.DELETE_ACCOUNT)
+        onStep(V2AccountDeletionStep.DELETE_ACCOUNT)
+        withContext(Dispatchers.IO) {
             callAccountManagement("deleteAccount", uid)
+        }
 
+        withContext(Dispatchers.IO) {
             ServiceLocator.db.goals().clear(uid)
             ServiceLocator.db.golfProfile().delete(uid)
             ServiceLocator.db.plazaSaved().clear(uid)
@@ -60,9 +73,14 @@ class V2AccountDeletionRepository {
             V2UserScopedCache.onLogout()
             ServiceLocator.authRepo.logout()
             ServiceLocator.creditsRepo.reset()
-
-            onStep(V2AccountDeletionStep.COMPLETED)
         }
+
+        onStep(V2AccountDeletionStep.COMPLETED)
+        Result.success(Unit)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     private suspend fun callAccountManagement(action: String, userId: String) {

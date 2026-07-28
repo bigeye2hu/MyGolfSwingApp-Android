@@ -1,5 +1,10 @@
 package com.mygolfswing.app.ui.home
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,18 +21,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Book
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,7 +44,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Memo
-import com.mygolfswing.app.data.model.V2MemoAccent
 import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.ui.common.V2Format
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -57,33 +61,34 @@ import com.mygolfswing.app.ui.memo.V2MemoThumbnail
 fun V2HomeMemoSection(
     memos: List<V2Memo>,
     modifier: Modifier = Modifier,
+    isLoading: Boolean = false,
     onSeeAll: () -> Unit = {},
     onMemoTap: (V2Memo) -> Unit = {},
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
     ) {
         SectionTitleRow(
             title = "最近 Memo",
-            count = memos.size,
             onSeeAll = onSeeAll,
             modifier = Modifier.padding(horizontal = DSSpacing.lg),
         )
 
-        if (memos.isEmpty()) {
-            EmptyHint(
-                text = "暂无最近 Memo，去写一条试试 →",
-                modifier = Modifier.padding(horizontal = DSSpacing.lg),
-            )
-        } else {
-            LazyRow(
+        when {
+            memos.isNotEmpty() -> LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = DSSpacing.lg),
             ) {
                 items(memos, key = { it.id }) { memo ->
                     MemoMiniCard(memo = memo, onTap = { onMemoTap(memo) })
                 }
+            }
+            isLoading -> LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = DSSpacing.lg),
+            ) {
+                items(3) { MemoSkeletonCard() }
             }
         }
     }
@@ -92,7 +97,6 @@ fun V2HomeMemoSection(
 @Composable
 internal fun SectionTitleRow(
     title: String,
-    count: Int,
     onSeeAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -102,25 +106,20 @@ internal fun SectionTitleRow(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Filled.Book, null, tint = DSColors.deepGreen, modifier = Modifier.size(14.dp))
-            Text(title, style = DSTypography.titleMedium, color = DSColors.inkGreen)
-            Text(
-                text = " $count",
-                style = DSTypography.caption,
-                color = DSColors.shadowGray,
-            )
+            Text(title, style = DSTypography.titleLarge, color = DSColors.inkGreen)
         }
         Box(modifier = Modifier.weight(1f))
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.clickable { onSeeAll() },
         ) {
-            Text("全部", style = DSTypography.cardTitle, color = DSColors.deepGreen)
+            Text("全部", style = DSTypography.cardTitle, color = DSColors.fairway)
             Icon(
-                imageVector = Icons.Filled.ChevronRight,
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
-                tint = DSColors.deepGreen,
-                modifier = Modifier.size(14.dp),
+                tint = DSColors.fairway,
+                modifier = Modifier.size(11.dp),
             )
         }
     }
@@ -132,6 +131,50 @@ private fun MemoMiniCard(memo: V2Memo, onTap: () -> Unit) {
         V2MemoKind.VIDEO -> VideoMemoMiniCard(memo = memo, chipText = "视频", onTap = onTap)
         V2MemoKind.MIXED -> VideoMemoMiniCard(memo = memo, chipText = "视频·笔记", onTap = onTap)
         V2MemoKind.TEXT -> TextMemoMiniCard(memo = memo, onTap = onTap)
+    }
+}
+
+@Composable
+private fun MemoSkeletonCard() {
+    val transition = rememberInfiniteTransition(label = "memo_skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.52f,
+        targetValue = 0.86f,
+        animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
+        label = "memo_skeleton_alpha",
+    )
+    Column(
+        modifier = Modifier
+            .width(200.dp)
+            .height(130.dp)
+            .shadow(elevation = 2.dp, shape = RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(DSColors.listMutedBg.copy(alpha = alpha))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(58.dp)
+                .height(18.dp)
+                .clip(RoundedCornerShape(50))
+                .background(DSColors.cardWhite.copy(alpha = alpha)),
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.82f)
+                .height(13.dp)
+                .clip(RoundedCornerShape(50))
+                .background(DSColors.cardWhite.copy(alpha = alpha)),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.48f)
+                .height(10.dp)
+                .clip(RoundedCornerShape(50))
+                .background(DSColors.cardWhite.copy(alpha = alpha * 0.82f)),
+        )
     }
 }
 
@@ -148,6 +191,7 @@ private fun VideoMemoMiniCard(memo: V2Memo, chipText: String, onTap: () -> Unit)
         V2MemoThumbnail(
             memo = memo,
             modifier = Modifier.fillMaxSize(),
+            useHeroGrassPlaceholder = true,
         )
         Box(
             modifier = Modifier
@@ -173,7 +217,7 @@ private fun VideoMemoMiniCard(memo: V2Memo, chipText: String, onTap: () -> Unit)
                 Spacer(modifier = Modifier.weight(1f))
                 DurationBadge(memo.durationSec)
             }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(if (memo.kind == V2MemoKind.VIDEO) 6.dp else 4.dp)) {
                 Text(
                     text = displayTitle(memo),
                     style = DSTypography.cardTitle,
@@ -186,19 +230,19 @@ private fun VideoMemoMiniCard(memo: V2Memo, chipText: String, onTap: () -> Unit)
                     style = DSTypography.caption,
                     color = Color.White.copy(alpha = 0.76f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Box(
+        Icon(
+            Icons.Filled.PlayCircle,
+            contentDescription = null,
+            tint = Color.White,
             modifier = Modifier
-                .align(Alignment.Center)
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.88f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.PlayArrow, null, tint = DSColors.inkGreen, modifier = Modifier.size(22.dp))
-        }
+                .align(Alignment.TopStart)
+                .padding(start = 26.dp, top = 42.dp)
+                .size(36.dp),
+        )
     }
 }
 
@@ -212,17 +256,16 @@ private fun TextMemoMiniCard(memo: V2Memo, onTap: () -> Unit) {
             .clip(RoundedCornerShape(14.dp))
             .background(DSColors.sandBeige)
             .clickable { onTap() }
-            .padding(14.dp),
+            .padding(DSSpacing.md),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             MemoTypeChip(text = "文字", icon = Icons.Filled.TextFields, dark = false)
             Spacer(modifier = Modifier.weight(1f))
-            memo.accent?.let { AccentChip(accent = it) }
         }
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            text = memo.text?.takeIf { it.isNotBlank() } ?: displayTitle(memo),
+            text = memo.text.orEmpty(),
             style = DSTypography.cardTitle,
             color = DSColors.inkGreen,
             maxLines = 3,
@@ -234,12 +277,16 @@ private fun TextMemoMiniCard(memo: V2Memo, onTap: () -> Unit) {
                 text = V2Format.timelineLabel(memo.createdAt),
                 style = DSTypography.caption,
                 color = DSColors.shadowGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = "${memo.wordCount}字",
                 style = DSTypography.caption,
                 color = DSColors.shadowGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -251,40 +298,27 @@ private fun MemoTypeChip(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     dark: Boolean,
 ) {
-    val bg = if (dark) Color.Black.copy(alpha = 0.45f) else DSColors.cardWhite.copy(alpha = 0.72f)
-    val fg = if (dark) Color.White else DSColors.fairway
+    val bg = if (dark) Color.White.copy(alpha = 0.18f) else DSColors.mistGreen
+    val fg = if (dark) Color.White else DSColors.deepGreen
+    val border = if (dark) Color.White.copy(alpha = 0.25f) else Color.Transparent
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(bg)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
+            .border(0.5.dp, border, RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(icon, null, tint = fg, modifier = Modifier.size(12.dp))
+        Icon(icon, null, tint = fg, modifier = Modifier.size(10.dp))
         Text(text = text, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = fg)
     }
 }
 
 @Composable
-private fun AccentChip(accent: V2MemoAccent) {
-    Text(
-        text = accent.displayName,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold,
-        color = DSColors.goldBright,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(DSColors.goldBright.copy(alpha = 0.12f))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
-}
-
-@Composable
 private fun DurationBadge(durationSec: Double?) {
-    durationSec?.takeIf { it > 0 } ?: return
     Text(
-        text = formatDuration(durationSec),
+        text = formatDuration(durationSec ?: 0.0),
         fontSize = 10.sp,
         fontWeight = FontWeight.Medium,
         color = Color.White,
@@ -297,7 +331,6 @@ private fun DurationBadge(durationSec: Double?) {
 
 private fun displayTitle(memo: V2Memo): String {
     memo.displayTitle?.takeIf { it.isNotBlank() }?.let { return it }
-    memo.title?.takeIf { it.isNotBlank() }?.let { return it }
     memo.text?.takeIf { it.isNotBlank() }?.lineSequence()?.firstOrNull()?.let { return it.take(20) }
     return if (memo.kind == V2MemoKind.TEXT) "未命名笔记" else "未命名视频"
 }
@@ -305,22 +338,4 @@ private fun displayTitle(memo: V2Memo): String {
 private fun formatDuration(seconds: Double): String {
     val total = seconds.toInt().coerceAtLeast(0)
     return "%d:%02d".format(total / 60, total % 60)
-}
-
-@Composable
-internal fun EmptyHint(text: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(DSColors.listMutedBg)
-            .padding(16.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
-        )
-    }
 }

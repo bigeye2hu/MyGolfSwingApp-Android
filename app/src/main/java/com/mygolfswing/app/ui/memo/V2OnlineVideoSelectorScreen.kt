@@ -1,6 +1,5 @@
 package com.mygolfswing.app.ui.memo
 
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
@@ -14,9 +13,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -54,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -83,6 +87,7 @@ fun V2OnlineVideoSelectorScreen(
     var durationSec by remember { mutableStateOf<Double?>(null) }
     var loading by remember { mutableStateOf(false) }
     var fetchFailed by remember { mutableStateOf(false) }
+    var pasteMessage by remember { mutableStateOf<String?>(null) }
     var fetchToken by remember { mutableIntStateOf(0) }
 
     val hasRecognized = platform.isNotEmpty() && platform != "其他" &&
@@ -99,6 +104,7 @@ fun V2OnlineVideoSelectorScreen(
         thumbnailUrl = null
         durationSec = null
         fetchFailed = false
+        pasteMessage = null
         if (cleaned.isBlank()) {
             platform = ""
             return
@@ -157,31 +163,41 @@ fun V2OnlineVideoSelectorScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier.clickable(onClick = onBack),
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier.widthIn(min = 60.dp),
+                contentAlignment = Alignment.CenterStart,
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DSColors.fairway, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("返回", color = DSColors.fairway, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Row(
+                    modifier = Modifier.clickable(onClick = onBack),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = DSColors.fairway, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("返回", color = DSColors.fairway, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                }
             }
             Spacer(Modifier.weight(1f))
             Text("添加在线视频", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
             Spacer(Modifier.weight(1f))
-            Text(
-                "确认",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = if (hasRecognized) Color.White else DSColors.shadowGray,
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(
-                        if (hasRecognized) Brush.linearGradient(listOf(Color(0xFF3D9A6A), DSColors.fairway))
-                        else Brush.linearGradient(listOf(DSColors.sandBeige, DSColors.sandBeige)),
-                    )
-                    .clickable(enabled = hasRecognized, onClick = ::confirm)
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-            )
+            Box(
+                modifier = Modifier.widthIn(min = 60.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Text(
+                    "确认",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (hasRecognized) Color.White else DSColors.shadowGray,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(
+                            if (hasRecognized) Brush.linearGradient(listOf(Color(0xFF3D9A6A), DSColors.fairway))
+                            else Brush.linearGradient(listOf(DSColors.sandBeige, DSColors.sandBeige)),
+                        )
+                        .clickable(enabled = hasRecognized, onClick = ::confirm)
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(DSColors.borderLine))
 
@@ -189,6 +205,8 @@ fun V2OnlineVideoSelectorScreen(
             Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
+                .imePadding()
+                .v2NavigationBarPadding()
                 .padding(bottom = 24.dp),
         ) {
             if (!hasRecognized) {
@@ -205,11 +223,14 @@ fun V2OnlineVideoSelectorScreen(
                 hasRecognized = hasRecognized,
                 hasInvalid = hasInvalid,
                 platform = platform,
+                pasteMessage = pasteMessage,
                 onPaste = {
-                    val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clip.primaryClip?.getItemAt(0)?.text?.toString()?.let {
-                        urlInput = it
-                        detectAndFetch(it)
+                    val pasted = context.readClipboardText()
+                    if (pasted == null) {
+                        pasteMessage = "剪贴板没有可用链接，请手动粘贴"
+                    } else {
+                        urlInput = pasted
+                        detectAndFetch(pasted)
                     }
                 },
                 onClear = {
@@ -219,6 +240,7 @@ fun V2OnlineVideoSelectorScreen(
                     thumbnailUrl = null
                     durationSec = null
                     fetchFailed = false
+                    pasteMessage = null
                 },
             )
 
@@ -253,11 +275,17 @@ private fun EmptyHero(modifier: Modifier = Modifier) {
         Box(
             modifier = Modifier
                 .size(88.dp)
+                .shadow(
+                    elevation = 12.dp,
+                    shape = CircleShape,
+                    ambientColor = DSColors.fairway.copy(alpha = 0.25f),
+                    spotColor = DSColors.fairway.copy(alpha = 0.25f),
+                )
                 .clip(CircleShape)
                 .background(Brush.linearGradient(listOf(Color(0xFF3D9A6A), DSColors.fairway))),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Link, null, tint = Color.White, modifier = Modifier.size(32.dp))
+            Icon(Icons.Filled.Link, null, tint = Color.White, modifier = Modifier.size(28.dp))
         }
         Spacer(Modifier.height(16.dp))
         Text("粘贴视频链接", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
@@ -278,6 +306,7 @@ private fun UrlInputCard(
     hasRecognized: Boolean,
     hasInvalid: Boolean,
     platform: String,
+    pasteMessage: String?,
     onPaste: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -290,6 +319,12 @@ private fun UrlInputCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp)
+            .shadow(
+                elevation = 1.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = Color.Black.copy(alpha = 0.05f),
+                spotColor = Color.Black.copy(alpha = 0.05f),
+            )
             .clip(RoundedCornerShape(20.dp))
             .background(DSColors.cardWhite)
             .border(1.dp, borderColor, RoundedCornerShape(20.dp))
@@ -317,6 +352,7 @@ private fun UrlInputCard(
                 },
             )
             when {
+                pasteMessage != null -> Text(pasteMessage, fontSize = 10.sp, color = DSColors.flagRed)
                 loading -> Text("正在获取视频信息…", fontSize = 10.sp, color = DSColors.shadowGray)
                 hasRecognized -> Text("链接识别成功 · $platform", fontSize = 10.sp, color = DSColors.fairway)
                 hasInvalid -> Text("无法识别该视频链接", fontSize = 10.sp, color = DSColors.flagRed)
@@ -360,6 +396,12 @@ private fun VideoPreviewCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
+            .shadow(
+                elevation = 6.dp,
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = Color.Black.copy(alpha = 0.08f),
+                spotColor = Color.Black.copy(alpha = 0.08f),
+            )
             .clip(RoundedCornerShape(24.dp))
             .background(DSColors.cardWhite)
             .border(1.dp, DSColors.borderLine, RoundedCornerShape(24.dp)),
@@ -421,16 +463,22 @@ private fun VideoPreviewCard(
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
-            Icon(
-                Icons.Filled.PlayArrow,
-                null,
-                tint = Color.White,
+            Box(
                 modifier = Modifier
                     .size(48.dp)
                     .align(Alignment.Center)
-                    .background(Color.White.copy(0.25f), CircleShape)
-                    .padding(12.dp),
-            )
+                    .background(Color.White.copy(0.25f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .offset(x = 1.5.dp),
+                )
+            }
         }
         Column(Modifier.padding(16.dp)) {
             Text(title.ifBlank { "正在获取标题…" }, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
@@ -460,6 +508,12 @@ private fun ConfirmButton(onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp)
+            .shadow(
+                elevation = 10.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = DSColors.fairway.copy(alpha = 0.35f),
+                spotColor = DSColors.fairway.copy(alpha = 0.35f),
+            )
             .clip(RoundedCornerShape(20.dp))
             .background(Brush.linearGradient(listOf(Color(0xFF3D9A6A), DSColors.fairway)))
             .clickable(onClick = onClick)
@@ -489,7 +543,7 @@ private fun InvalidLinkCard() {
         Column {
             Text("视频链接无效", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = DSColors.flagRed)
             Text(
-                "当前支持 B站 / YouTube / 小红书 / 抖音。请检查链接是否完整。",
+                "当前只支持 B站 / YouTube / 小红书 / 抖音 的视频链接。请检查是否复制完整，或换一条试试。",
                 fontSize = 11.sp,
                 color = DSColors.shadowGray,
                 modifier = Modifier.padding(top = 4.dp),
@@ -504,6 +558,12 @@ private fun SupportedPlatformsCard() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
+            .shadow(
+                elevation = 1.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = Color.Black.copy(alpha = 0.05f),
+                spotColor = Color.Black.copy(alpha = 0.05f),
+            )
             .clip(RoundedCornerShape(20.dp))
             .background(DSColors.cardWhite)
             .border(1.dp, DSColors.borderLine, RoundedCornerShape(20.dp))
@@ -517,6 +577,12 @@ private fun SupportedPlatformsCard() {
                     Box(
                         Modifier
                             .size(40.dp)
+                            .shadow(
+                                elevation = 1.dp,
+                                shape = RoundedCornerShape(12.dp),
+                                ambientColor = Color.Black.copy(alpha = 0.05f),
+                                spotColor = Color.Black.copy(alpha = 0.05f),
+                            )
                             .clip(RoundedCornerShape(12.dp))
                             .background(item.color),
                         contentAlignment = Alignment.Center,
@@ -552,7 +618,7 @@ private fun HelperCard() {
         Column {
             Text("如何获取视频链接？", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway)
             Text(
-                "在视频平台点击「分享」→「复制链接」，粘贴到上方输入框即可自动识别。",
+                "在视频平台点击「分享」→「复制链接」，然后粘贴到上方输入框即可自动识别。",
                 fontSize = 11.sp,
                 color = DSColors.shadowGray,
                 modifier = Modifier.padding(top = 4.dp),
@@ -581,6 +647,17 @@ private fun platformColor(p: String): Color = when (p) {
     "抖音" -> Color(0xFF1B2A21)
     else -> DSColors.fairway
 }
+
+private fun Context.readClipboardText(): String? = runCatching {
+    val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clip.primaryClip
+        ?.takeIf { it.itemCount > 0 }
+        ?.getItemAt(0)
+        ?.coerceToText(this)
+        ?.toString()
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+}.getOrNull()
 
 private data class SupportedPlatformItem(
     val name: String,

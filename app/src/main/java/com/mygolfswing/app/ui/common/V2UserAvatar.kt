@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,7 +64,7 @@ fun V2UserAvatar(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Filled.Person,
+                        imageVector = Icons.Filled.AccountCircle,
                         contentDescription = "头像",
                         tint = DSColors.shadowGray,
                         modifier = Modifier.size(placeholderIconSize),

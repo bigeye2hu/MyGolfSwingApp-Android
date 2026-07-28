@@ -6,6 +6,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -44,6 +46,7 @@ import com.mygolfswing.app.data.model.V2PlazaVideo
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import com.mygolfswing.app.ui.plaza.publicHomeMetaText
 import java.util.Locale
 
 /**
@@ -62,7 +65,7 @@ fun V2HomePlazaSection(
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
     ) {
         Row(
             modifier = Modifier
@@ -71,7 +74,7 @@ fun V2HomePlazaSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Filled.PlayArrow, null, tint = DSColors.fairway, modifier = Modifier.size(16.dp))
+                Icon(Icons.Filled.PlayArrow, null, tint = DSColors.fairway, modifier = Modifier.size(13.dp))
                 Text("广场推荐", style = DSTypography.titleLarge, color = DSColors.inkGreen)
             }
             Spacer(Modifier.weight(1f))
@@ -81,20 +84,24 @@ fun V2HomePlazaSection(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text("全部", style = DSTypography.cardTitle, color = DSColors.fairway)
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = DSColors.fairway, modifier = Modifier.size(11.dp))
             }
         }
 
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = DSSpacing.lg),
-        ) {
-            if (videos.isEmpty()) {
-                items(3) { V2HomePlazaSkeletonCard() }
-            } else {
+        when {
+            videos.isNotEmpty() -> LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = DSSpacing.lg),
+            ) {
                 items(videos, key = { it.id }) { video ->
                     V2HomePlazaCard(video = video, onTap = { onVideoTap(video) })
                 }
+            }
+            else -> LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = DSSpacing.lg),
+            ) {
+                items(3) { V2HomePlazaSkeletonCard() }
             }
         }
     }
@@ -111,7 +118,7 @@ private fun V2HomePlazaCard(video: V2PlazaVideo, onTap: () -> Unit) {
         modifier = Modifier
             .width(200.dp)
             .height(140.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(DSSpacing.Radius.md))
             .clickable(onClick = onTap),
     ) {
         PlazaThumbnail(video = video, modifier = Modifier.fillMaxSize())
@@ -124,17 +131,21 @@ private fun V2HomePlazaCard(video: V2PlazaVideo, onTap: () -> Unit) {
             ) {
                 Text(
                     chip,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
                     color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        .background(Color.Black.copy(0.45f), RoundedCornerShape(50))
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.18f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     formatDuration(video.durationSec),
-                    fontSize = 10.sp,
+                    style = DSTypography.caption,
                     color = Color.White,
                     modifier = Modifier
                         .background(Color.Black.copy(0.45f), RoundedCornerShape(50))
@@ -154,17 +165,17 @@ private fun V2HomePlazaCard(video: V2PlazaVideo, onTap: () -> Unit) {
             ) {
                 Text(
                     video.title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = DSTypography.cardTitle,
                     color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${video.coach.displayName} · ${formatViewCount(video.viewCount)} 次观看",
-                    fontSize = 11.sp,
+                    "${video.coach.displayName} · ${video.publicHomeMetaText()}",
+                    style = DSTypography.caption,
                     color = Color.White.copy(0.8f),
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -184,35 +195,110 @@ private fun PlazaThumbnail(video: V2PlazaVideo, modifier: Modifier = Modifier) {
     } else {
         Box(
             modifier = modifier.background(
-                Brush.linearGradient(video.thumbnailKind.gradient),
+                Brush.linearGradient(video.thumbnailKind.homeGradient),
             ),
         )
     }
 }
 
+private val V2PlazaVideo.ThumbnailKind.homeGradient: List<Color>
+    get() = when (this) {
+        V2PlazaVideo.ThumbnailKind.GREEN_SWING -> listOf(DSColors.fairway, DSColors.deepGreen)
+        V2PlazaVideo.ThumbnailKind.SAND_WARM -> listOf(DSColors.trophyGold.copy(alpha = 0.5f), DSColors.deepGreen)
+        V2PlazaVideo.ThumbnailKind.MINT_TIP -> listOf(DSColors.fairway.copy(alpha = 0.6f), DSColors.inkGreen)
+        V2PlazaVideo.ThumbnailKind.EARTH_GEAR -> listOf(DSColors.trophyGold.copy(alpha = 0.4f), DSColors.inkGreen)
+        V2PlazaVideo.ThumbnailKind.FITNESS_ROSE -> listOf(Color(0xFFD98C8C), DSColors.deepGreen)
+        V2PlazaVideo.ThumbnailKind.SHORT_AMBER -> listOf(DSColors.trophyGold.copy(alpha = 0.7f), DSColors.fairway)
+    }
+
 @Composable
 private fun V2HomePlazaSkeletonCard() {
     val transition = rememberInfiniteTransition(label = "plaza_shimmer")
-    val alpha by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.55f,
+    val shimmer by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(1200), RepeatMode.Reverse),
-        label = "alpha",
+        label = "shimmer",
     )
+    val shimmerStart = -360f + shimmer * 720f
     Box(
         modifier = Modifier
             .width(200.dp)
             .height(140.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(DSSpacing.Radius.md))
             .background(
                 Brush.linearGradient(
                     listOf(
-                        DSColors.fairway.copy(alpha),
-                        DSColors.deepGreen.copy(alpha + 0.1f),
+                        DSColors.fairway.copy(alpha = 0.35f),
+                        DSColors.deepGreen.copy(alpha = 0.55f),
                     ),
                 ),
             ),
-    )
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(46.dp)
+                        .height(18.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.25f)),
+                )
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(16.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.25f)),
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(12.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.35f)),
+                )
+                Box(
+                    modifier = Modifier
+                        .width(110.dp)
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.20f)),
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0f),
+                            Color.White.copy(alpha = 0.18f),
+                            Color.White.copy(alpha = 0f),
+                        ),
+                        start = Offset(shimmerStart, shimmerStart),
+                        end = Offset(shimmerStart + 360f, shimmerStart + 360f),
+                    ),
+                ),
+        )
+    }
 }
 
 private fun formatDuration(sec: Double): String {
@@ -220,10 +306,4 @@ private fun formatDuration(sec: Double): String {
     val m = total / 60
     val s = total % 60
     return String.format(Locale.ROOT, "%d:%02d", m, s)
-}
-
-private fun formatViewCount(count: Int): String = when {
-    count >= 10_000 -> String.format(Locale.ROOT, "%.1fw", count / 10_000f)
-    count >= 1_000 -> String.format(Locale.ROOT, "%.1fk", count / 1_000f)
-    else -> count.toString()
 }

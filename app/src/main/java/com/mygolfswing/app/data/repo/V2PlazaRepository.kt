@@ -4,10 +4,13 @@ import com.mygolfswing.app.data.db.PlazaSavedDao
 import com.mygolfswing.app.data.db.PlazaSavedEntity
 import com.mygolfswing.app.data.model.V2PlazaCategoryChip
 import com.mygolfswing.app.data.model.V2PlazaCoach
+import com.mygolfswing.app.data.model.V2PlazaCoachLink
+import com.mygolfswing.app.data.model.V2PlazaCoachProfile
 import com.mygolfswing.app.data.model.V2PlazaVideo
 import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -16,6 +19,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
@@ -26,6 +30,9 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.UUID
 
 /**
@@ -58,8 +65,9 @@ class V2PlazaRepository(
         sortBy: String = "popular",
         categoryId: String? = null,
         parentCategoryId: String? = null,
+        coachId: String? = null,
         keyword: String? = null,
-    ): Result<List<V2PlazaVideo>> = runCatching {
+    ): Result<List<V2PlazaVideo>> = runPlazaCatching {
         val body = JsonObject(
             buildMap {
                 put("action", JsonPrimitive("getPlazaVideos"))
@@ -73,6 +81,7 @@ class V2PlazaRepository(
                 } else if (category != null) {
                     put("categoryId", JsonPrimitive(category))
                 }
+                coachId?.takeIf { it.isNotBlank() }?.let { put("coachId", JsonPrimitive(it)) }
                 keyword?.takeIf { it.isNotBlank() }?.let { put("keyword", JsonPrimitive(it)) }
                 session.current().userId?.let { put("userId", JsonPrimitive(it)) }
             },
@@ -80,14 +89,14 @@ class V2PlazaRepository(
         val resp = net.cloudApi.videoPlaza(body)
         val success = resp["success"]?.jsonPrimitive?.boolean == true
         if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取广场视频失败")
-        val arr = resp["videos"]?.jsonArray ?: return@runCatching emptyList()
+        val arr = resp["videos"]?.jsonArray ?: return@runPlazaCatching emptyList()
         val decoded = arr.mapNotNull { runCatching { decodeVideo(it.jsonObject) }.getOrNull() }
         hydrateCoaches(decoded)
     }
 
-    suspend fun fetchCategories(): Result<List<V2PlazaCategoryChip>> = runCatching {
+    suspend fun fetchCategories(): Result<List<V2PlazaCategoryChip>> = runPlazaCatching {
         val resp = net.cloudApi.videoPlaza(JsonObject(mapOf("action" to JsonPrimitive("getCategories"))))
-        val arr = resp["categories"]?.jsonArray ?: return@runCatching emptyList()
+        val arr = resp["categories"]?.jsonArray ?: return@runPlazaCatching emptyList()
         arr.mapNotNull { e ->
             runCatching {
                 val o = e.jsonObject
@@ -104,14 +113,156 @@ class V2PlazaRepository(
             .also { cachedCategories = it }
     }
 
+    suspend fun fetchCoachProfile(coachId: String): Result<V2PlazaCoachProfile> = runPlazaCatching {
+        val resp = net.cloudApi.videoPlaza(
+            JsonObject(
+                mapOf(
+                    "action" to JsonPrimitive("getCoachProfile"),
+                    "coachId" to JsonPrimitive(coachId),
+                ),
+            ),
+        )
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取教练失败")
+        decodeCoach(resp["coach"]?.jsonObject ?: error("教练不存在"))
+    }
+
+    suspend fun fetchCoachVideos(coachId: String, limit: Int = 30, offset: Int = 0): Result<List<V2PlazaVideo>> =
+        fetchVideos(limit = limit, offset = offset, coachId = coachId)
+
     suspend fun save(videoId: String) = withContext(Dispatchers.IO) {
-        val uid = session.current().userId ?: return@withContext
+        val uid = session.current().userId ?: error("请先登录后再收藏")
+        callAuthedVideoAction("favoriteVideo", videoId)
         savedDao.save(PlazaSavedEntity(uid, videoId, System.currentTimeMillis()))
     }
 
     suspend fun unsave(videoId: String) = withContext(Dispatchers.IO) {
-        val uid = session.current().userId ?: return@withContext
+        val uid = session.current().userId ?: error("请先登录后再取消收藏")
+        callAuthedVideoAction("unfavoriteVideo", videoId)
         savedDao.remove(videoId, uid)
+    }
+
+    suspend fun like(videoId: String): Result<Unit> = runPlazaCatching {
+        callAuthedVideoAction("likeVideo", videoId)
+    }
+
+    suspend fun unlike(videoId: String): Result<Unit> = runPlazaCatching {
+        callAuthedVideoAction("unlikeVideo", videoId)
+    }
+
+    suspend fun fetchComments(videoId: String, limit: Int = 30, offset: Int = 0): Result<List<V2PlazaComment>> = runPlazaCatching {
+        val resp = net.cloudApi.videoPlaza(
+            JsonObject(
+                mapOf(
+                    "action" to JsonPrimitive("getComments"),
+                    "videoId" to JsonPrimitive(videoId),
+                    "limit" to JsonPrimitive(limit),
+                    "offset" to JsonPrimitive(offset),
+                ),
+            ),
+        )
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取评论失败")
+        val arr = firstArray(
+            resp,
+            "comments",
+            "items",
+            "list",
+            "data.comments",
+            "data.items",
+            "data.list",
+        ) ?: return@runPlazaCatching emptyList()
+        arr.mapNotNull { runCatching { decodeComment(it.jsonObject) }.getOrNull() }
+    }
+
+    suspend fun addComment(videoId: String, content: String): Result<V2PlazaComment> = runPlazaCatching {
+        val current = session.current()
+        val uid = current.userId ?: error("请先登录后再评论")
+        val body = JsonObject(
+            mapOf(
+                "action" to JsonPrimitive("addComment"),
+                "videoId" to JsonPrimitive(videoId),
+                "userId" to JsonPrimitive(uid),
+                "userName" to JsonPrimitive(current.nickname ?: current.username ?: "用户"),
+                "userAvatar" to JsonPrimitive(current.avatar ?: ""),
+                "content" to JsonPrimitive(content),
+            ),
+        )
+        val resp = net.cloudApi.videoPlaza(body)
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "评论失败")
+        val commentObj = firstObject(resp, "comment", "data.comment", "data", "result.comment")
+        if (commentObj != null) {
+            decodeComment(commentObj)
+        } else {
+            V2PlazaComment(
+                id = UUID.randomUUID(),
+                videoId = videoId,
+                userId = uid,
+                userName = current.nickname ?: current.username ?: "我",
+                userAvatar = current.avatar,
+                content = content,
+                createdAt = LocalDateTime.now(),
+            )
+        }
+    }
+
+    suspend fun reportVideo(videoId: String, reason: String, detail: String): Result<Unit> = runPlazaCatching {
+        val uid = session.current().userId ?: error("请先登录后再举报")
+        val body = JsonObject(
+            mapOf(
+                "action" to JsonPrimitive("reportVideo"),
+                "videoId" to JsonPrimitive(videoId),
+                "userId" to JsonPrimitive(uid),
+                "reason" to JsonPrimitive(reason),
+                "reasonText" to JsonPrimitive(reason),
+                "detail" to JsonPrimitive(detail),
+                "priority" to JsonPrimitive(if (reason == "child_abuse" || reason == "pornography") 8 else 3),
+            ),
+        )
+        val resp = net.cloudApi.videoPlaza(body)
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "举报失败")
+    }
+
+    suspend fun reportComment(commentId: String, videoId: String, reason: String = "用户举报"): Result<Unit> = runPlazaCatching {
+        val uid = session.current().userId ?: error("请先登录后再举报")
+        val body = JsonObject(
+            mapOf(
+                "action" to JsonPrimitive("reportComment"),
+                "commentId" to JsonPrimitive(commentId),
+                "videoId" to JsonPrimitive(videoId),
+                "userId" to JsonPrimitive(uid),
+                "reason" to JsonPrimitive(reason),
+            ),
+        )
+        val resp = net.cloudApi.videoPlaza(body)
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "举报失败")
+    }
+
+    suspend fun claimVideo(
+        videoId: String,
+        claimType: String,
+        contactInfo: String,
+        platformLink: String,
+        detail: String,
+    ): Result<Unit> = runPlazaCatching {
+        val uid = session.current().userId ?: error("请先登录后再认领")
+        val body = JsonObject(
+            mapOf(
+                "action" to JsonPrimitive("claimVideo"),
+                "videoId" to JsonPrimitive(videoId),
+                "userId" to JsonPrimitive(uid),
+                "claimType" to JsonPrimitive(claimType),
+                "contactInfo" to JsonPrimitive(contactInfo),
+                "platformLink" to JsonPrimitive(platformLink),
+                "detail" to JsonPrimitive(detail),
+            ),
+        )
+        val resp = net.cloudApi.videoPlaza(body)
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "认领提交失败")
     }
 
     private fun decodeVideo(o: JsonObject): V2PlazaVideo {
@@ -183,7 +334,7 @@ class V2PlazaRepository(
         }
     }
 
-    private suspend fun fetchCoachName(coachId: String): Result<String> = runCatching {
+    private suspend fun fetchCoachName(coachId: String): Result<String> = runPlazaCatching {
         val resp = net.cloudApi.videoPlaza(
             JsonObject(
                 mapOf(
@@ -196,6 +347,70 @@ class V2PlazaRepository(
         if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取教练失败")
         val coach = resp["coach"]?.jsonObject ?: error("教练不存在")
         coach.string("name") ?: error("missing coach name")
+    }
+
+    private suspend fun callAuthedVideoAction(action: String, videoId: String) {
+        val uid = session.current().userId ?: error("请先登录")
+        val resp = net.cloudApi.videoPlaza(
+            JsonObject(
+                mapOf(
+                    "action" to JsonPrimitive(action),
+                    "videoId" to JsonPrimitive(videoId),
+                    "userId" to JsonPrimitive(uid),
+                ),
+            ),
+        )
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "操作失败")
+    }
+
+    private fun decodeComment(o: JsonObject): V2PlazaComment {
+        val rawId = o.string("id", "commentId") ?: UUID.randomUUID().toString()
+        val id = runCatching { UUID.fromString(rawId) }.getOrElse { UUID.nameUUIDFromBytes(rawId.toByteArray()) }
+        val createdAtMs = o["createdAt"]?.jsonPrimitive?.longOrNull
+            ?: o["created_at"]?.jsonPrimitive?.longOrNull
+            ?: System.currentTimeMillis()
+        val normalizedMs = if (createdAtMs < 10_000_000_000L) createdAtMs * 1000L else createdAtMs
+        return V2PlazaComment(
+            id = id,
+            videoId = o.string("videoId") ?: "",
+            userId = o.string("userId") ?: "",
+            userName = o.string("userName", "nickname", "username") ?: "用户",
+            userAvatar = o.string("userAvatar", "avatar"),
+            content = o.string("content") ?: "",
+            createdAt = LocalDateTime.ofInstant(Instant.ofEpochMilli(normalizedMs), ZoneId.systemDefault()),
+        )
+    }
+
+    private fun decodeCoach(o: JsonObject): V2PlazaCoachProfile {
+        val id = o.string("id", "coachId") ?: error("missing coachId")
+        val name = o.string("name", "coachName", "displayName") ?: "教练"
+        val links = (o["externalLinks"] as? JsonArray)
+            ?.mapNotNull { item ->
+                runCatching {
+                    val link = item.jsonObject
+                    V2PlazaCoachLink(
+                        platform = link.string("platform") ?: "link",
+                        url = link.string("url") ?: "",
+                        label = link.string("label") ?: link.string("platform") ?: "链接",
+                        displayName = link.string("displayName") ?: "",
+                    )
+                }.getOrNull()
+            }
+            ?.filter { it.url.isNotBlank() || it.displayName.isNotBlank() }
+            ?: emptyList()
+        return V2PlazaCoachProfile(
+            id = id,
+            name = name,
+            avatarUrl = o.string("avatarURL", "avatarUrl", "avatar"),
+            bannerUrl = o.string("bannerURL", "bannerUrl", "banner"),
+            certification = o.string("certification"),
+            bio = o.string("bio", "description", "intro"),
+            region = o.string("region"),
+            tier = o.string("tier"),
+            badges = o.stringArray("badges"),
+            externalLinks = links,
+        )
     }
 
     private fun categoryNameFor(id: String?): String? =
@@ -238,6 +453,21 @@ class V2PlazaRepository(
     private fun JsonObject.string(vararg keys: String): String? =
         keys.firstNotNullOfOrNull { key -> this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } }
 
+    private fun firstArray(o: JsonObject, vararg paths: String): JsonArray? =
+        paths.firstNotNullOfOrNull { path ->
+            nested(o, path) as? JsonArray
+        }
+
+    private fun firstObject(o: JsonObject, vararg paths: String): JsonObject? =
+        paths.firstNotNullOfOrNull { path ->
+            nested(o, path) as? JsonObject
+        }
+
+    private fun nested(o: JsonObject, path: String): JsonElement? =
+        path.split(".").fold(o as JsonElement?) { current, key ->
+            (current as? JsonObject)?.get(key)
+        }
+
     private fun JsonObject.stringArray(key: String): List<String> =
         (this[key] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull }
             ?: this[key]?.jsonPrimitive?.contentOrNull
@@ -245,4 +475,24 @@ class V2PlazaRepository(
                 ?.map { it.trim() }
                 ?.filter { it.isNotEmpty() }
             ?: emptyList()
+
+    private suspend inline fun <T> runPlazaCatching(
+        crossinline block: suspend () -> T,
+    ): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
 }
+
+data class V2PlazaComment(
+    val id: UUID,
+    val videoId: String,
+    val userId: String,
+    val userName: String,
+    val userAvatar: String?,
+    val content: String,
+    val createdAt: LocalDateTime,
+)

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,14 +31,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.store.V2ProfileStore
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -53,6 +57,9 @@ fun V2NicknameEditorDialog(
     val scope = rememberCoroutineScope()
 
     AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .v2NavigationBarPadding(),
         onDismissRequest = { if (!loading) onDismiss() },
         title = { Text("修改昵称", style = DSTypography.titleMedium) },
         text = {
@@ -64,6 +71,7 @@ fun V2NicknameEditorDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = nicknameFieldColors(),
+                    shape = RoundedCornerShape(12.dp),
                 )
                 error?.let { Text(it, color = DSColors.flagRed, style = DSTypography.caption) }
             }
@@ -74,13 +82,20 @@ fun V2NicknameEditorDialog(
                 onClick = {
                     scope.launch {
                         loading = true
-                        ServiceLocator.authRepo.updateNickname(nickname.trim())
-                            .onSuccess {
-                                V2ProfileStore.refresh(force = true)
-                                onSaved()
-                            }
-                            .onFailure { error = it.message ?: "更新失败" }
-                        loading = false
+                        try {
+                            ServiceLocator.authRepo.updateNickname(nickname.trim())
+                                .onSuccess {
+                                    V2ProfileStore.refresh(force = true)
+                                    onSaved()
+                                }
+                                .onFailure { error = accountSecurityError("更新失败，请稍后重试", it.message) }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            error = accountSecurityError("更新失败，请稍后重试", e.message)
+                        } finally {
+                            loading = false
+                        }
                     }
                 },
             ) {
@@ -122,6 +137,9 @@ fun V2PhoneBindDialog(
     }
 
     AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .v2NavigationBarPadding(),
         onDismissRequest = { if (!loading) onDismiss() },
         title = { Text(if (hasPhone) "换绑手机号" else "绑定手机号", style = DSTypography.titleMedium) },
         text = {
@@ -141,6 +159,7 @@ fun V2PhoneBindDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.fillMaxWidth(),
                     colors = nicknameFieldColors(),
+                    shape = RoundedCornerShape(12.dp),
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
@@ -151,6 +170,7 @@ fun V2PhoneBindDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         modifier = Modifier.weight(1f),
                         colors = nicknameFieldColors(),
+                        shape = RoundedCornerShape(12.dp),
                     )
                     OutlinedButton(
                         onClick = {
@@ -160,10 +180,17 @@ fun V2PhoneBindDialog(
                             }
                             scope.launch {
                                 sending = true
-                                ServiceLocator.authRepo.sendSmsCode(phone)
-                                    .onSuccess { countdown = 60 }
-                                    .onFailure { error = it.message ?: "发送失败" }
-                                sending = false
+                                try {
+                                    ServiceLocator.authRepo.sendSmsCode(phone)
+                                        .onSuccess { countdown = 60 }
+                                        .onFailure { error = accountSecurityError("验证码发送失败，请稍后重试", it.message) }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Throwable) {
+                                    error = accountSecurityError("验证码发送失败，请稍后重试", e.message)
+                                } finally {
+                                    sending = false
+                                }
                             }
                         },
                         enabled = phone.length == 11 && countdown == 0 && !sending,
@@ -187,13 +214,20 @@ fun V2PhoneBindDialog(
                 onClick = {
                     scope.launch {
                         loading = true
-                        ServiceLocator.authRepo.bindPhoneNumber(phone, code)
-                            .onSuccess {
-                                V2ProfileStore.refresh(force = true)
-                                onSaved()
-                            }
-                            .onFailure { error = it.message ?: "绑定失败" }
-                        loading = false
+                        try {
+                            ServiceLocator.authRepo.bindPhoneNumber(phone, code)
+                                .onSuccess {
+                                    V2ProfileStore.refresh(force = true)
+                                    onSaved()
+                                }
+                                .onFailure { error = accountSecurityError("绑定失败，请检查验证码后重试", it.message) }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Throwable) {
+                            error = accountSecurityError("绑定失败，请检查验证码后重试", e.message)
+                        } finally {
+                            loading = false
+                        }
                     }
                 },
             ) {
@@ -214,11 +248,25 @@ fun V2PhoneBindDialog(
 
 @Composable
 private fun nicknameFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedContainerColor = DSColors.mistGreen,
+    unfocusedContainerColor = DSColors.mistGreen,
+    disabledContainerColor = DSColors.mistGreen,
     focusedBorderColor = DSColors.fairway,
+    unfocusedBorderColor = Color.Transparent,
+    disabledBorderColor = Color.Transparent,
     cursorColor = DSColors.fairway,
+    focusedTextColor = DSColors.inkGreen,
+    unfocusedTextColor = DSColors.inkGreen,
+    focusedPlaceholderColor = DSColors.shadowGray.copy(alpha = 0.7f),
+    unfocusedPlaceholderColor = DSColors.shadowGray.copy(alpha = 0.7f),
 )
 
 private fun String.maskPhone(): String {
     if (length <= 7) return this
     return "${take(3)}****${takeLast(4)}"
+}
+
+private fun accountSecurityError(base: String, debugDetail: String?): String {
+    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+    return if (detail == null) base else "$base（$detail）"
 }

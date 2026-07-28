@@ -3,6 +3,7 @@ package com.mygolfswing.app.ui.legal
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
@@ -34,7 +36,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mygolfswing.app.ui.common.V2NavTopBarCentered
+import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -58,16 +62,38 @@ fun V2LegalScreen(type: V2LegalDocType, onBack: () -> Unit) {
             .fillMaxSize()
             .background(DSColors.warmWhite),
     ) {
-        V2NavTopBarCentered(title = type.title, onBack = onBack)
+        LegalTopBar(onClose = onBack)
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
+                .v2NavigationBarPadding()
                 .padding(bottom = 32.dp),
         ) {
             LegalHero(type)
             LegalContentCard(content = content, modifier = Modifier.padding(horizontal = DSSpacing.lg))
         }
+    }
+}
+
+@Composable
+private fun LegalTopBar(onClose: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .v2StatusBarPadding()
+            .height(56.dp)
+            .padding(horizontal = 16.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Cancel,
+            contentDescription = "关闭",
+            tint = DSColors.shadowGray.copy(alpha = 0.7f),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(24.dp)
+                .clickable(onClick = onClose),
+        )
     }
 }
 
@@ -258,5 +284,10 @@ private fun cleanMarkdown(text: String): String =
 private fun loadAsset(context: Context, path: String): String = runCatching {
     context.assets.open(path).bufferedReader().use { it.readText() }
 }.getOrElse {
-    "文档加载失败，请稍后重试。\n\n（$path）"
+    buildString {
+        append("文档加载失败，请稍后重试；如多次失败，请联系客服。")
+        if (ServiceLocator.isDebuggable) {
+            append("\n\n（$path）")
+        }
+    }
 }

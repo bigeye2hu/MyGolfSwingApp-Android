@@ -29,6 +29,15 @@ class V2AppNavigation<D : Any>(private val root: D) {
         }
     }
 
+    fun navigateBackSkipping(predicate: (D) -> Boolean) {
+        var nextStack = backStack
+        while (nextStack.lastOrNull()?.let(predicate) == true) {
+            nextStack = nextStack.dropLast(1)
+        }
+        current = nextStack.lastOrNull() ?: root
+        backStack = if (nextStack.isNotEmpty()) nextStack.dropLast(1) else emptyList()
+    }
+
     fun resetToRoot() {
         current = root
         backStack = emptyList()
@@ -37,6 +46,20 @@ class V2AppNavigation<D : Any>(private val root: D) {
     fun resetTo(destination: D) {
         current = destination
         backStack = emptyList()
+    }
+
+    fun returnTo(destination: D) {
+        if (destination == root) {
+            resetToRoot()
+            return
+        }
+        val index = backStack.indexOfLast { it == destination }
+        if (index >= 0) {
+            current = destination
+            backStack = backStack.take(index)
+        } else {
+            resetTo(destination)
+        }
     }
 
     val canGoBack: Boolean get() = current != root

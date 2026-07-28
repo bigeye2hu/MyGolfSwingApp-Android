@@ -75,12 +75,13 @@ fun V2GoalHeroCard(
             .shadow(
                 elevation = 24.dp,
                 shape = RoundedCornerShape(style.cornerRadius),
+                ambientColor = style.shadowColor,
                 spotColor = style.shadowColor,
             )
             .clip(RoundedCornerShape(style.cornerRadius))
             .border(width = 1.dp, color = style.borderColor, shape = RoundedCornerShape(style.cornerRadius))
             .background(Color.Transparent)
-            .height(206.dp),
+            .height(220.dp),
     ) {
         GolfScapeBackground(style = style, modifier = Modifier.fillMaxSize())
 
@@ -96,7 +97,7 @@ fun V2GoalHeroCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = onTap),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     text = goal.title,
@@ -273,6 +274,7 @@ private fun FigmaImageBackground(style: V2GoalHeroStyle) {
 private fun HeaderRow(style: V2GoalHeroStyle, onEdit: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
+            modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -288,7 +290,7 @@ private fun HeaderRow(style: V2GoalHeroStyle, onEdit: () -> Unit) {
                     imageVector = Icons.Filled.PlayArrow,
                     contentDescription = null,
                     tint = Gold,
-                    modifier = Modifier.size(14.dp),
+                    modifier = Modifier.size(10.dp),
                 )
             }
             Text(
@@ -427,18 +429,22 @@ private fun FooterRow(
                 color = style.secondaryText,
                 fontSize = 12.sp,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
             Text(
                 text = "·",
                 color = style.mutedText,
                 fontSize = 10.sp,
-                letterSpacing = 2.sp,
+                letterSpacing = 5.sp,
             )
             Text(
                 text = "🎬 $linkedVideoCount 个视频",
                 color = style.secondaryText,
                 fontSize = 12.sp,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
             )
         }
         Spacer(modifier = Modifier.weight(1f))
@@ -476,7 +482,7 @@ private fun HeroCheckInButton(goal: V2Goal, style: V2GoalHeroStyle, onComplete: 
             imageVector = state.icon,
             contentDescription = state.title,
             tint = style.buttonText,
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(11.dp),
         )
         Text(
             text = state.title,

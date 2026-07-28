@@ -11,15 +11,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Icon
+import com.mygolfswing.app.R
 import coil.compose.AsyncImage
-import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.memo.V2MemoThumbnailStore
 import com.mygolfswing.app.data.model.V2Memo
+import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.model.V2MemoThumbnailKind
 import com.mygolfswing.app.data.video.V2VideoThumbnailLoader
 
@@ -31,6 +40,8 @@ fun V2MemoThumbnail(
     memo: V2Memo,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
+    useHeroGrassPlaceholder: Boolean = false,
+    showKindPlaceholderIcon: Boolean = false,
 ) {
     val context = LocalContext.current
     val resolvedUrl = remember(memo.id, memo.thumbnailUrl, memo.videoUrl) {
@@ -45,27 +56,65 @@ fun V2MemoThumbnail(
         }
         fallbackBitmap = V2VideoThumbnailLoader.loadFirstFrame(memo.videoUrl)
     }
+    val fallback = fallbackBitmap
 
     Box(
-        modifier = modifier.background(thumbnailGradientBrush(memo.thumbnailKind)),
+        modifier = modifier.background(
+            if (useHeroGrassPlaceholder) homeMemoPlaceholderBrush() else thumbnailGradientBrush(memo.thumbnailKind),
+        ),
     ) {
-        resolvedUrl?.let { url ->
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = contentScale,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } ?: fallbackBitmap?.let { bmp ->
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = null,
-                contentScale = contentScale,
-                modifier = Modifier.fillMaxSize(),
-            )
+        when {
+            resolvedUrl != null -> {
+                AsyncImage(
+                    model = resolvedUrl,
+                    contentDescription = null,
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            fallback != null -> {
+                Image(
+                    bitmap = fallback.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            useHeroGrassPlaceholder -> {
+                Image(
+                    painter = painterResource(id = R.drawable.v2_hero_grass_bg),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.BottomEnd,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(0.55f),
+                )
+            }
+            showKindPlaceholderIcon -> {
+                Icon(
+                    imageVector = when (memo.kind) {
+                        V2MemoKind.VIDEO -> Icons.Filled.PlayArrow
+                        V2MemoKind.TEXT -> Icons.Filled.Description
+                        V2MemoKind.MIXED -> Icons.Filled.Videocam
+                    },
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.50f),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxSize(0.27f),
+                )
+            }
         }
     }
 }
+
+private fun homeMemoPlaceholderBrush(): Brush = Brush.linearGradient(
+    listOf(
+        Color(0xFF1B4332),
+        Color(0xFF2D6A4F),
+    ),
+)
 
 fun thumbnailGradientBrush(kind: V2MemoThumbnailKind): Brush {
     val (a, b) = when (kind) {

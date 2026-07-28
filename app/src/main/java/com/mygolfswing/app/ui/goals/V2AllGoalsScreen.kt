@@ -21,17 +21,32 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.outlined.CheckCircle as OutlinedCheckCircle
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,10 +61,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.store.V2GoalStore
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import java.util.UUID
 
 /**
@@ -63,16 +82,39 @@ fun V2AllGoalsScreen(
 ) {
     val goals by V2GoalStore.goals.collectAsState()
     var completedExpanded by rememberSaveable { mutableStateOf(false) }
+    var pendingDeleteGoal by remember { mutableStateOf<V2Goal?>(null) }
+    var deletingGoalId by remember { mutableStateOf<UUID?>(null) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun deleteGoal(goal: V2Goal) {
+        if (deletingGoalId != null) return
+        scope.launch {
+            deletingGoalId = goal.id
+            deleteError = null
+            try {
+                V2GoalStore.deleteAndWait(goal.id)
+                pendingDeleteGoal = null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                pendingDeleteGoal = null
+                deleteError = "删除目标失败，请稍后重试"
+            } finally {
+                deletingGoalId = null
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.linearGradient(
-                    0.0f to Color(0xFFF0F8F4),
-                    0.3f to Color(0xFFE8F3EF),
+                    0.0f to Color(0xFFF0F8F5),
+                    0.3f to Color(0xFFE8F5EF),
                     0.7f to Color(0xFFF5F5F0),
-                    1.0f to Color(0xFFFAF7F0),
+                    1.0f to Color(0xFFFAF8F5),
                 ),
             ),
     ) {
@@ -81,7 +123,7 @@ fun V2AllGoalsScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 140.dp),
+                contentPadding = PaddingValues(bottom = 164.dp),
                 verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
             ) {
                 item {
@@ -100,6 +142,18 @@ fun V2AllGoalsScreen(
                     }
                 }
 
+                if (goals.isEmpty()) {
+                    item {
+                        AllGoalsEmptyState(
+                            onCreate = onCreate,
+                            modifier = Modifier.padding(
+                                horizontal = DSSpacing.lg,
+                                vertical = DSSpacing.md,
+                            ),
+                        )
+                    }
+                }
+
                 V2GoalStore.groupedActiveByPriority.forEach { group ->
                     item {
                         AllGoalsPriorityHeader(
@@ -107,19 +161,18 @@ fun V2AllGoalsScreen(
                             count = group.goals.size,
                             modifier = Modifier.padding(
                                 horizontal = DSSpacing.lg,
-                                vertical = DSSpacing.sm,
                             ),
                         )
                     }
                     items(group.goals, key = { it.id }) { goal ->
-                        AllGoalsCard(
+                        SwipeToDeleteGoalCard(
                             goal = goal,
                             linkedMemoCount = V2GoalStore.linkedMemoCount(goal),
                             onCheckIn = { V2GoalStore.checkIn(goal.id) },
                             onTap = { onSelectGoal(goal.id) },
+                            onDeleteRequest = { pendingDeleteGoal = goal },
                             modifier = Modifier.padding(
                                 horizontal = DSSpacing.lg,
-                                vertical = 4.dp,
                             ),
                         )
                     }
@@ -139,20 +192,17 @@ fun V2AllGoalsScreen(
                     }
                     if (completedExpanded) {
                         items(V2GoalStore.completedGoals, key = { it.id }) { goal ->
-                            Box(
+                            SwipeToDeleteGoalCard(
+                                goal = goal,
+                                linkedMemoCount = V2GoalStore.linkedMemoCount(goal),
+                                onCheckIn = null,
+                                onTap = { onSelectGoal(goal.id) },
+                                onDeleteRequest = { pendingDeleteGoal = goal },
+                                dimmed = true,
                                 modifier = Modifier.padding(
                                     horizontal = DSSpacing.lg,
-                                    vertical = 4.dp,
                                 ),
-                            ) {
-                                AllGoalsCard(
-                                    goal = goal,
-                                    linkedMemoCount = V2GoalStore.linkedMemoCount(goal),
-                                    onCheckIn = null,
-                                    onTap = { onSelectGoal(goal.id) },
-                                    dimmed = true,
-                                )
-                            }
+                            )
                         }
                     }
                 }
@@ -163,7 +213,54 @@ fun V2AllGoalsScreen(
             onTap = onCreate,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .v2NavigationBarPadding()
                 .padding(bottom = DSSpacing.xl),
+        )
+    }
+
+    pendingDeleteGoal?.let { goal ->
+        AlertDialog(
+            onDismissRequest = { if (deletingGoalId == null) pendingDeleteGoal = null },
+            title = { Text("删除目标") },
+            text = { Text("确定要删除「${goal.title}」吗？删除后无法恢复。") },
+            confirmButton = {
+                TextButton(
+                    enabled = deletingGoalId == null,
+                    onClick = { deleteGoal(goal) },
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (deletingGoalId == goal.id) {
+                            CircularProgressIndicator(
+                                color = DSColors.flagRed,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                        Text(if (deletingGoalId == goal.id) "删除中..." else "删除", color = DSColors.flagRed)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = deletingGoalId == null, onClick = { pendingDeleteGoal = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
+    deleteError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { deleteError = null },
+            title = { Text("删除失败") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { deleteError = null }) {
+                    Text("好", color = DSColors.fairway)
+                }
+            },
         )
     }
 }
@@ -174,24 +271,35 @@ fun V2AllGoalsScreen(
 
 @Composable
 private fun AllGoalsNavBar(onBack: () -> Unit, onCreate: () -> Unit) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .v2StatusBarPadding()
-            .background(DSColors.cardWhite.copy(alpha = 0.92f))
-            .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(DSColors.cardWhite.copy(alpha = 0.92f)),
     ) {
-        CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, onClick = onBack)
-        Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = "全部目标",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = DSColors.inkGreen,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .v2StatusBarPadding()
+                .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, onClick = onBack)
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = "全部目标",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = DSColors.inkGreen,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            CircleIconButton(icon = Icons.Filled.Add, onClick = onCreate)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(0.5.dp)
+                .background(DSColors.borderLine),
         )
-        Spacer(modifier = Modifier.weight(1f))
-        CircleIconButton(icon = Icons.Filled.Add, onClick = onCreate)
     }
 }
 
@@ -212,8 +320,74 @@ private fun CircleIconButton(
             imageVector = icon,
             contentDescription = null,
             tint = DSColors.fairway,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(14.dp),
         )
+    }
+}
+
+// =================================================================
+// Empty State
+// =================================================================
+
+@Composable
+private fun AllGoalsEmptyState(
+    onCreate: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp))
+            .background(DSColors.cardWhite.copy(alpha = 0.88f))
+            .border(width = 1.dp, color = Color.White.copy(alpha = 0.75f), shape = RoundedCornerShape(24.dp))
+            .padding(horizontal = DSSpacing.lg, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(DSColors.fairway.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = DSColors.fairway,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        Text(
+            text = "还没有训练目标",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = DSColors.inkGreen,
+        )
+        Text(
+            text = "先创建一个本周可执行的小目标，首页会自动把它放进今日聚焦。",
+            fontSize = 12.sp,
+            color = DSColors.shadowGray,
+            lineHeight = 18.sp,
+        )
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(DSColors.fairway)
+                .clickable(onClick = onCreate)
+                .padding(horizontal = 18.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+            Text("新建目标", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
     }
 }
 
@@ -232,7 +406,12 @@ private fun AllGoalsStatsBento(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(DSSpacing.Radius.md))
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(DSSpacing.Radius.md),
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.06f),
+            )
             .clip(RoundedCornerShape(DSSpacing.Radius.md))
             .background(DSColors.cardWhite.copy(alpha = 0.78f))
             .border(width = 1.dp, color = Color.White.copy(alpha = 0.9f), shape = RoundedCornerShape(DSSpacing.Radius.md))
@@ -291,6 +470,12 @@ private fun AllGoalsPriorityHeader(
         Box(
             modifier = Modifier
                 .size(10.dp)
+                .shadow(
+                    elevation = 1.dp,
+                    shape = CircleShape,
+                    ambientColor = Color.Black.copy(alpha = 0.05f),
+                    spotColor = Color.Black.copy(alpha = 0.05f),
+                )
                 .clip(CircleShape)
                 .background(dot),
         )
@@ -332,6 +517,67 @@ private fun priorityDividerColor(p: V2Goal.Priority): Color = when (p) {
 // Goal Card
 // =================================================================
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToDeleteGoalCard(
+    goal: V2Goal,
+    linkedMemoCount: Int,
+    onCheckIn: (() -> Unit)?,
+    onTap: () -> Unit,
+    onDeleteRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+    dimmed: Boolean = false,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        positionalThreshold = { distance -> distance * 0.35f },
+    )
+
+    LaunchedEffect(dismissState.currentValue) {
+        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+            onDeleteRequest()
+            dismissState.reset()
+        }
+    }
+
+    SwipeToDismissBox(
+        state = dismissState,
+        modifier = modifier,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(DSSpacing.Radius.md))
+                    .background(DSColors.flagRed)
+                    .padding(horizontal = DSSpacing.lg),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.DeleteOutline,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text("删除", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
+    ) {
+        AllGoalsCard(
+            goal = goal,
+            linkedMemoCount = linkedMemoCount,
+            onCheckIn = onCheckIn,
+            onTap = onTap,
+            modifier = Modifier.fillMaxWidth(),
+            dimmed = dimmed,
+        )
+    }
+}
+
 @Composable
 private fun AllGoalsCard(
     goal: V2Goal,
@@ -344,7 +590,12 @@ private fun AllGoalsCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(DSSpacing.Radius.md))
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(DSSpacing.Radius.md),
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.06f),
+            )
             .clip(RoundedCornerShape(DSSpacing.Radius.md))
             .background(DSColors.cardWhite.copy(alpha = if (dimmed) 0.55f else 0.78f))
             .border(width = 1.dp, color = Color.White.copy(alpha = 0.9f), shape = RoundedCornerShape(DSSpacing.Radius.md))
@@ -369,7 +620,7 @@ private fun AllGoalsCard(
             val trailing = if (goal.metric.kind == V2Goal.Metric.Kind.FREE) {
                 "永久目标"
             } else {
-                "完成度 ${(goal.ratio * 100).toInt()}%"
+                "完成度 ${(goal.ratio * 100).roundToInt()}%"
             }
             Text(text = trailing, fontSize = 12.sp, color = Color(0xFF9CA3AF))
         }
@@ -401,7 +652,7 @@ private fun CardTitleBlock(goal: V2Goal, modifier: Modifier = Modifier) {
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                TopicChip(text = goal.topic.displayName)
+                TopicChip(text = allGoalsTopicChipText(goal))
             }
             MetaLine(goal = goal)
         }
@@ -420,6 +671,15 @@ private fun TopicChip(text: String) {
             .background(DSColors.fairway.copy(alpha = 0.08f))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
+}
+
+private fun allGoalsTopicChipText(goal: V2Goal): String {
+    if (goal.iconType != V2Goal.IconType.CLUB) return goal.topic.displayName
+    return when {
+        goal.title.contains("一号木") || goal.title.contains("木杆") -> "木杆"
+        goal.title.contains("铁") -> "铁杆"
+        else -> goal.topic.displayName
+    }
 }
 
 @Composable
@@ -465,11 +725,22 @@ private fun StatusChip(goal: V2Goal) {
 @Composable
 private fun CardCheckInButton(goal: V2Goal, onClick: () -> Unit) {
     val enabled = goal.status == V2Goal.Status.ACTIVE && !goal.hasCheckedInToday
-    val bg = when {
+    val icon = when {
+        goal.status == V2Goal.Status.COMPLETED -> Icons.Filled.EmojiEvents
+        goal.status == V2Goal.Status.PAUSED -> Icons.Filled.Pause
+        goal.hasCheckedInToday -> Icons.Filled.CheckCircle
+        else -> Icons.Filled.Check
+    }
+    val bgColor = when {
         goal.status == V2Goal.Status.COMPLETED -> Color(0xFFFFF3C8)
         goal.status == V2Goal.Status.PAUSED -> Color(0xFFEDEFF2)
         goal.hasCheckedInToday -> Color(0xFFEFFCEC)
         else -> DSColors.fairway
+    }
+    val bgBrush = if (enabled) {
+        Brush.linearGradient(listOf(DSColors.fairway, Color(0xFF40916C)))
+    } else {
+        Brush.linearGradient(listOf(bgColor, bgColor))
     }
     val fg = if (enabled) Color.White else when {
         goal.status == V2Goal.Status.COMPLETED -> Color(0xFFB7800F)
@@ -486,14 +757,26 @@ private fun CardCheckInButton(goal: V2Goal, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .size(48.dp)
-            .shadow(elevation = if (enabled) 4.dp else 0.dp, shape = CircleShape)
+            .shadow(
+                elevation = if (enabled) 4.dp else 0.dp,
+                shape = CircleShape,
+                ambientColor = DSColors.fairway.copy(alpha = 0.28f),
+                spotColor = DSColors.fairway.copy(alpha = 0.28f),
+            )
             .clip(CircleShape)
-            .background(bg)
+            .background(bgBrush)
             .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(text = title, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = fg)
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = fg,
+            modifier = Modifier.size(12.dp),
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(text = title, fontSize = 9.sp, fontWeight = FontWeight.Medium, color = fg)
     }
 }
 
@@ -524,19 +807,30 @@ private fun CardProgressBar(goal: V2Goal) {
 @Composable
 private fun MemoCountChip(count: Int) {
     val active = count > 0
-    val bg = if (active) DSColors.fairway.copy(alpha = 0.10f) else Color(0xFFE0E3E7)
+    val bg = if (active) DSColors.fairway.copy(alpha = 0.10f) else Color(0xFF9CA3AF).copy(alpha = 0.12f)
     val fg = if (active) DSColors.fairway else Color(0xFF9CA3AF)
     val text = if (active) "${count}条Memo" else "暂无Memo"
-    Text(
-        text = text,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        color = fg,
+    Row(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(bg)
             .padding(horizontal = 10.dp, vertical = 4.dp),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Description,
+            contentDescription = null,
+            tint = fg,
+            modifier = Modifier.size(11.dp),
+        )
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = fg,
+        )
+    }
 }
 
 // =================================================================
@@ -553,12 +847,11 @@ private fun AllGoalsCompletedRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 1.dp, shape = RoundedCornerShape(DSSpacing.Radius.md))
             .clip(RoundedCornerShape(DSSpacing.Radius.md))
             .background(DSColors.cardWhite.copy(alpha = 0.65f))
             .border(
                 width = 1.dp,
-                color = Color(0xFFC7DBD0),
+                color = Color(0xFFC7DBD0).copy(alpha = 0.50f),
                 shape = RoundedCornerShape(DSSpacing.Radius.md),
             )
             .clickable { onToggle() }
@@ -573,32 +866,37 @@ private fun AllGoalsCompletedRow(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFE0E3E7)),
+                    .background(Color(0xFF9CA3AF).copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Filled.CheckCircle,
+                    imageVector = Icons.Outlined.OutlinedCheckCircle,
                     contentDescription = null,
                     tint = Color(0xFF9CA3AF),
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(14.dp),
                 )
             }
-            Text(
-                text = "已完成",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF6C757D),
-            )
-            Text(
-                text = "$count",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color(0xFF9CA3AF),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0xFFF2F3F5))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "已完成",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF6C757D),
+                )
+                Text(
+                    text = "$count",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF9CA3AF),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFFF2F3F5))
+                        .padding(horizontal = 8.dp, vertical = 1.5.dp),
+                )
+            }
         }
         Spacer(modifier = Modifier.weight(1f))
         Row(
@@ -614,7 +912,7 @@ private fun AllGoalsCompletedRow(
                 imageVector = if (expanded) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight,
                 contentDescription = null,
                 tint = Color(0xFF9CA3AF),
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(11.dp),
             )
         }
     }
@@ -628,7 +926,12 @@ private fun AllGoalsCompletedRow(
 private fun AllGoalsCreateFab(onTap: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
-            .shadow(elevation = 14.dp, shape = RoundedCornerShape(50))
+            .shadow(
+                elevation = 10.dp,
+                shape = RoundedCornerShape(50),
+                ambientColor = DSColors.fairway.copy(alpha = 0.38f),
+                spotColor = DSColors.fairway.copy(alpha = 0.38f),
+            )
             .clip(RoundedCornerShape(50))
             .background(
                 Brush.linearGradient(listOf(DSColors.fairway, DSColors.leafGreen)),
@@ -642,7 +945,7 @@ private fun AllGoalsCreateFab(onTap: () -> Unit, modifier: Modifier = Modifier) 
             imageVector = Icons.Filled.Add,
             contentDescription = null,
             tint = Color.White,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(14.dp),
         )
         Text(text = "新建目标", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }

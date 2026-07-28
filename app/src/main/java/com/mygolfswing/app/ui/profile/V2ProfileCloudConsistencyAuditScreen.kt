@@ -67,7 +67,7 @@ fun V2ProfileCloudConsistencyAuditScreen(onBack: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "此功能仅对测试账号 test1 开放",
+                    text = "此功能仅在调试包对内部测试账号开放",
                     style = DSTypography.caption,
                     color = DSColors.shadowGray,
                 )

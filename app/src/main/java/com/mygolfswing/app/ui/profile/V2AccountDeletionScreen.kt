@@ -15,10 +15,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -27,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -42,9 +43,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.repo.V2AccountDeletionRepository
 import com.mygolfswing.app.data.repo.V2AccountDeletionStep
+import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private val DarkBg = Color(0xFF0A0A0A)
@@ -59,7 +64,9 @@ private val Accent = Color(0xFF8B5CF6)
 fun V2AccountDeletionScreen(
     onBack: () -> Unit,
     onDeletionComplete: () -> Unit,
+    onRequestLogin: () -> Unit = {},
 ) {
+    val profile by V2ProfileStore.profile.collectAsState()
     val scope = rememberCoroutineScope()
     val repo = remember { V2AccountDeletionRepository() }
 
@@ -67,25 +74,40 @@ fun V2AccountDeletionScreen(
     var completed by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var stepLabel by remember { mutableStateOf(V2AccountDeletionStep.PREPARING.label) }
+    var showFinalConfirm by remember { mutableStateOf(false) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     fun startDeletion() {
+        if (isDeleting || completed) return
+        if (!profile.isLoggedIn) {
+            errorMessage = "请先登录后再删除账号"
+            showError = true
+            return
+        }
         scope.launch {
             isDeleting = true
+            showFinalConfirm = false
             showError = false
             errorMessage = null
-            val result = repo.deleteAccount { step ->
-                stepLabel = step.label
-                progress = step.progress
-            }
-            result.onSuccess {
-                completed = true
-                isDeleting = false
-            }.onFailure {
-                isDeleting = false
-                errorMessage = it.message ?: "未知错误，请稍后重试"
+            try {
+                val result = repo.deleteAccount { step ->
+                    stepLabel = step.label
+                    progress = step.progress
+                }
+                result.onSuccess {
+                    completed = true
+                }.onFailure {
+                    errorMessage = accountDeletionError("删除失败，请稍后重试；如多次失败，请联系客服协助处理", it.message)
+                    showError = true
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                errorMessage = accountDeletionError("删除失败，请稍后重试；如多次失败，请联系客服协助处理", e.message)
                 showError = true
+            } finally {
+                isDeleting = false
             }
         }
     }
@@ -110,8 +132,35 @@ fun V2AccountDeletionScreen(
         when {
             completed -> CompletedView(onDeletionComplete = onDeletionComplete)
             isDeleting -> ProgressView(progress = progress, stepLabel = stepLabel)
-            else -> ConfirmationView(onConfirm = { startDeletion() }, onCancel = onBack)
+            else -> ConfirmationView(
+                isLoggedIn = profile.isLoggedIn,
+                onConfirm = { showFinalConfirm = true },
+                onLogin = onRequestLogin,
+                onCancel = onBack,
+            )
         }
+    }
+
+    if (showFinalConfirm) {
+        AlertDialog(
+            onDismissRequest = { showFinalConfirm = false },
+            title = { Text("再次确认删除账号？") },
+            text = {
+                Text(
+                    "删除后将永久清除账号、云端数据、训练心得和记录元数据，此操作不可撤销。本机已下载的原视频文件会保留在设备上。",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { startDeletion() }) {
+                    Text("永久删除", color = Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFinalConfirm = false }) {
+                    Text("取消", color = Muted)
+                }
+            },
+        )
     }
 
     if (showError) {
@@ -137,10 +186,16 @@ fun V2AccountDeletionScreen(
 }
 
 @Composable
-private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
+private fun ConfirmationView(
+    isLoggedIn: Boolean,
+    onConfirm: () -> Unit,
+    onLogin: () -> Unit,
+    onCancel: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .v2NavigationBarPadding()
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -153,7 +208,7 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
                 .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.WarningAmber, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(36.dp))
+            Icon(Icons.Filled.Warning, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(36.dp))
         }
 
         Spacer(Modifier.height(24.dp))
@@ -174,7 +229,7 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
             DeletionItem("AI 对话记录")
             DeletionItem("训练心得卡片")
             DeletionItem("视频备忘录记录")
-            DeletionItem("挥杆记录及视频文件")
+            DeletionItem("挥杆记录元数据")
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
@@ -192,12 +247,18 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 40.dp)) {
             Button(
-                onClick = onConfirm,
+                onClick = { if (isLoggedIn) onConfirm() else onLogin() },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Danger),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isLoggedIn) Danger else Accent,
+                ),
             ) {
-                Text("确认删除", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (isLoggedIn) "确认删除" else "登录后删除账号",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
             Button(
                 onClick = onCancel,
@@ -215,7 +276,7 @@ private fun ConfirmationView(onConfirm: () -> Unit, onCancel: () -> Unit) {
 @Composable
 private fun DeletionItem(text: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-        Icon(Icons.Filled.Close, contentDescription = null, tint = Danger, modifier = Modifier.size(14.dp))
+        Icon(Icons.Filled.Cancel, contentDescription = null, tint = Danger, modifier = Modifier.size(14.dp))
         Text(text, color = Color.White, fontSize = 15.sp)
     }
 }
@@ -223,7 +284,9 @@ private fun DeletionItem(text: String) {
 @Composable
 private fun ProgressView(progress: Float, stepLabel: String) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .v2NavigationBarPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -252,6 +315,7 @@ private fun CompletedView(onDeletionComplete: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .v2NavigationBarPadding()
             .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -272,11 +336,17 @@ private fun CompletedView(onDeletionComplete: () -> Unit) {
         Spacer(Modifier.weight(1f))
         Button(
             onClick = onDeletionComplete,
-            modifier = Modifier.fillMaxWidth().height(52.dp).padding(bottom = 40.dp),
+            modifier = Modifier.fillMaxWidth().height(52.dp),
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Accent),
         ) {
             Text("返回登录界面", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
+        Spacer(Modifier.height(40.dp))
     }
+}
+
+private fun accountDeletionError(base: String, debugDetail: String?): String {
+    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+    return if (detail == null) base else "$base（$detail）"
 }

@@ -1,11 +1,9 @@
 package com.mygolfswing.app.ui.golfcam.steps
 
-import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -35,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -43,16 +41,19 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.R
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.mygolfswing.app.ui.golfcam.model.LandingOutput
+import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
@@ -61,8 +62,107 @@ import kotlin.math.roundToInt
 
 private const val MIN_FLIGHT_SEC = 0.5
 private const val MAX_FLIGHT_SEC = 8.0
-private const val LANDING_THUMB_COUNT = 12
+private const val DEFAULT_FLIGHT_SEC = 4.5
+internal const val LANDING_THUMB_COUNT = 12
+internal const val LANDING_TIMELINE_HEIGHT_DP = 56
+internal const val LANDING_TIMELINE_THUMB_WIDTH_DP = 32
+internal const val LANDING_TIMELINE_PIXELS_PER_SECOND_DP = 80
+internal const val LANDING_TIMELINE_TRACK_CORNER_RADIUS_DP = 4
+internal const val LANDING_CENTER_INDICATOR_WIDTH_DP = 20
+internal const val LANDING_CENTER_INDICATOR_BAR_WIDTH_DP = 4
+internal const val LANDING_CENTER_INDICATOR_DOT_SIZE_DP = 8
+internal const val LANDING_CENTER_INDICATOR_VERTICAL_INSET_DP = 4
+internal const val LANDING_VIRTUAL_THUMBNAIL_ALPHA = 0.6f
+internal const val LANDING_VIRTUAL_OVERLAY_ALPHA = 0.4f
+internal const val LANDING_MIN_TIME_MARKER_WIDTH_DP = 2
+internal const val LANDING_MIN_TIME_LABEL_FONT_SP = 9
+internal const val LANDING_TOOL_VERTICAL_SPACING_DP = 6
+internal const val LANDING_TOOL_LABEL_FONT_SP = 11
+internal const val LANDING_TOOL_VALUE_FONT_SP = 14
+internal const val LANDING_TOOL_MARK_SIZE_DP = 16
+internal const val LANDING_TOOL_MARK_SPACING_DP = 6
+internal const val LANDING_TOOL_TITLE_FONT_SP = 13
+internal const val LANDING_VIRTUAL_BADGE_FONT_SP = 10
+internal const val LANDING_VIRTUAL_BADGE_CORNER_RADIUS_DP = 4
+internal const val LANDING_VIRTUAL_BADGE_HORIZONTAL_PADDING_DP = 6
+internal const val LANDING_VIRTUAL_BADGE_VERTICAL_PADDING_DP = 2
+internal const val LANDING_HINT_ICON_SIZE_DP = 14
+internal const val LANDING_HINT_SPACING_DP = 8
+internal const val LANDING_HINT_FONT_SP = 12
 private val VIRTUAL_BLUE = Color(0xFF4285F4)
+
+private fun finiteDoubleIn(value: Double, min: Double, max: Double, fallback: Double): Double {
+    return value.takeIf { it.isFinite() }?.coerceIn(min, max) ?: fallback.coerceIn(min, max)
+}
+
+private fun finiteFloatIn(value: Float, min: Float, max: Float, fallback: Float): Float {
+    return value.takeIf { it.isFinite() }?.coerceIn(min, max) ?: fallback.coerceIn(min, max)
+}
+
+internal fun landingTailSeconds(impactTimeMs: Long, clipEndMs: Long): Double {
+    return ((clipEndMs - impactTimeMs) / 1000.0)
+        .coerceAtLeast(MIN_FLIGHT_SEC)
+        .coerceAtMost(MAX_FLIGHT_SEC)
+}
+
+internal fun landingFlightTimeSeconds(landing: LandingOutput?): Double {
+    return finiteDoubleIn(
+        value = landing?.flightTimeSec ?: DEFAULT_FLIGHT_SEC,
+        min = MIN_FLIGHT_SEC,
+        max = MAX_FLIGHT_SEC,
+        fallback = DEFAULT_FLIGHT_SEC,
+    )
+}
+
+internal fun landingOutputForTimeChange(current: LandingOutput?, flightTimeSec: Double): LandingOutput {
+    return (current ?: LandingOutput(0.5f, 0.5f, DEFAULT_FLIGHT_SEC)).copy(
+        flightTimeSec = finiteDoubleIn(flightTimeSec, MIN_FLIGHT_SEC, MAX_FLIGHT_SEC, DEFAULT_FLIGHT_SEC),
+    )
+}
+
+internal fun landingOutputForPositionChange(
+    current: LandingOutput?,
+    normalizedX: Float,
+    normalizedY: Float,
+): LandingOutput {
+    return LandingOutput(
+        normalizedX = finiteFloatIn(normalizedX, 0f, 1f, fallback = 0.5f),
+        normalizedY = finiteFloatIn(normalizedY, 0f, 1f, fallback = 0.5f),
+        flightTimeSec = landingFlightTimeSeconds(current),
+    )
+}
+
+internal fun isLandingVirtualSegment(flightTimeSec: Double, tailSeconds: Double): Boolean {
+    val safeFlightTime = finiteDoubleIn(flightTimeSec, MIN_FLIGHT_SEC, MAX_FLIGHT_SEC, DEFAULT_FLIGHT_SEC)
+    val safeTailSeconds = finiteDoubleIn(tailSeconds, MIN_FLIGHT_SEC, MAX_FLIGHT_SEC, MIN_FLIGHT_SEC)
+    return safeFlightTime > safeTailSeconds
+}
+
+internal fun formatLandingTimeLabel(flightTimeSec: Double): String {
+    return String.format(Locale.US, "%.1fs", finiteDoubleIn(flightTimeSec, MIN_FLIGHT_SEC, MAX_FLIGHT_SEC, DEFAULT_FLIGHT_SEC))
+}
+
+internal fun formatLandingPositionLabel(xPct: Float, yPct: Float): String {
+    return String.format(
+        Locale.US,
+        "%.0f%%, %.0f%%",
+        finiteFloatIn(xPct, 0f, 100f, fallback = 50f),
+        finiteFloatIn(yPct, 0f, 100f, fallback = 50f),
+    )
+}
+
+internal fun landingSeekTimeMs(
+    trimStartMs: Long,
+    impactTimeMs: Long,
+    flightTimeSec: Double,
+    clipEndMs: Long,
+    frameRate: Double,
+): Long {
+    val safeFlightTime = finiteDoubleIn(flightTimeSec, MIN_FLIGHT_SEC, MAX_FLIGHT_SEC, DEFAULT_FLIGHT_SEC)
+    val targetMs = GolfCamFrameTimeline.timeMsAfterSeconds(impactTimeMs, safeFlightTime)
+    val lastSeekMs = GolfCamFrameTimeline.lastFrameTimeMsForRange(trimStartMs, clipEndMs, frameRate)
+    return targetMs.coerceIn(trimStartMs.coerceAtLeast(0L), lastSeekMs.coerceAtLeast(trimStartMs))
+}
 
 /**
  * 步骤 4：落点选择（对齐 iOS LandingStepTool）。
@@ -73,21 +173,20 @@ private val VIRTUAL_BLUE = Color(0xFF4285F4)
 fun LandingStepTool(
     videoUri: Uri,
     state: GolfCamWorkflowState = GolfCamWorkflowState(),
+    frameRate: Double = 30.0,
     onFlightTimeChange: ((Double) -> Unit)? = null,
 ) {
     val landing = state.landing
+    val trimStartMs = state.trimResult?.startMs ?: 0L
     val impactTimeMs = state.impactFrame?.timeMs ?: state.trimResult?.startMs ?: 0L
     val clipEndMs = state.trimResult?.endMs ?: 0L
-    val tTail = ((clipEndMs - impactTimeMs) / 1000.0).takeIf { it.isFinite() }
-        ?.coerceAtLeast(MIN_FLIGHT_SEC)
-        ?.coerceAtMost(MAX_FLIGHT_SEC)
-        ?: MAX_FLIGHT_SEC
+    val tTail = landingTailSeconds(impactTimeMs, clipEndMs)
 
     val xPct = (landing?.normalizedX ?: 0.5f) * 100f
     val yPct = (landing?.normalizedY ?: 0.5f) * 100f
-    val flightTime = landing?.flightTimeSec ?: 4.5
-    var sliderValue by remember(flightTime) { mutableDoubleStateOf(flightTime.coerceIn(MIN_FLIGHT_SEC, MAX_FLIGHT_SEC)) }
-    val isInVirtualSegment = sliderValue > tTail + 0.02
+    val flightTime = landingFlightTimeSeconds(landing)
+    var sliderValue by remember(flightTime) { mutableDoubleStateOf(flightTime) }
+    val isInVirtualSegment = isLandingVirtualSegment(sliderValue, tTail)
 
     LaunchedEffect(Unit) {
         if (landing == null) onFlightTimeChange?.invoke(sliderValue)
@@ -95,7 +194,7 @@ fun LandingStepTool(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(LANDING_TOOL_VERTICAL_SPACING_DP.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -103,11 +202,11 @@ fun LandingStepTool(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(horizontalAlignment = Alignment.Start) {
-                Text("飞行时间", color = DSColors.shadowGray, fontSize = 10.sp)
+                Text("飞行时间", color = DSColors.shadowGray, fontSize = LANDING_TOOL_LABEL_FONT_SP.sp)
                 Text(
-                    "${"%.1f".format(sliderValue)}s",
+                    formatLandingTimeLabel(sliderValue),
                     color = if (isInVirtualSegment) VIRTUAL_BLUE else DSColors.inkGreen,
-                    fontSize = 14.sp,
+                    fontSize = LANDING_TOOL_VALUE_FONT_SP.sp,
                     fontWeight = FontWeight.SemiBold,
                     fontFamily = FontFamily.Monospace,
                 )
@@ -115,30 +214,43 @@ fun LandingStepTool(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(LANDING_TOOL_MARK_SPACING_DP.dp),
             ) {
-                Icon(Icons.Filled.Flag, null, tint = DSColors.fairway, modifier = Modifier.size(16.dp))
-                Text("落点", color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Image(
+                    painter = painterResource(id = R.drawable.landing_mark),
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(DSColors.cardWhite),
+                    modifier = Modifier.size(LANDING_TOOL_MARK_SIZE_DP.dp),
+                )
+                Text(
+                    "落点",
+                    color = DSColors.inkGreen,
+                    fontSize = LANDING_TOOL_TITLE_FONT_SP.sp,
+                    fontWeight = FontWeight.Medium,
+                )
                 if (isInVirtualSegment) {
                     Text(
                         "虚拟段",
                         color = VIRTUAL_BLUE,
-                        fontSize = 10.sp,
+                        fontSize = LANDING_VIRTUAL_BADGE_FONT_SP.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(VIRTUAL_BLUE.copy(alpha = 0.16f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .clip(RoundedCornerShape(LANDING_VIRTUAL_BADGE_CORNER_RADIUS_DP.dp))
+                            .background(VIRTUAL_BLUE.copy(alpha = 0.2f))
+                            .padding(
+                                horizontal = LANDING_VIRTUAL_BADGE_HORIZONTAL_PADDING_DP.dp,
+                                vertical = LANDING_VIRTUAL_BADGE_VERTICAL_PADDING_DP.dp,
+                            ),
                     )
                 }
             }
 
             Column(horizontalAlignment = Alignment.End) {
-                Text("位置", color = DSColors.shadowGray, fontSize = 10.sp)
+                Text("位置", color = DSColors.shadowGray, fontSize = LANDING_TOOL_LABEL_FONT_SP.sp)
                 Text(
-                    "${"%.0f".format(xPct)}%, ${"%.0f".format(yPct)}%",
+                    formatLandingPositionLabel(xPct, yPct),
                     color = DSColors.inkGreen,
-                    fontSize = 12.sp,
+                    fontSize = LANDING_TOOL_VALUE_FONT_SP.sp,
                     fontWeight = FontWeight.Medium,
                     fontFamily = FontFamily.Monospace,
                 )
@@ -147,8 +259,10 @@ fun LandingStepTool(
 
         LandingThumbnailTimeline(
             videoUri = videoUri,
+            trimStartMs = trimStartMs,
             impactTimeMs = impactTimeMs,
             clipEndMs = clipEndMs,
+            frameRate = frameRate,
             flightTimeSec = sliderValue,
             tTailSec = tTail,
             onTimeChanged = { newTime ->
@@ -157,24 +271,24 @@ fun LandingStepTool(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp),
+                .height(LANDING_TIMELINE_HEIGHT_DP.dp),
         )
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(LANDING_HINT_SPACING_DP.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(
                 Icons.Filled.LocationOn,
                 null,
                 tint = DSColors.fairway,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(LANDING_HINT_ICON_SIZE_DP.dp),
             )
             Text(
                 "滑动时间轴选择落点时间，拖动画面中的落点标记",
                 color = DSColors.shadowGray,
-                fontSize = 12.sp,
+                fontSize = LANDING_HINT_FONT_SP.sp,
             )
         }
     }
@@ -183,8 +297,10 @@ fun LandingStepTool(
 @Composable
 private fun LandingThumbnailTimeline(
     videoUri: Uri,
+    trimStartMs: Long,
     impactTimeMs: Long,
     clipEndMs: Long,
+    frameRate: Double,
     flightTimeSec: Double,
     tTailSec: Double,
     onTimeChanged: (Double) -> Unit,
@@ -192,27 +308,65 @@ private fun LandingThumbnailTimeline(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    var thumbnails by remember(videoUri, impactTimeMs, clipEndMs) { mutableStateOf<List<ImageBitmap?>>(emptyList()) }
-
-    LaunchedEffect(videoUri, impactTimeMs, clipEndMs) {
-        thumbnails = withContext(Dispatchers.IO) {
-            loadLandingThumbnails(
-                context = context,
-                videoUri = videoUri,
+    val thumbnailSampleTimesMs = remember(trimStartMs, impactTimeMs, clipEndMs, frameRate) {
+        List(LANDING_THUMB_COUNT) { index ->
+            val relSec = index * MAX_FLIGHT_SEC / (LANDING_THUMB_COUNT - 1)
+            landingSeekTimeMs(
+                trimStartMs = trimStartMs,
                 impactTimeMs = impactTimeMs,
+                flightTimeSec = relSec,
                 clipEndMs = clipEndMs,
+                frameRate = frameRate,
+            )
+        }
+    }
+    var thumbnails by remember(videoUri, thumbnailSampleTimesMs) {
+        mutableStateOf(
+            GolfCamThumbnailCache.cachedTimelineThumbnails(videoUri, thumbnailSampleTimesMs)
+                .map { it?.asImageBitmap() },
+        )
+    }
+    val priorityTimeMs = landingSeekTimeMs(
+        trimStartMs = trimStartMs,
+        impactTimeMs = impactTimeMs,
+        flightTimeSec = flightTimeSec,
+        clipEndMs = clipEndMs,
+        frameRate = frameRate,
+    )
+    val priorityThumbnailIndex = remember(thumbnailSampleTimesMs, priorityTimeMs) {
+        golfCamThumbnailPriorityIndex(thumbnailSampleTimesMs, priorityTimeMs)
+    }
+    val prioritySampleTimeMs = remember(thumbnailSampleTimesMs, priorityThumbnailIndex, priorityTimeMs) {
+        golfCamThumbnailPrioritySampleTimeMs(thumbnailSampleTimesMs, priorityTimeMs)
+    }
+
+    LaunchedEffect(videoUri, thumbnailSampleTimesMs, priorityThumbnailIndex) {
+        val exactCachedSampleTimes = GolfCamThumbnailCache.cachedExactSampleTimes(videoUri, thumbnailSampleTimesMs)
+        thumbnails = GolfCamThumbnailCache.cachedTimelineThumbnails(videoUri, thumbnailSampleTimesMs)
+            .map { it?.asImageBitmap() }
+        GolfCamThumbnailCache.loadTimelineThumbnails(
+            context = context,
+            videoUri = videoUri,
+            sampleTimesMs = thumbnailSampleTimesMs,
+            priorityTimeMs = prioritySampleTimeMs,
+            skipCachedSampleTimesMs = exactCachedSampleTimes,
+        ) { index, bitmap ->
+            thumbnails = golfCamFillMissingThumbnailSlotsFromNearest(
+                thumbnails.toMutableList().also { current ->
+                    if (index in current.indices) current[index] = bitmap.asImageBitmap()
+                },
             )
         }
     }
 
     BoxWithConstraints(
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(LANDING_TIMELINE_TRACK_CORNER_RADIUS_DP.dp))
             .background(Color(0xFF262626)),
     ) {
         val widthPx = with(density) { maxWidth.toPx() }
-        val pixelsPerSecond = with(density) { 80.dp.toPx() }
-        val thumbWidthPx = with(density) { 32.dp.toPx() }
+        val pixelsPerSecond = with(density) { LANDING_TIMELINE_PIXELS_PER_SECOND_DP.dp.toPx() }
+        val thumbWidthPx = with(density) { LANDING_TIMELINE_THUMB_WIDTH_DP.dp.toPx() }
         val centerX = widthPx / 2f
 
         Canvas(
@@ -274,12 +428,12 @@ private fun DrawScope.drawLandingFilmstrip(
                 dstOffset = IntOffset(x.roundToInt(), 0),
                 dstSize = IntSize(max(1, thumbWidthPx.roundToInt()), size.height.roundToInt()),
                 filterQuality = FilterQuality.Low,
-                alpha = if (virtual) 0.58f else 1f,
+                alpha = if (virtual) LANDING_VIRTUAL_THUMBNAIL_ALPHA else 1f,
             )
         }
         if (virtual) {
             drawRect(
-                color = VIRTUAL_BLUE.copy(alpha = 0.34f),
+                color = VIRTUAL_BLUE.copy(alpha = LANDING_VIRTUAL_OVERLAY_ALPHA),
                 topLeft = Offset(x, 0f),
                 size = Size(thumbWidthPx - 1f, size.height),
             )
@@ -302,7 +456,8 @@ private fun DrawScope.drawTimeMarker(
 ) {
     val x = centerX + ((timeSec - flightTimeSec) * pixelsPerSecond).toFloat()
     if (x < -8f || x > size.width + 8f) return
-    drawRect(color = color, topLeft = Offset(x - 1f, 0f), size = Size(2f, size.height))
+    val markerWidth = LANDING_MIN_TIME_MARKER_WIDTH_DP.dp.toPx()
+    drawRect(color = color, topLeft = Offset(x - markerWidth / 2f, 0f), size = Size(markerWidth, size.height))
     if (label != null) {
         drawContext.canvas.nativeCanvas.drawText(
             label,
@@ -310,7 +465,7 @@ private fun DrawScope.drawTimeMarker(
             14f,
             android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
                 this.color = android.graphics.Color.argb(210, 255, 255, 255)
-                textSize = 24f
+                textSize = LANDING_MIN_TIME_LABEL_FONT_SP.sp.toPx()
                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
             },
         )
@@ -321,47 +476,18 @@ private fun DrawScope.drawTimeMarker(
 private fun CenterTimeIndicator(modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val cx = size.width / 2f
-        val barTop = 4f
-        val barBottom = size.height - 4f
+        val verticalInset = LANDING_CENTER_INDICATOR_VERTICAL_INSET_DP.dp.toPx()
+        val barWidth = LANDING_CENTER_INDICATOR_BAR_WIDTH_DP.dp.toPx()
+        val dotRadius = LANDING_CENTER_INDICATOR_DOT_SIZE_DP.dp.toPx() / 2f
+        val barTop = verticalInset
+        val barBottom = size.height - verticalInset
         drawRoundRect(
             color = Color.White,
-            topLeft = Offset(cx - 2f, barTop),
-            size = Size(4f, barBottom - barTop),
+            topLeft = Offset(cx - barWidth / 2f, barTop),
+            size = Size(barWidth, barBottom - barTop),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f),
         )
-        drawCircle(Color.White, radius = 4f, center = Offset(cx, 4f))
-        drawCircle(Color.White, radius = 4f, center = Offset(cx, size.height - 4f))
+        drawCircle(Color.White, radius = dotRadius, center = Offset(cx, dotRadius))
+        drawCircle(Color.White, radius = dotRadius, center = Offset(cx, size.height - dotRadius))
     }
-}
-
-private fun loadLandingThumbnails(
-    context: android.content.Context,
-    videoUri: Uri,
-    impactTimeMs: Long,
-    clipEndMs: Long,
-): List<ImageBitmap?> {
-    val retriever = MediaMetadataRetriever()
-    return try {
-        retriever.setDataSource(context, videoUri)
-        val metadata = retriever.thumbnailVideoMetadata()
-        List(LANDING_THUMB_COUNT) { index ->
-            val relSec = index * MAX_FLIGHT_SEC / (LANDING_THUMB_COUNT - 1)
-            val targetMs = impactTimeMs + (relSec * 1000).toLong()
-            val safeMs = if (clipEndMs > 33L) min(targetMs, clipEndMs - 33L) else targetMs
-            retriever.getFrameAtTime(
-                max(0L, safeMs) * 1000L,
-                MediaMetadataRetriever.OPTION_CLOSEST,
-            )?.rotatedToVisualOrientation(metadata)?.toLandingBitmap()
-        }
-    } catch (_: Throwable) {
-        emptyList()
-    } finally {
-        retriever.release()
-    }
-}
-
-private fun Bitmap.toLandingBitmap(): ImageBitmap {
-    val scaled = Bitmap.createScaledBitmap(this, 64, 112, true)
-    if (scaled !== this) recycle()
-    return scaled.asImageBitmap()
 }

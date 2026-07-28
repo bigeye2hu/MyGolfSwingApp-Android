@@ -18,6 +18,7 @@ data class V2SwingDayItem(
     val isInProgress: Boolean = false,
     val sessionCount: Int = 1,
     val clipCount: Int,
+    val clipPreviewIds: List<UUID> = emptyList(),
     val clipPreviewUrls: List<String> = emptyList(),
     val extraClipCount: Int = 0,
 )
@@ -30,6 +31,7 @@ data class V2SwingClip(
     val timestamp: LocalDateTime = LocalDateTime.now(),
     val durationSec: Double = 0.0,
     val retention: V2SwingClipRetention = V2SwingClipRetention.TEMPORARY,
+    val sourceLabel: String? = null,
 )
 
 enum class V2SwingClipRetention(val wire: String) {

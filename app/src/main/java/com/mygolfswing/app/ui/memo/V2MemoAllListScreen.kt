@@ -3,6 +3,7 @@ package com.mygolfswing.app.ui.memo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,14 +15,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Note
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -36,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +52,7 @@ import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.V2NavTopBar
+import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import java.util.UUID
@@ -53,16 +62,22 @@ private enum class MemoFilter(val display: String) {
     ALL("全部"), TEXT("文字"), VIDEO("视频"), PINNED("置顶"),
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun V2MemoAllListScreen(
     onBack: () -> Unit,
     onOpenMemo: (UUID) -> Unit,
+    onCreateMemo: () -> Unit = {},
+    onCreateVideoMemo: () -> Unit = {},
+    onCreateTextMemo: () -> Unit = {},
 ) {
     val memos by V2MemoStore.allMemos.collectAsState()
     var filter by rememberSaveable { mutableStateOf(MemoFilter.ALL) }
     var topic by rememberSaveable { mutableStateOf(V2Topic.ALL) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var showSearch by rememberSaveable { mutableStateOf(false) }
 
-    val filtered = remember(memos, filter, topic) {
+    val filtered = remember(memos, filter, topic, query) {
         memos
             .filter { m ->
                 when (filter) {
@@ -73,20 +88,48 @@ fun V2MemoAllListScreen(
                 }
             }
             .filter { topic == V2Topic.ALL || it.topic == topic }
+            .filter { it.matchesListQuery(query) }
             .sortedByDescending { it.createdAt }
+    }
+    val groups = remember(filtered) {
+        val order = mutableListOf<String>()
+        val bucket = linkedMapOf<String, List<V2Memo>>()
+        filtered.forEach { memo ->
+            val key = V2MemoListGrouping.headerKey(memo.createdAt)
+            if (!bucket.containsKey(key)) order.add(key)
+            bucket[key] = bucket[key].orEmpty() + memo
+        }
+        order.map { it to bucket[it].orEmpty() }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(DSColors.warmWhite),
+            .background(DSColors.warmWhite)
+            .v2NavigationBarPadding(),
     ) {
-        V2NavTopBar(title = "全部 Memo", onBack = onBack)
+        V2NavTopBar(
+            title = "全部 Memo",
+            onBack = onBack,
+            trailing = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { showSearch = !showSearch }) {
+                        Icon(Icons.Filled.Search, contentDescription = "搜索", tint = DSColors.fairway)
+                    }
+                    IconButton(onClick = onCreateMemo) {
+                        Icon(Icons.Filled.Add, contentDescription = "新建 Memo", tint = DSColors.fairway)
+                    }
+                }
+            },
+        )
         AllListStatsBar(
             total = memos.size,
             text = memos.count { it.kind == V2MemoKind.TEXT },
             video = memos.count { it.hasVideo },
         )
+        if (showSearch || query.isNotBlank()) {
+            V2MemoSearchBar(query = query, onQueryChange = { query = it }, placeholder = "搜索全部 Memo 标题 / 标签 / 来源")
+        }
         AllListFilterRow(filter = filter, onSelect = { filter = it })
         LazyRow(
             contentPadding = PaddingValues(horizontal = DSSpacing.lg, vertical = 4.dp),
@@ -98,14 +141,146 @@ fun V2MemoAllListScreen(
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
-            verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
+            contentPadding = PaddingValues(vertical = DSSpacing.md),
         ) {
-            items(filtered, key = { it.id }) { memo ->
-                AllListRowCard(memo = memo, onTap = { onOpenMemo(memo.id) })
+            if (filtered.isEmpty()) {
+                item {
+                    Box(modifier = Modifier.padding(horizontal = DSSpacing.lg)) {
+                        AllMemoListEmptyState(
+                            hasAnyMemo = memos.isNotEmpty(),
+                            query = query,
+                            onCreateVideoMemo = onCreateVideoMemo,
+                            onCreateTextMemo = onCreateTextMemo,
+                            onClearFilter = {
+                                filter = MemoFilter.ALL
+                                topic = V2Topic.ALL
+                                query = ""
+                            },
+                        )
+                    }
+                }
+            } else {
+                groups.forEach { (header, items) ->
+                    stickyHeader { V2MemoListSectionHeader(header) }
+                    items(items, key = { it.id }) { memo ->
+                        AllListRowCard(
+                            memo = memo,
+                            onTap = { onOpenMemo(memo.id) },
+                            modifier = Modifier.padding(horizontal = DSSpacing.lg, vertical = 6.dp),
+                        )
+                    }
+                }
+                item { V2MemoNoMoreFooter() }
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+private fun AllMemoListEmptyState(
+    hasAnyMemo: Boolean,
+    query: String,
+    onCreateVideoMemo: () -> Unit,
+    onCreateTextMemo: () -> Unit,
+    onClearFilter: () -> Unit,
+) {
+    val trueEmpty = !hasAnyMemo
+    val isSearchEmpty = hasAnyMemo && query.isNotBlank()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = DSSpacing.xl, vertical = 72.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            imageVector = when {
+                trueEmpty -> Icons.AutoMirrored.Filled.Note
+                isSearchEmpty -> Icons.Filled.Search
+                else -> Icons.Filled.FilterList
+            },
+            contentDescription = null,
+            tint = DSColors.shadowGray,
+            modifier = Modifier.size(if (trueEmpty) 32.dp else 28.dp),
+        )
+        Text(
+            text = when {
+                trueEmpty -> "还没有任何 Memo"
+                isSearchEmpty -> "当前搜索没有结果"
+                else -> "当前筛选下没有 Memo"
+            },
+            color = DSColors.inkGreen,
+            fontSize = if (trueEmpty) 14.sp else 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            text = if (trueEmpty) {
+                "回主页用「+ 新建 Memo」开始记录"
+            } else if (isSearchEmpty) {
+                "换个关键词，或回到全部 Memo"
+            } else {
+                "清除筛选后继续查看全部记录"
+            },
+            color = DSColors.shadowGray,
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(2.dp))
+        if (trueEmpty) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                AllMemoEmptyActionChip(
+                    icon = Icons.Filled.PlayCircle,
+                    label = "视频 Memo",
+                    onClick = onCreateVideoMemo,
+                    background = DSColors.fairway,
+                )
+                AllMemoEmptyActionChip(
+                    icon = Icons.Filled.Add,
+                    label = "随手记",
+                    onClick = onCreateTextMemo,
+                    background = DSColors.deepGreen,
+                )
+            }
+        } else {
+            Text(
+                "清除筛选",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(DSColors.fairway)
+                    .clickable(onClick = onClearFilter)
+                    .padding(horizontal = 16.dp)
+                    .height(32.dp)
+                    .wrapContentHeight(Alignment.CenterVertically),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AllMemoEmptyActionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    background: Color,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(background)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp)
+            .height(32.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -171,10 +346,14 @@ private fun AllListChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AllListRowCard(memo: V2Memo, onTap: () -> Unit) {
+private fun AllListRowCard(
+    memo: V2Memo,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val playable = remember(memo.videoUrl) { memoVideoPlayable(memo.videoUrl) }
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .shadow(3.dp, RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))

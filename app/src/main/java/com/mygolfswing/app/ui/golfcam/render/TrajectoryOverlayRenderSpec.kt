@@ -10,7 +10,9 @@ internal data class HeadGlowAlphas(
 )
 
 internal object TrajectoryOverlayRenderSpec {
-    fun shouldDrawFlyingHead(headProgress: Float): Boolean = headProgress < 1f
+    fun shouldDrawFlyingHead(headProgress: Float): Boolean {
+        return headProgress.isFinite() && headProgress >= 0f && headProgress < 1f
+    }
 
     fun headGlowRadius(
         style: TrackStyle,
@@ -28,11 +30,17 @@ internal object TrajectoryOverlayRenderSpec {
     }
 
     fun headGlowAlphas(glowOpacity: Float): HeadGlowAlphas {
-        val opacity = glowOpacity.coerceIn(0f, 1f)
+        val opacity = (glowOpacity.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f)
         return HeadGlowAlphas(
             outer = 0.35f * opacity,
             body = 0.75f * opacity,
-            core = 0.90f * opacity,
+            core = 0.9f * opacity,
         )
+    }
+
+    fun alphaByte(alpha: Float): Int {
+        return ((alpha.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f) * 255f)
+            .toInt()
+            .coerceIn(0, 255)
     }
 }

@@ -27,7 +27,7 @@ internal object TrajectoryOverlayFrameSampler {
         elapsedSec: Double,
         legacyProgressAtTime: ((Double) -> Double)? = null,
     ): TrajectoryOverlayFrameSnapshot? {
-        val headProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+        val rawHeadProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
             GolfCamSpeedConfig.progress(elapsedSec / timing.totalDurationSec, style.speedLevel)
         } else {
             legacyProgressAtTime?.invoke(elapsedSec)
@@ -36,7 +36,8 @@ internal object TrajectoryOverlayFrameSampler {
                     timing = timing,
                     params = TrajectoryMotionModel.parametersFromStyle(style),
                 ).progressAtTime(elapsedSec)
-        }.toFloat().coerceIn(0f, 1f)
+        }
+        val headProgress = rawHeadProgress.takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0f
 
         if (headProgress <= 0f) return null
 

@@ -10,20 +10,25 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Note
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -51,7 +56,7 @@ fun V2MemoHomeHeader(totalCount: Int, onCreate: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = DSSpacing.lg)
-            .padding(top = DSSpacing.md, bottom = 12.dp),
+            .padding(top = 52.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -59,11 +64,15 @@ fun V2MemoHomeHeader(totalCount: Int, onCreate: () -> Unit) {
                 Icon(Icons.Filled.Description, null, tint = DSColors.inkGreen, modifier = Modifier.size(20.dp))
                 Text("记录 Memo", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen)
             }
-            Row(modifier = Modifier.padding(start = 4.dp, top = 4.dp)) {
-                Text("我的训练记录 · ", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = DSColors.shadowGray)
+            Row(
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("我的训练记录 ·", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = DSColors.shadowGray)
                 Text("${totalCount}条", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway)
             }
         }
+        Spacer(Modifier.width(12.dp))
         Row(
             modifier = Modifier
                 .shadow(6.dp, RoundedCornerShape(50), spotColor = DSColors.fairway.copy(0.25f))
@@ -71,11 +80,12 @@ fun V2MemoHomeHeader(totalCount: Int, onCreate: () -> Unit) {
                 .background(DSColors.fairway)
                 .clickable(onClick = onCreate)
                 .padding(horizontal = 18.dp)
+                .widthIn(min = 132.dp)
                 .height(44.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Icon(Icons.Filled.Add, null, tint = Color.White, modifier = Modifier.size(14.dp))
+            Icon(Icons.Filled.Add, null, tint = Color.White, modifier = Modifier.size(11.dp))
             Text("新建 Memo", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
         }
     }
@@ -96,11 +106,11 @@ fun V2MemoHomeSectionHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = DSColors.fairway, modifier = Modifier.size(16.dp))
+            Icon(icon, null, tint = DSColors.fairway, modifier = Modifier.size(width = 16.dp, height = 14.dp))
             Spacer(Modifier.width(8.dp))
             Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen)
             Text(
-                " $visibleCount / $totalCount",
+                "$visibleCount / $totalCount",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 color = DSColors.shadowGray,
@@ -111,13 +121,14 @@ fun V2MemoHomeSectionHeader(
         Row(
             modifier = Modifier.clickable(onClick = onMore),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text("更多", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway)
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 null,
                 tint = DSColors.fairway,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(9.dp),
             )
         }
     }
@@ -154,17 +165,28 @@ fun V2MemoSectionEmptyCard(kind: V2MemoSectionEmptyKind, onTap: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = DSSpacing.lg)
-            .shadow(3.dp, RoundedCornerShape(18.dp), spotColor = DSColors.fairway.copy(0.07f))
+            .shadow(
+                elevation = 14.dp,
+                shape = RoundedCornerShape(18.dp),
+                ambientColor = DSColors.fairway.copy(alpha = 0.07f),
+                spotColor = DSColors.fairway.copy(alpha = 0.07f),
+            )
             .clip(RoundedCornerShape(18.dp))
             .background(Brush.linearGradient(colors))
             .border(1.dp, Color(0xFFCFC9BA), RoundedCornerShape(18.dp))
             .clickable(onClick = onTap)
             .padding(horizontal = 16.dp, vertical = 30.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(icon, null, tint = DSColors.shadowGray.copy(0.55f), modifier = Modifier.size(28.dp))
+        Box(
+            modifier = Modifier.size(28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = DSColors.shadowGray.copy(0.55f), modifier = Modifier.size(26.dp))
+        }
         Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium, color = Color(0xFF6B7280), modifier = Modifier.padding(top = 8.dp))
-        Text(subtitle, fontSize = 12.sp, color = Color(0xFF9CA3AF), textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+        Text(subtitle, fontSize = 12.sp, color = Color(0xFF9CA3AF), textAlign = TextAlign.Center)
         Text(cta, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway, modifier = Modifier.padding(top = 8.dp))
     }
 }
@@ -180,71 +202,112 @@ fun V2MemoHomeAIInsightCard(
     trainingGoal: String?,
     onContinueChat: () -> Unit,
 ) {
-    val empty = memoSampleCount == 0
+    val hasInsightContext =
+        !statusSummary.isNullOrBlank() ||
+            !currentFocus.isNullOrBlank() ||
+            !painPoint.isNullOrBlank() ||
+            !trainingGoal.isNullOrBlank()
+    val empty = memoSampleCount == 0 && !hasInsightContext
     val title = when {
-        empty -> "开始记录，解锁 AI 洞察"
-        !currentFocus.isNullOrBlank() -> "当前重点：$currentFocus"
-        !trainingGoal.isNullOrBlank() -> "训练目标：$trainingGoal"
-        !statusSummary.isNullOrBlank() -> "AI 已更新训练洞察"
-        else -> "继续积累训练样本"
+        empty -> "还没有洞察内容"
+        !painPoint.isNullOrBlank() -> "本周值得关注"
+        hasInsightContext -> "今天的关键点"
+        else -> "开始记录你的训练"
     }
-    val body = when {
-        empty -> "写下或录制几条 Memo 后，AI 会结合你的练习内容给出个性化建议。"
-        !statusSummary.isNullOrBlank() -> statusSummary
-        !painPoint.isNullOrBlank() -> "最近可以优先关注「$painPoint」。继续记录视频和随手记，AI 会帮你更新训练重点。"
-        else -> "你最近记录了 $memoSampleCount 条训练内容。继续保持记录节奏，AI 档案会随着聊天和 Memo 自动沉淀。"
+    val bodySegments = insightBodySegments(
+        empty = empty,
+        statusSummary = statusSummary,
+        currentFocus = currentFocus,
+        painPoint = painPoint,
+        trainingGoal = trainingGoal,
+    )
+    val body = buildAnnotatedString {
+        bodySegments.forEach { segment ->
+            withStyle(
+                SpanStyle(
+                    color = if (segment.emphasis) DSColors.fairway else Color(0xFF6C757D),
+                    fontWeight = if (segment.emphasis) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+            ) {
+                append(segment.text)
+            }
+        }
     }
-    Column(
+    val sourceHint = when {
+        empty -> "📊 暂无数据"
+        memoSampleCount > 0 -> "📊 基于最近 ${minOf(memoSampleCount, 7)} 条 Memo"
+        else -> "📊 暂无 Memo 样本"
+    }
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = DSSpacing.lg)
-            .shadow(4.dp, RoundedCornerShape(24.dp), spotColor = DSColors.fairway.copy(0.08f))
+            .heightIn(min = 190.dp)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = DSColors.fairway.copy(alpha = 0.08f),
+                spotColor = DSColors.fairway.copy(alpha = 0.08f),
+            )
             .clip(RoundedCornerShape(24.dp))
             .background(Brush.linearGradient(listOf(Color(0xFFD8E2DC), DSColors.warmWhite)))
             .border(1.dp, DSColors.goldBright.copy(0.08f), RoundedCornerShape(24.dp))
-            .padding(18.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFE9DCC2)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.AutoAwesome, null, tint = DSColors.goldBright, modifier = Modifier.size(14.dp))
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "AI 教练 · 我的 MEMO 洞察",
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = DSColors.fairway,
-                letterSpacing = 0.6.sp,
-            )
-        }
-        Text(
-            text = title,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = DSColors.inkGreen,
-            modifier = Modifier.padding(top = 12.dp),
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 60.dp, y = (-60).dp)
+                .size(180.dp)
+                .clip(CircleShape)
+                .background(Brush.radialGradient(listOf(DSColors.goldBright.copy(alpha = 0.18f), Color.Transparent))),
         )
-        Text(
-            text = body,
-            fontSize = 14.sp,
-            color = Color(0xFF6C757D),
-            lineHeight = 22.sp,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
+                .padding(start = 18.dp, top = 18.dp, end = 18.dp, bottom = 54.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFE9DCC2)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.AutoAwesome, null, tint = DSColors.goldBright, modifier = Modifier.size(14.dp))
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "AI 教练 · 我的 Memo 洞察",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = DSColors.fairway,
+                    letterSpacing = 0.6.sp,
+                )
+            }
+            Text(
+                text = title,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = DSColors.inkGreen,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Text(
+                text = body,
+                fontSize = 14.sp,
+                lineHeight = 22.sp,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 18.dp, bottom = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                if (empty) "基于你的 Memo 与目标" else "基于最近 Memo",
+                sourceHint,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 color = DSColors.shadowGray,
@@ -258,19 +321,100 @@ fun V2MemoHomeAIInsightCard(
                     if (empty) "记录后解锁" else "继续聊聊",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (empty) DSColors.shadowGray else DSColors.fairway,
+                    color = DSColors.fairway,
                 )
-                if (!empty) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        null,
-                        tint = DSColors.fairway,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    null,
+                    tint = DSColors.fairway,
+                    modifier = Modifier.size(9.dp),
+                )
             }
         }
     }
+}
+
+private data class InsightTextSegment(
+    val text: String,
+    val emphasis: Boolean = false,
+)
+
+private fun insightBodySegments(
+    empty: Boolean,
+    statusSummary: String?,
+    currentFocus: String?,
+    painPoint: String?,
+    trainingGoal: String?,
+): List<InsightTextSegment> {
+    if (empty) {
+        return listOf(InsightTextSegment("记录你的第一条 Memo 后，AI 教练将为你生成专属训练分析。"))
+    }
+
+    val summary = statusSummary?.trim().orEmpty()
+    if (summary.isNotEmpty()) {
+        val keywords = listOfNotNull(currentFocus, painPoint, trainingGoal)
+            .map { it.trim() }
+            .filter { it.length in 2..10 }
+            .distinct()
+            .sortedByDescending { it.length }
+        return tokenizeInsightSummary(summary, keywords)
+    }
+
+    if (!currentFocus.isNullOrBlank()) {
+        return buildList {
+            add(InsightTextSegment("最近你在 "))
+            add(InsightTextSegment(currentFocus, emphasis = true))
+            add(InsightTextSegment(" 上花了不少功夫"))
+            if (!painPoint.isNullOrBlank()) {
+                add(InsightTextSegment("，重点注意 "))
+                add(InsightTextSegment(painPoint, emphasis = true))
+                add(InsightTextSegment(" 这个老毛病"))
+            }
+            if (!trainingGoal.isNullOrBlank()) {
+                add(InsightTextSegment("，继续朝 "))
+                add(InsightTextSegment(trainingGoal, emphasis = true))
+                add(InsightTextSegment(" 稳定推进"))
+            }
+            add(InsightTextSegment("。"))
+        }
+    }
+
+    return listOf(
+        InsightTextSegment("还没有看到足够的练习记录。试着记录一段 "),
+        InsightTextSegment("挥杆视频", emphasis = true),
+        InsightTextSegment(" 或一条 "),
+        InsightTextSegment("随手心得", emphasis = true),
+        InsightTextSegment("，让 AI 教练给你画一张专属技术档案。"),
+    )
+}
+
+private fun tokenizeInsightSummary(text: String, keywords: List<String>): List<InsightTextSegment> {
+    if (keywords.isEmpty()) return listOf(InsightTextSegment(text))
+
+    val segments = mutableListOf<InsightTextSegment>()
+    var cursor = 0
+    while (cursor < text.length) {
+        val match = keywords
+            .mapNotNull { keyword ->
+                val index = text.indexOf(keyword, startIndex = cursor)
+                if (index >= 0) keyword to index else null
+            }
+            .minWithOrNull(compareBy<Pair<String, Int>> { it.second }.thenByDescending { it.first.length })
+
+        if (match == null) {
+            segments += InsightTextSegment(text.substring(cursor))
+            break
+        }
+
+        val (keyword, index) = match
+        if (index > cursor) {
+            segments += InsightTextSegment(text.substring(cursor, index))
+        }
+        segments += InsightTextSegment(keyword, emphasis = true)
+        cursor = index + keyword.length
+    }
+
+    return segments.ifEmpty { listOf(InsightTextSegment(text)) }
 }
 
 @Composable
@@ -280,13 +424,19 @@ fun V2MemoHomeFooter(totalCount: Int, onViewAll: () -> Unit) {
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(DSColors.mistGreen.copy(0.12f), DSColors.warmWhite)))
             .padding(horizontal = DSSpacing.lg)
-            .padding(top = 24.dp, bottom = 32.dp),
+            .padding(top = 24.dp, bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(6.dp, RoundedCornerShape(50), spotColor = DSColors.fairway.copy(0.15f))
+                .shadow(
+                    elevation = 6.dp,
+                    shape = RoundedCornerShape(50),
+                    ambientColor = DSColors.fairway.copy(alpha = 0.15f),
+                    spotColor = DSColors.fairway.copy(alpha = 0.15f),
+                )
                 .clip(RoundedCornerShape(50))
                 .background(DSColors.cardWhite)
                 .border(1.dp, DSColors.fairway, RoundedCornerShape(50))
@@ -295,7 +445,7 @@ fun V2MemoHomeFooter(totalCount: Int, onViewAll: () -> Unit) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Layers, null, tint = DSColors.fairway, modifier = Modifier.size(16.dp))
+            Icon(Icons.Filled.Layers, null, tint = DSColors.fairway, modifier = Modifier.size(13.dp))
             Spacer(Modifier.width(8.dp))
             Text("查看全部 Memo", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway)
             Spacer(Modifier.width(8.dp))
@@ -311,7 +461,6 @@ fun V2MemoHomeFooter(totalCount: Int, onViewAll: () -> Unit) {
             )
         }
         Row(
-            modifier = Modifier.padding(top = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -334,7 +483,7 @@ fun V2MemoHomeFooter(totalCount: Int, onViewAll: () -> Unit) {
 
 /** Section 图标预设 */
 object V2MemoHomeIcons {
-    val videoNotes = Icons.Filled.PlayCircle
-    val textNotes = Icons.AutoMirrored.Filled.Note
-    val swingRecords = Icons.Filled.Videocam
+    val videoNotes = Icons.AutoMirrored.Filled.Article
+    val textNotes = Icons.Filled.ChatBubble
+    val swingRecords = Icons.Filled.SmartDisplay
 }

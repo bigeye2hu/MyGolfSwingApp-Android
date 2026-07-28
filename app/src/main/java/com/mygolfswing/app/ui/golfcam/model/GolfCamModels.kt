@@ -9,8 +9,15 @@ import kotlin.math.roundToInt
 
 // ─── 几何基础 ──────────────────────────────────────────────────────────────────
 
+private fun finiteNormalizedCoordinate(value: Float, fallback: Float): Float {
+    return value.takeIf { it.isFinite() } ?: fallback
+}
+
 data class NormalizedPoint(val x: Float, val y: Float) {
-    fun toOffset(width: Float, height: Float) = Offset(x * width, y * height)
+    fun toOffset(width: Float, height: Float) = Offset(
+        finiteNormalizedCoordinate(x, 0.5f) * finiteNormalizedCoordinate(width, 1f),
+        finiteNormalizedCoordinate(y, 0.5f) * finiteNormalizedCoordinate(height, 1f),
+    )
 }
 
 /** 三次贝塞尔路径（归一化坐标 0~1）*/
@@ -21,17 +28,30 @@ data class BezierPath(
     val p3: NormalizedPoint,
 ) {
     fun point(t: Float): NormalizedPoint {
-        val mt = 1f - t
+        val safeT = finiteNormalizedCoordinate(t, 0f).coerceIn(0f, 1f)
+        val safeP0 = p0.finiteOrCenter()
+        val safeP1 = p1.finiteOrCenter()
+        val safeP2 = p2.finiteOrCenter()
+        val safeP3 = p3.finiteOrCenter()
+        val mt = 1f - safeT
         return NormalizedPoint(
-            x = mt * mt * mt * p0.x + 3 * mt * mt * t * p1.x + 3 * mt * t * t * p2.x + t * t * t * p3.x,
-            y = mt * mt * mt * p0.y + 3 * mt * mt * t * p1.y + 3 * mt * t * t * p2.y + t * t * t * p3.y,
+            x = mt * mt * mt * safeP0.x + 3 * mt * mt * safeT * safeP1.x + 3 * mt * safeT * safeT * safeP2.x + safeT * safeT * safeT * safeP3.x,
+            y = mt * mt * mt * safeP0.y + 3 * mt * mt * safeT * safeP1.y + 3 * mt * safeT * safeT * safeP2.y + safeT * safeT * safeT * safeP3.y,
         )
     }
 
     fun pointAtArcProgress(progress: Float, arcTable: ArcLengthTable): NormalizedPoint {
-        if (arcTable.totalLength <= 0f) return point(progress.coerceIn(0f, 1f))
-        val u = arcTable.uAtArcLength(arcTable.totalLength * progress.coerceIn(0f, 1f))
+        val safeProgress = finiteNormalizedCoordinate(progress, 0f).coerceIn(0f, 1f)
+        if (!arcTable.totalLength.isFinite() || arcTable.totalLength <= 0f) return point(safeProgress)
+        val u = arcTable.uAtArcLength(arcTable.totalLength * safeProgress)
         return point(u)
+    }
+
+    private fun NormalizedPoint.finiteOrCenter(): NormalizedPoint {
+        return NormalizedPoint(
+            x = finiteNormalizedCoordinate(x, 0.5f),
+            y = finiteNormalizedCoordinate(y, 0.5f),
+        )
     }
 }
 
@@ -252,25 +272,27 @@ object TrajectoryAlgorithmManager {
 // ─── 弧长表（均匀弧长采样，O(1) 反查）──────────────────────────────────────────
 
 class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
-    private val uSamples = FloatArray(sampleCount + 1) { it.toFloat() / sampleCount }
-    val arcLengths = FloatArray(sampleCount + 1)
+    private val safeSampleCount = sampleCount.coerceAtLeast(1)
+    private val uSamples = FloatArray(safeSampleCount + 1) { it.toFloat() / safeSampleCount }
+    val arcLengths = FloatArray(safeSampleCount + 1)
 
     val totalLength: Float
 
     init {
         var prev = bezier.point(0f)
-        for (i in 1..sampleCount) {
+        for (i in 1..safeSampleCount) {
             val curr = bezier.point(uSamples[i])
             val dx = curr.x - prev.x
             val dy = curr.y - prev.y
             arcLengths[i] = arcLengths[i - 1] + kotlin.math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
             prev = curr
         }
-        totalLength = arcLengths[sampleCount]
+        totalLength = arcLengths[safeSampleCount].takeIf { it.isFinite() } ?: 0f
     }
 
     fun uAtArcLength(s: Float): Float {
-        val target = s.coerceIn(0f, totalLength)
+        val safeTotal = totalLength.takeIf { it.isFinite() && it > 0f } ?: return 0f
+        val target = finiteNormalizedCoordinate(s, 0f).coerceIn(0f, safeTotal)
         var lo = 0; var hi = arcLengths.size - 1
         while (lo < hi - 1) {
             val mid = (lo + hi) / 2
@@ -282,7 +304,7 @@ class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
     }
 
     fun arcLengthAtU(u: Float): Float {
-        val target = u.coerceIn(0f, 1f)
+        val target = finiteNormalizedCoordinate(u, 0f).coerceIn(0f, 1f)
         var lo = 0; var hi = uSamples.size - 1
         while (lo < hi - 1) {
             val mid = (lo + hi) / 2
@@ -303,8 +325,11 @@ class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
     }
 
     fun apexProgress(): Float {
-        if (totalLength <= 0f) return 0.6f
-        return (arcLengthAtU(apexU()) / totalLength).coerceIn(0.05f, 0.95f)
+        if (!totalLength.isFinite() || totalLength <= 0f) return 0.6f
+        return (arcLengthAtU(apexU()) / totalLength)
+            .takeIf { it.isFinite() }
+            ?.coerceIn(0.05f, 0.95f)
+            ?: 0.6f
     }
 }
 
@@ -721,9 +746,13 @@ object GolfCamSpeedConfig {
     const val DEFAULT_LEVEL = 0.45
     const val STEP = 0.05
 
-    fun clamp(v: Double) = v.coerceIn(MIN_LEVEL, MAX_LEVEL)
+    fun clamp(v: Double) = v.takeIf { it.isFinite() }?.coerceIn(MIN_LEVEL, MAX_LEVEL) ?: DEFAULT_LEVEL
     fun normalized(v: Double) = (clamp(v) - MIN_LEVEL) / (MAX_LEVEL - MIN_LEVEL)
     fun percentText(v: Double) = "${(clamp(v) * 100).toInt()}%"
+
+    private fun finiteDouble(value: Double, fallback: Double): Double {
+        return value.takeIf { it.isFinite() } ?: fallback
+    }
 
     private fun calibratedGamma(v: Double): Double {
         val x = normalized(v)
@@ -734,7 +763,7 @@ object GolfCamSpeedConfig {
     }
 
     fun progress(timeProgress: Double, speedLevel: Double): Double {
-        val tau = timeProgress.coerceIn(0.0, 1.0)
+        val tau = finiteDouble(timeProgress, fallback = 0.0).coerceIn(0.0, 1.0)
         if (tau <= 0.0) return 0.0
         if (tau >= 1.0) return 1.0
         return tau.pow(calibratedGamma(speedLevel)).coerceIn(0.0, 1.0)
@@ -765,10 +794,10 @@ object GolfCamSpeedConfig {
         frameRate: Double = 30.0,
         updateIntervalFrames: Int = 2,
     ): Double {
-        val dur = max(totalDurationSec, 1e-6)
-        val elapsed = max(0.0, elapsedSec)
+        val dur = max(finiteDouble(totalDurationSec, fallback = 1e-6), 1e-6)
+        val elapsed = max(0.0, finiteDouble(elapsedSec, fallback = 0.0))
         if (elapsed >= dur) return 1.0
-        val fps = if (frameRate > 1.0) frameRate else 30.0
+        val fps = finiteDouble(frameRate, fallback = 30.0).takeIf { it > 1.0 } ?: 30.0
         val frameIndex = (elapsed * fps).toInt()
         val sampledFrame = frameIndex - (frameIndex % max(updateIntervalFrames, 1))
         val sampledTime = sampledFrame / fps
@@ -783,9 +812,10 @@ object GolfCamSpeedConfig {
         frameRate: Double = 30.0,
     ): Int {
         val p = displayProgress(elapsedSec, totalDurationSec, speedLevel, frameRate = frameRate)
-        val final = totalDistance.roundToInt()
+        val safeDistance = GolfCamDistanceConfig.clamp(totalDistance)
+        val final = safeDistance.roundToInt()
         if (p >= 1.0) return max(0, final)
-        return max(0, min(final, (totalDistance * p).toInt()))
+        return max(0, min(final, (safeDistance * p).toInt()))
     }
 
     fun visibleTailStartProgress(
@@ -794,8 +824,8 @@ object GolfCamSpeedConfig {
         activeAlgorithm: TrajectoryAlgorithmKind,
         apexProgress: Double,
     ): Double {
-        val head = headProgress.coerceIn(0.0, 1.0)
-        val rawTailPercent = (tailHalfLife / 100.0).coerceIn(0.0, 1.0)
+        val head = finiteDouble(headProgress, fallback = 0.0).coerceIn(0.0, 1.0)
+        val rawTailPercent = (finiteDouble(tailHalfLife, fallback = 70.0) / 100.0).coerceIn(0.0, 1.0)
         if (rawTailPercent >= 0.995) return 0.0
 
         if (activeAlgorithm != TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
@@ -803,7 +833,7 @@ object GolfCamSpeedConfig {
             return max(0.0, head - tailLength)
         }
 
-        val apex = apexProgress.coerceIn(0.05, 0.95)
+        val apex = finiteDouble(apexProgress, fallback = 0.5).coerceIn(0.05, 0.95)
         val visualTailPercent = rawTailPercent.coerceIn(0.16, 0.42)
         val requestedTailStart = max(0.0, head - rawTailPercent)
 
@@ -831,12 +861,14 @@ object GolfCamSpeedConfig {
 object GolfCamDistanceConfig {
     const val MIN_DISTANCE = 10.0
     const val MAX_DISTANCE = 1000.0
-    const val MAX_INPUT_DIGITS = 4
+    const val DEFAULT_DISTANCE = 150.0
 
-    fun clamp(distance: Double): Double = distance.coerceIn(MIN_DISTANCE, MAX_DISTANCE)
+    fun clamp(distance: Double): Double {
+        return distance.takeIf { it.isFinite() }?.coerceIn(MIN_DISTANCE, MAX_DISTANCE) ?: DEFAULT_DISTANCE
+    }
 
     fun inputText(raw: String): String {
-        return raw.filter { it.isDigit() }.take(MAX_INPUT_DIGITS)
+        return raw.filter { it.isDigit() }
     }
 
     fun displayText(distance: Double): String = clamp(distance).toInt().toString()
@@ -890,11 +922,27 @@ val defaultTrackColorPresets = listOf(
     TrackColorPreset("珍珠白", listOf(0xFFC3CCC8, 0xFFF0F6F3, 0xFFFFFFFF), 24f, 0.46f, 0.88f),
 )
 
+const val GOLF_CAM_DEFAULT_PRESET_NAME = "青蓝薄荷"
+const val GOLF_CAM_DEFAULT_COLOR_HEX = 0xFF55F3D8
+
+fun defaultGolfCamTrackColorPreset(): TrackColorPreset {
+    return defaultTrackColorPresets.firstOrNull { it.name == GOLF_CAM_DEFAULT_PRESET_NAME }
+        ?: defaultTrackColorPresets.first()
+}
+
 enum class DistanceUnit(val displayName: String, val abbreviation: String) {
     YARDS("码", "YDS"),
     METERS("米", "M");
 
     fun toggle(): DistanceUnit = if (this == YARDS) METERS else YARDS
+}
+
+internal fun parseGolfCamDistanceUnit(raw: String?, fallback: DistanceUnit = DistanceUnit.YARDS): DistanceUnit {
+    return when (raw?.trim()?.lowercase()) {
+        "yards", "yard", "yd", "yds" -> DistanceUnit.YARDS
+        "meters", "meter", "m" -> DistanceUnit.METERS
+        else -> fallback
+    }
 }
 
 enum class TrackEffectType(val displayName: String) {
@@ -928,8 +976,60 @@ data class TrackRenderTuning(
     val highlightFalloffPower: Float = 0.82f,
 )
 
+internal fun TrackRenderTuning.clampedForGolfCamProduction(): TrackRenderTuning {
+    fun finite(value: Float, min: Float, max: Float, fallback: Float): Float {
+        return value.takeIf { it.isFinite() }?.coerceIn(min, max) ?: fallback.coerceIn(min, max)
+    }
+
+    val defaults = TrackRenderTuning()
+    var start = highlightStart
+    var end = highlightEnd
+    var peak = highlightPeak
+    if (abs(start - 0.20f) < 0.001f &&
+        abs(end - 0.60f) < 0.001f &&
+        abs(peak - 0.42f) < 0.001f
+    ) {
+        start = 0.00f
+        end = 0.96f
+        peak = 0.32f
+    }
+    if (abs(start - 0.18f) < 0.001f &&
+        abs(end - 0.96f) < 0.001f
+    ) {
+        start = 0.00f
+    }
+
+    start = finite(start, 0.00f, 0.90f, defaults.highlightStart)
+    end = finite(end, 0.05f, 1.00f, defaults.highlightEnd)
+    if (end <= start + 0.05f) {
+        end = min(1.0f, start + 0.05f)
+    }
+    peak = finite(peak, start, end, defaults.highlightPeak)
+
+    return copy(
+        bandAlphaMultiplier = finite(bandAlphaMultiplier, 0.00f, 1.40f, defaults.bandAlphaMultiplier),
+        bodyAlphaBase = finite(bodyAlphaBase, 0.00f, 0.16f, defaults.bodyAlphaBase),
+        bodyAlphaScale = finite(bodyAlphaScale, 0.50f, 1.20f, defaults.bodyAlphaScale),
+        glowBlurMultiplier = finite(glowBlurMultiplier, 0.25f, 1.20f, defaults.glowBlurMultiplier),
+        outerGlowMultiplier = finite(outerGlowMultiplier, 0.20f, 1.00f, defaults.outerGlowMultiplier),
+        fillGlowMultiplier = finite(fillGlowMultiplier, 0.08f, 0.45f, defaults.fillGlowMultiplier),
+        highlightWidthRatio = finite(highlightWidthRatio, 0.30f, 0.85f, defaults.highlightWidthRatio),
+        highlightAlphaMax = finite(highlightAlphaMax, 0.00f, 0.90f, defaults.highlightAlphaMax),
+        highlightWhiteLiftBase = finite(highlightWhiteLiftBase, 0.00f, 0.00f, defaults.highlightWhiteLiftBase),
+        highlightWhiteLiftScale = finite(highlightWhiteLiftScale, 0.00f, 0.00f, defaults.highlightWhiteLiftScale),
+        highlightStart = start,
+        highlightEnd = end,
+        highlightPeak = peak,
+        highlightStrength = finite(highlightStrength, 0.00f, 1.60f, defaults.highlightStrength),
+        widthTaperPower = finite(widthTaperPower, 0.70f, 2.20f, defaults.widthTaperPower),
+        apexThinStrength = finite(apexThinStrength, 0.00f, 0.85f, defaults.apexThinStrength),
+        apexThinRadius = finite(apexThinRadius, 0.04f, 0.35f, defaults.apexThinRadius),
+        highlightFalloffPower = finite(highlightFalloffPower, 0.45f, 1.80f, defaults.highlightFalloffPower),
+    )
+}
+
 data class TrackStyle(
-    val colorPreset: TrackColorPreset = defaultTrackColorPresets.getOrElse(2) { defaultTrackColorPresets.first() },
+    val colorPreset: TrackColorPreset = defaultGolfCamTrackColorPreset(),
     val colorHex: Long? = null,
     val colorAlpha: Double = 0.75,
     val glowOpacity: Double = colorPreset.glowAlpha.toDouble(),
@@ -958,7 +1058,12 @@ data class TrackStyle(
     val effectType: TrackEffectType = TrackEffectType.GRADIENT,
     val renderTuning: TrackRenderTuning = TrackRenderTuning(),
 ) {
-    fun primaryColorArgb(): Long = colorHex ?: colorPreset.bandOuterColor()
+    fun primaryColorArgb(): Long = colorHex
+        ?: if (colorPreset.name == GOLF_CAM_DEFAULT_PRESET_NAME) {
+            GOLF_CAM_DEFAULT_COLOR_HEX
+        } else {
+            colorPreset.bandOuterColor()
+        }
 }
 
 object GolfCamTrailGeometry {
@@ -976,20 +1081,28 @@ object GolfCamTrailGeometry {
         apexProgress: Float,
         tuning: TrackRenderTuning,
     ): Float {
-        val safeHeight = videoHeight.coerceAtLeast(1f)
-        val pct = (widthPct.toFloat().coerceIn(0f, 160f)) / 100f
+        fun finiteFloat(value: Float, fallback: Float): Float {
+            return value.takeIf { it.isFinite() } ?: fallback
+        }
+        fun finiteDouble(value: Double, fallback: Double): Double {
+            return value.takeIf { it.isFinite() } ?: fallback
+        }
+
+        val safeTuning = tuning.clampedForGolfCamProduction()
+        val safeHeight = finiteFloat(videoHeight, fallback = 1f).coerceAtLeast(1f)
+        val pct = (finiteDouble(widthPct, fallback = 40.0).toFloat().coerceIn(0f, 160f)) / 100f
         val headHalfWidth = safeHeight * TRAIL_WIDTH_HEAD_RATIO * GLOW_WIDTH_MULTIPLIER
         val minTailHalfWidth = safeHeight * TAIL_WIDTH_MIN_RATIO * GLOW_WIDTH_MULTIPLIER
         val maxTailHalfWidth = safeHeight * TAIL_WIDTH_MAX_RATIO * GLOW_WIDTH_MULTIPLIER
         val tailHalfWidth = minTailHalfWidth + (maxTailHalfWidth - minTailHalfWidth) * pct
-        val p = globalProgress.coerceIn(0f, 1f)
-        val taper = (1f - p).toDouble().pow(tuning.widthTaperPower.toDouble()).toFloat()
+        val p = finiteFloat(globalProgress, fallback = 0f).coerceIn(0f, 1f)
+        val taper = (1f - p).toDouble().pow(safeTuning.widthTaperPower.toDouble()).toFloat()
         val halfWidth = headHalfWidth + (tailHalfWidth - headHalfWidth) * taper
-        val apex = apexProgress.coerceIn(0.05f, 0.95f)
-        val radius = tuning.apexThinRadius.coerceAtLeast(0.001f)
+        val apex = finiteFloat(apexProgress, fallback = 0.5f).coerceIn(0.05f, 0.95f)
+        val radius = safeTuning.apexThinRadius.coerceAtLeast(0.001f)
         val distance = (abs(p - apex) / radius).coerceIn(0f, 1f)
         val apexWeight = 1f - distance * distance * (3f - 2f * distance)
-        val thinFactor = 1f - tuning.apexThinStrength * apexWeight
+        val thinFactor = 1f - safeTuning.apexThinStrength * apexWeight
         return (2f * halfWidth * thinFactor).coerceAtLeast(0.10f)
     }
 }
@@ -1010,6 +1123,19 @@ private fun lerpArgb(a: Long, b: Long, t: Float): Long {
 
 // ─── 工作流步骤输出（对齐 iOS GolfCamWorkflowState 各步骤）───────────────────────
 
+data class GolfCamVideoConfig(
+    val durationMs: Long = 1L,
+    val frameRate: Double = 30.0,
+    val visualWidth: Int = 1,
+    val visualHeight: Int = 1,
+    val rotationDegrees: Int = 0,
+) {
+    val aspectRatio: Float
+        get() = visualWidth.coerceAtLeast(1).toFloat() / visualHeight.coerceAtLeast(1).toFloat()
+
+    val isPortrait: Boolean get() = visualHeight >= visualWidth
+}
+
 data class TrimResult(val startMs: Long, val endMs: Long)
 
 /** 音频检测原始候选（绝对时间） */
@@ -1017,7 +1143,8 @@ data class ImpactCandidate(
     val timeSec: Double,
     val confidence: Float,  // 0-1，相对最高分归一化
 ) {
-    val confidencePercent: Int get() = (confidence * 100).toInt()
+    val confidencePercent: Int
+        get() = ((confidence.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f) * 100).toInt()
 }
 
 /** UI 层候选帧（相对裁剪片段的帧索引） */
@@ -1026,7 +1153,8 @@ data class CandidateImpactFrame(
     val confidence: Float,
     val timeSec: Double,
 ) {
-    val confidencePercent: Int get() = (confidence * 100).toInt()
+    val confidencePercent: Int
+        get() = ((confidence.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f) * 100).toInt()
 }
 
 data class ImpactFrameSelection(

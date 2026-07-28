@@ -5,10 +5,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,23 +50,48 @@ fun V2VideoMemoLargeCard(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(96.dp)
-            .shadow(2.dp, RoundedCornerShape(14.dp))
+            .height(109.dp)
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(14.dp),
+                ambientColor = Color.Black.copy(alpha = 0.04f),
+                spotColor = Color.Black.copy(alpha = 0.04f),
+            )
             .clip(RoundedCornerShape(14.dp))
             .background(DSColors.cardWhite)
-            .border(0.5.dp, DSColors.borderLine, RoundedCornerShape(14.dp))
-            .padding(10.dp),
+            .border(1.dp, DSColors.listCardBorder, RoundedCornerShape(14.dp)),
     ) {
         Box(
             modifier = Modifier
-                .width(72.dp)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(10.dp)),
+                .width(120.dp)
+                .fillMaxHeight(),
             contentAlignment = Alignment.Center,
         ) {
             V2MemoThumbnail(memo = memo, modifier = Modifier.fillMaxSize())
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent),
+                        ),
+                    ),
+            )
             if (playable) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.25f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        null,
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp).offset(x = 1.dp),
+                    )
+                }
             } else {
                 Text(
                     "文件缺失",
@@ -81,31 +109,46 @@ fun V2VideoMemoLargeCard(
                 Text(
                     String.format(Locale.ROOT, "%d:%02d", t / 60, t % 60),
                     color = Color.White,
-                    fontSize = 9.sp,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                        .padding(top = 8.dp, start = 8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Color.Black.copy(0.65f))
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                        .background(Color.Black.copy(0.7f))
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
                 )
             }
         }
-        Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
-            SourceChip(chipText, chipStyle)
+        Column(modifier = Modifier.weight(1f).fillMaxHeight().padding(12.dp)) {
             Text(
                 memo.displayTitle ?: memo.title ?: "无标题",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = DSColors.inkGreen,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = DSColors.fairway,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            memo.text?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    fontSize = 12.sp,
+                    color = Color(0xFF666666),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            SourceChip(chipText, chipStyle)
+            Text(
+                metaText,
+                fontSize = 11.sp,
+                color = Color(0xFF999999),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 4.dp),
             )
-            memo.text?.takeIf { it.isNotBlank() }?.let {
-                Text(it, fontSize = 11.sp, color = DSColors.shadowGray, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            Text(metaText, fontSize = 10.sp, color = DSColors.shadowGray, modifier = Modifier.padding(top = 4.dp))
         }
     }
 }
@@ -113,20 +156,20 @@ fun V2VideoMemoLargeCard(
 @Composable
 private fun SourceChip(text: String, style: V2VideoSourceChipStyle) {
     val (bg, fg, border) = when (style) {
-        V2VideoSourceChipStyle.MUTED -> Triple(DSColors.sandBeige, DSColors.shadowGray, DSColors.listCardBorder)
-        V2VideoSourceChipStyle.GOLD -> Triple(DSColors.goldBright.copy(0.12f), DSColors.goldBright, DSColors.goldBright.copy(0.4f))
-        V2VideoSourceChipStyle.LEAF -> Triple(DSColors.chipGreenBg, DSColors.leafGreen, DSColors.leafGreen.copy(0.3f))
+        V2VideoSourceChipStyle.MUTED -> Triple(DSColors.listMutedBg, DSColors.fairway, Color.Transparent)
+        V2VideoSourceChipStyle.GOLD -> Triple(Color.Transparent, DSColors.goldBright, DSColors.goldBright)
+        V2VideoSourceChipStyle.LEAF -> Triple(DSColors.leafGreen.copy(alpha = 0.12f), DSColors.leafGreen, Color.Transparent)
     }
     Text(
         text,
-        fontSize = 9.sp,
-        fontWeight = FontWeight.SemiBold,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
         color = fg,
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(RoundedCornerShape(6.dp))
             .background(bg)
-            .border(0.5.dp, border, RoundedCornerShape(50))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
+            .border(1.dp, border, RoundedCornerShape(6.dp))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
     )
 }
 

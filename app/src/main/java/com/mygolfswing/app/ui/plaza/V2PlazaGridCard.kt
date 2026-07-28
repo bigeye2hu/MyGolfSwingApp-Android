@@ -16,10 +16,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2PlazaVideo
@@ -48,7 +50,12 @@ fun V2PlazaGridCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(16.dp))
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = Color.Black.copy(alpha = 0.04f),
+                spotColor = Color.Black.copy(alpha = 0.04f),
+            )
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite)
             .border(width = 1.dp, color = Color.Black.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp))
@@ -72,19 +79,6 @@ private fun Thumbnail(video: V2PlazaVideo, onSaveTap: () -> Unit) {
             modifier = Modifier.fillMaxSize(),
             heroScrim = false,
         )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.PlayCircle,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.85f),
-                modifier = Modifier.size(40.dp),
-            )
-        }
 
         Row(
             modifier = Modifier
@@ -118,8 +112,15 @@ private fun TopicChip(text: String) {
         fontSize = 10.sp,
         fontWeight = FontWeight.SemiBold,
         color = DSColors.fairway,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
-            .shadow(elevation = 3.dp, shape = RoundedCornerShape(50))
+            .shadow(
+                elevation = 3.dp,
+                shape = RoundedCornerShape(50),
+                ambientColor = Color.Black.copy(alpha = 0.18f),
+                spotColor = Color.Black.copy(alpha = 0.18f),
+            )
             .clip(RoundedCornerShape(50))
             .background(DSColors.sandBeige)
             .padding(horizontal = 8.dp, vertical = 3.dp),
@@ -202,7 +203,7 @@ private fun InfoBlock(video: V2PlazaVideo) {
             fontWeight = FontWeight.SemiBold,
             color = DSColors.inkGreen,
             maxLines = 2,
-            minLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -218,15 +219,19 @@ private fun InfoBlock(video: V2PlazaVideo) {
                 fontWeight = FontWeight.Medium,
                 color = DSColors.shadowGray,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
 
         Spacer(modifier = Modifier.weight(1f))
 
         Row {
-            StatLabel(icon = Icons.Filled.PlayArrow, text = formatCount(video.viewCount))
+            StatLabel(
+                icon = if (video.viewCount >= V2_PLAZA_PUBLIC_VIEWS_THRESHOLD) Icons.Filled.PlayCircleOutline else Icons.Filled.AutoAwesome,
+                text = video.publicGridPrimaryMetaText(),
+            )
             Spacer(modifier = Modifier.weight(1f))
-            StatLabel(icon = Icons.Filled.BookmarkBorder, text = formatCount(video.saveCount))
+            StatLabel(icon = Icons.Filled.BookmarkBorder, text = video.publicFavoriteText())
         }
     }
 }
@@ -258,10 +263,4 @@ private fun StatLabel(icon: androidx.compose.ui.graphics.vector.ImageVector, tex
         )
         Text(text = text, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = DSColors.shadowGray)
     }
-}
-
-private fun formatCount(n: Int): String = when {
-    n >= 10_000 -> "%.1fw".format(n / 10_000.0)
-    n >= 1_000 -> "%.1fk".format(n / 1_000.0)
-    else -> n.toString()
 }

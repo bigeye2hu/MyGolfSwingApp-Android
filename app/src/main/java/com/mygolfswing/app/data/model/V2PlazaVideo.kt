@@ -77,3 +77,35 @@ data class V2PlazaCategoryChip(
 ) {
     val isTopLevel: Boolean get() = parentId.isBlank()
 }
+
+data class V2PlazaCoachProfile(
+    val id: String,
+    val name: String,
+    val avatarUrl: String? = null,
+    val bannerUrl: String? = null,
+    val certification: String? = null,
+    val bio: String? = null,
+    val region: String? = null,
+    val tier: String? = null,
+    val badges: List<String> = emptyList(),
+    val externalLinks: List<V2PlazaCoachLink> = emptyList(),
+) {
+    val initialChar: String get() = name.firstOrNull()?.toString() ?: "C"
+    val badgeLabels: List<String> get() = badges.map { badgeLabel(it) }
+
+    private fun badgeLabel(raw: String): String = when (raw) {
+        "official" -> "官方合作"
+        "certified" -> "认证教练"
+        "vip" -> "VIP"
+        else -> raw
+    }
+}
+
+data class V2PlazaCoachLink(
+    val platform: String,
+    val url: String,
+    val label: String,
+    val displayName: String = "",
+) {
+    val displayText: String get() = displayName.takeIf { it.isNotBlank() } ?: url
+}

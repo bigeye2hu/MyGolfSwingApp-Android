@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -47,7 +48,12 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .shadow(2.dp, RoundedCornerShape(14.dp))
+                .shadow(
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(14.dp),
+                    ambientColor = Color.Black.copy(alpha = 0.04f),
+                    spotColor = Color.Black.copy(alpha = 0.04f),
+                )
                 .clip(RoundedCornerShape(14.dp))
                 .background(DSColors.cardWhite)
                 .border(0.5.dp, DSColors.borderLine, RoundedCornerShape(14.dp)),
@@ -91,7 +97,14 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                             .background(Color.White.copy(0.8f)),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(Icons.Filled.PlayArrow, null, tint = DSColors.inkGreen, modifier = Modifier.size(14.dp))
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            null,
+                            tint = DSColors.inkGreen,
+                            modifier = Modifier
+                                .size(11.dp)
+                                .offset(x = 1.dp),
+                        )
                     }
                 } else {
                     Text(
@@ -113,7 +126,10 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                     .weight(1f)
                     .padding(10.dp),
             ) {
-                Row {
+                Row(
+                    modifier = Modifier.height(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         "视频+笔记",
                         fontSize = 8.sp,
@@ -124,10 +140,10 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                             .background(DSColors.mistGreen)
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
-                    memo.accent?.let { acc ->
+                    if (memo.accent != null) {
                         Spacer(Modifier.width(3.dp))
                         Text(
-                            acc.displayName,
+                            memo.accentDisplayLabel(),
                             fontSize = 8.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = DSColors.goldBright,
@@ -139,7 +155,7 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                     }
                 }
                 Text(
-                    text = memo.displayTitle ?: memo.title ?: "无标题",
+                    text = memo.displayTitle ?: "",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = DSColors.inkGreen,
@@ -183,7 +199,15 @@ fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
                     .clip(CircleShape)
                     .background(DSColors.goldBright)
                     .border(1.dp, Color.White, CircleShape),
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(8.dp),
+                )
+            }
         }
     }
 }

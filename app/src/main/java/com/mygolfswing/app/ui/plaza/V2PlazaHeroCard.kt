@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -23,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,7 +46,12 @@ fun V2PlazaHeroCard(video: V2PlazaVideo, onTap: () -> Unit) {
             .fillMaxWidth()
             .padding(horizontal = DSSpacing.lg, vertical = 8.dp)
             .height(200.dp)
-            .shadow(elevation = 12.dp, shape = RoundedCornerShape(24.dp))
+            .shadow(
+                elevation = 12.dp,
+                shape = RoundedCornerShape(24.dp),
+                ambientColor = DSColors.fairway.copy(alpha = 0.12f),
+                spotColor = DSColors.fairway.copy(alpha = 0.12f),
+            )
             .clip(RoundedCornerShape(24.dp))
             .clickable(onClick = onTap),
     ) {
@@ -51,6 +59,21 @@ fun V2PlazaHeroCard(video: V2PlazaVideo, onTap: () -> Unit) {
             video = video,
             modifier = Modifier.fillMaxSize(),
             heroScrim = true,
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .offset(x = 60.dp, y = (-40).dp)
+                .size(180.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            DSColors.trophyGold.copy(alpha = 0.22f),
+                            DSColors.trophyGold.copy(alpha = 0f),
+                        ),
+                    ),
+                ),
         )
         Column(
             Modifier
@@ -109,6 +132,12 @@ private fun TodayFeaturedChip(publishedAtMs: Long) {
             .background(Color.White.copy(alpha = 0.28f))
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
+        Icon(
+            imageVector = Icons.Filled.AutoAwesome,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(9.dp),
+        )
         Text("今日精选", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Color.White, letterSpacing = 0.25.sp)
         Text("· ${monthDayString(publishedAtMs)}", fontSize = 10.sp, color = Color.White.copy(alpha = 0.7f))
     }
@@ -135,7 +164,7 @@ private fun CoachAvatar(video: V2PlazaVideo) {
         modifier = Modifier
             .size(16.dp)
             .clip(CircleShape)
-            .background(DSColors.fairway),
+            .background(Brush.linearGradient(listOf(DSColors.fairway, Color(0xFF4A8B6A)))),
         contentAlignment = Alignment.Center,
     ) {
         Text(video.coach.initialChar, fontSize = 7.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
@@ -147,11 +176,24 @@ private fun PlayButton() {
     Box(
         modifier = Modifier
             .size(44.dp)
+            .shadow(
+                elevation = 4.dp,
+                shape = CircleShape,
+                ambientColor = Color.Black.copy(alpha = 0.15f),
+                spotColor = Color.Black.copy(alpha = 0.15f),
+            )
             .clip(CircleShape)
             .background(Color.White.copy(alpha = 0.92f)),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Filled.PlayArrow, null, tint = DSColors.deepGreen, modifier = Modifier.size(20.dp))
+        Icon(
+            Icons.Filled.PlayArrow,
+            null,
+            tint = DSColors.deepGreen,
+            modifier = Modifier
+                .size(14.dp)
+                .offset(x = 1.dp),
+        )
     }
 }
 

@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.repo
 
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -20,7 +21,7 @@ class V2VideoDownloadRepository(
     private val net: V2NetClient,
     private val session: V2SessionStore,
 ) {
-    suspend fun start(url: String): Result<V2DownloadStartResult> = runCatching {
+    suspend fun start(url: String): Result<V2DownloadStartResult> = runDownloadCatching {
         require(session.current().isLoggedIn) { "请先登录后再下载视频" }
         val resp = net.downloadApi.startDownload(JsonObject(mapOf("url" to JsonPrimitive(url))))
         V2DownloadStartResult(
@@ -33,7 +34,7 @@ class V2VideoDownloadRepository(
         )
     }
 
-    suspend fun confirm(jobId: String): Result<V2DownloadConfirmResult> = runCatching {
+    suspend fun confirm(jobId: String): Result<V2DownloadConfirmResult> = runDownloadCatching {
         require(session.current().isLoggedIn) { "请先登录后再确认下载" }
         val resp = net.downloadApi.confirmDownload(JsonObject(mapOf("job_id" to JsonPrimitive(jobId))))
         V2DownloadConfirmResult(
@@ -44,7 +45,7 @@ class V2VideoDownloadRepository(
         )
     }
 
-    suspend fun cancel(jobId: String): Result<V2DownloadCancelResult> = runCatching {
+    suspend fun cancel(jobId: String): Result<V2DownloadCancelResult> = runDownloadCatching {
         require(session.current().isLoggedIn) { "请先登录后再取消下载" }
         val resp = net.downloadApi.cancelDownload(JsonObject(mapOf("job_id" to JsonPrimitive(jobId))))
         V2DownloadCancelResult(
@@ -56,6 +57,16 @@ class V2VideoDownloadRepository(
 
     private fun JsonObject.string(key: String): String? =
         this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
+    private suspend inline fun <T> runDownloadCatching(
+        crossinline block: suspend () -> T,
+    ): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Result.failure(e)
+    }
 }
 
 data class V2DownloadStartResult(

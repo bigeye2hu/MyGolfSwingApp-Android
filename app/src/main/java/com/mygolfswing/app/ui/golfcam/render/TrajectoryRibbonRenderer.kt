@@ -10,6 +10,8 @@ import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.GolfCamTrailGeometry
 import com.mygolfswing.app.ui.golfcam.model.TrackRenderTuning
 import com.mygolfswing.app.ui.golfcam.model.TrackStyle
+import com.mygolfswing.app.ui.golfcam.model.clampedTrackStyle
+import com.mygolfswing.app.ui.golfcam.model.clampedForGolfCamProduction
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.pow
@@ -26,37 +28,60 @@ internal object TrajectoryRibbonRenderer {
         width: Float,
         height: Float,
     ) {
-        val head = headProgress.coerceIn(0f, 1f)
-        val tail = tailProgress.coerceIn(0f, head)
-        if (head <= tail || width <= 0f || height <= 0f) return
+        val head = finiteFloat(headProgress, fallback = 0f).coerceIn(0f, 1f)
+        val tail = finiteFloat(tailProgress, fallback = 0f).coerceIn(0f, head)
+        val safeWidth = finiteFloat(width, fallback = 0f)
+        val safeHeight = finiteFloat(height, fallback = 0f)
+        if (head <= tail || safeWidth <= 0f || safeHeight <= 0f) return
 
-        val tuning = style.renderTuning
+        val safeStyle = clampedTrackStyle(style)
+        val tuning = safeStyle.renderTuning
         if (!tuning.showOuterGlow && !tuning.showBodyBand && !tuning.showHighlightCore) return
 
-        val samples = buildSamples(bezier, arcTable, head, tail, style, width, height, tuning)
+        val samples = buildSamples(bezier, arcTable, head, tail, safeStyle, safeWidth, safeHeight, tuning)
         if (samples.size < 2) return
         val edges = buildEdges(samples) ?: return
 
-        val baseColor = style.primaryColorArgb()
-        val baseOpacity = (style.colorAlpha * alphaOf(baseColor)).toFloat().coerceIn(0f, 1f)
+        val baseColor = safeStyle.primaryColorArgb()
+        val baseOpacity = baseOpacity(safeStyle, baseColor)
         if (baseOpacity <= 0f) return
 
         if (tuning.showOuterGlow) {
-            drawGlow(canvas, edges, baseColor, baseOpacity, style, tuning)
+            drawGlow(canvas, edges, baseColor, baseOpacity, safeStyle, tuning)
         }
         if (tuning.showBodyBand) {
-            drawBodyBand(canvas, edges, baseColor, style, tuning)
+            drawBodyBand(canvas, edges, baseColor, safeStyle, tuning)
         }
         if (tuning.showHighlightCore) {
-            drawHighlight(canvas, edges, baseColor, style, tuning)
+            drawHighlight(canvas, edges, baseColor, safeStyle, tuning)
         }
     }
 
     internal fun bodyBandAlpha(style: TrackStyle, tuning: TrackRenderTuning = style.renderTuning): Float {
         val baseColor = style.primaryColorArgb()
-        val baseOpacity = (style.colorAlpha * alphaOf(baseColor)).toFloat().coerceIn(0f, 1f)
-        val presetBandAlpha = style.colorPreset.bandAlpha.coerceIn(0f, 1f)
-        return (baseOpacity * presetBandAlpha * tuning.bandAlphaMultiplier).coerceIn(0f, 1f)
+        val baseOpacity = baseOpacity(style, baseColor)
+        val presetBandAlpha = finiteUnit(style.colorPreset.bandAlpha, fallback = 1f)
+        val multiplier = finiteFloat(
+            tuning.bandAlphaMultiplier,
+            fallback = TrackRenderTuning().bandAlphaMultiplier,
+        ).coerceIn(0f, 1.40f)
+        return finiteUnit(baseOpacity * presetBandAlpha * multiplier, fallback = 0f)
+    }
+
+    internal fun highlightWidthRatio(tuning: TrackRenderTuning): Float {
+        return tuning.clampedForGolfCamProduction().highlightWidthRatio
+    }
+
+    private fun finiteFloat(value: Float, fallback: Float): Float {
+        return value.takeIf { it.isFinite() } ?: fallback
+    }
+
+    private fun finiteUnit(value: Float, fallback: Float): Float {
+        return finiteFloat(value, fallback).coerceIn(0f, 1f)
+    }
+
+    private fun baseOpacity(style: TrackStyle, baseColor: Long): Float {
+        return finiteUnit((style.colorAlpha * alphaOf(baseColor)).toFloat(), fallback = 0f)
     }
 
     private fun buildSamples(
@@ -145,14 +170,21 @@ internal object TrajectoryRibbonRenderer {
         tuning: TrackRenderTuning,
     ) {
         val path = makeRibbonPath(edges)
-        val blurAlpha = (baseOpacity * style.glowOpacity.toFloat() * tuning.outerGlowMultiplier).coerceIn(0f, 0.70f)
-        val fillAlpha = (baseOpacity * style.glowOpacity.toFloat() * tuning.fillGlowMultiplier).coerceIn(0f, 0.30f)
+        val glowOpacity = finiteUnit(style.glowOpacity.toFloat(), fallback = 0f)
+        val blurAlpha = finiteUnit(baseOpacity * glowOpacity * tuning.outerGlowMultiplier, fallback = 0f)
+            .coerceAtMost(0.70f)
+        val fillAlpha = finiteUnit(baseOpacity * glowOpacity * tuning.fillGlowMultiplier, fallback = 0f)
+            .coerceAtMost(0.30f)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.style = Paint.Style.FILL
         }
         if (blurAlpha > 0f) {
             paint.color = colorWithAlpha(baseColor, blurAlpha)
-            paint.maskFilter = BlurMaskFilter(max(2f, style.colorPreset.glowBlur * tuning.glowBlurMultiplier), BlurMaskFilter.Blur.NORMAL)
+            val blurRadius = max(
+                2f,
+                finiteFloat(style.colorPreset.glowBlur, fallback = 0f) * tuning.glowBlurMultiplier,
+            )
+            paint.maskFilter = BlurMaskFilter(blurRadius, BlurMaskFilter.Blur.NORMAL)
             canvas.drawPath(path, paint)
             paint.maskFilter = null
         }
@@ -178,14 +210,14 @@ internal object TrajectoryRibbonRenderer {
         forEachSegment(edges) { index, path ->
             val tailFade = tailEnvelope(index, last, power = 1.55f)
             val alpha = bandAlpha * (0.02f + 0.20f * tailFade)
-            paint.color = colorWithAlpha(baseColor, alpha.coerceIn(0f, 1f))
+            paint.color = colorWithAlpha(baseColor, alpha)
             canvas.drawPath(path, paint)
         }
 
         forEachSegment(edges) { index, path ->
             val tailFade = tailEnvelope(index, last)
             val alpha = bandAlpha * (tuning.bodyAlphaBase + tuning.bodyAlphaScale * tailFade)
-            paint.color = colorWithAlpha(baseColor, alpha.coerceIn(0f, 1f))
+            paint.color = colorWithAlpha(baseColor, alpha)
             canvas.drawPath(path, paint)
         }
     }
@@ -212,8 +244,8 @@ internal object TrajectoryRibbonRenderer {
                 tuning.highlightAlphaMax,
                 bandAlpha * tuning.highlightStrength * (0.14f + 0.62f * weight),
             ) * weight * tailFade
-            paint.color = colorWithAlpha(baseColor, alpha.coerceIn(0f, 1f))
-            canvas.drawPath(path, paint)
+            paint.color = colorWithAlpha(baseColor, alpha)
+            canvas.drawPath(highlightSegmentPath(edges, index, highlightWidthRatio(tuning)), paint)
         }
     }
 
@@ -243,24 +275,58 @@ internal object TrajectoryRibbonRenderer {
         }
     }
 
+    private fun highlightSegmentPath(edges: RibbonEdges, index: Int, widthRatio: Float): Path {
+        val ratio = finiteUnit(widthRatio, fallback = TrackRenderTuning().highlightWidthRatio)
+        fun inset(point: Point, opposite: Point): Point {
+            val centerX = (point.x + opposite.x) * 0.5f
+            val centerY = (point.y + opposite.y) * 0.5f
+            return Point(
+                x = centerX + (point.x - centerX) * ratio,
+                y = centerY + (point.y - centerY) * ratio,
+                progress = point.progress,
+            )
+        }
+        val left0 = inset(edges.left[index - 1], edges.right[index - 1])
+        val left1 = inset(edges.left[index], edges.right[index])
+        val right1 = inset(edges.right[index], edges.left[index])
+        val right0 = inset(edges.right[index - 1], edges.left[index - 1])
+        return Path().apply {
+            moveTo(left0.x, left0.y)
+            lineTo(left1.x, left1.y)
+            lineTo(right1.x, right1.y)
+            lineTo(right0.x, right0.y)
+            close()
+        }
+    }
+
     private fun tailEnvelope(index: Int, last: Int, power: Float = 1.6f): Float {
-        val local = (index.toFloat() / last.toFloat()).coerceIn(0f, 1f)
-        return local.toDouble().pow(power.toDouble()).toFloat()
+        val local = finiteUnit(index.toFloat() / last.toFloat(), fallback = 0f)
+        val safePower = finiteFloat(power, fallback = 1.6f).coerceAtLeast(0f)
+        return local.toDouble().pow(safePower.toDouble()).toFloat()
     }
 
     private fun highlightWeight(progress: Float, start: Float, peak: Float, end: Float, falloffPower: Float): Float {
-        if (progress < start || progress > end) return 0f
-        return if (progress <= peak) {
-            smoothStep(start, peak, progress)
+        val safeProgress = finiteUnit(progress, fallback = 0f)
+        val safeStart = finiteUnit(start, fallback = TrackRenderTuning().highlightStart)
+        val safeEnd = finiteUnit(end, fallback = TrackRenderTuning().highlightEnd).coerceAtLeast(safeStart)
+        val safePeak = finiteUnit(peak, fallback = TrackRenderTuning().highlightPeak).coerceIn(safeStart, safeEnd)
+        val safeFalloffPower = finiteFloat(falloffPower, fallback = TrackRenderTuning().highlightFalloffPower)
+            .coerceAtLeast(0f)
+        if (safeProgress < safeStart || safeProgress > safeEnd) return 0f
+        return if (safeProgress <= safePeak) {
+            smoothStep(safeStart, safePeak, safeProgress)
         } else {
-            val t = smoothStep(peak, end, progress)
-            (1f - t).coerceIn(0f, 1f).toDouble().pow(falloffPower.toDouble()).toFloat()
+            val t = smoothStep(safePeak, safeEnd, safeProgress)
+            finiteUnit(1f - t, fallback = 0f).toDouble().pow(safeFalloffPower.toDouble()).toFloat()
         }
     }
 
     private fun smoothStep(edge0: Float, edge1: Float, value: Float): Float {
-        if (abs(edge1 - edge0) <= 0.0001f) return if (value >= edge1) 1f else 0f
-        val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+        val safeEdge0 = finiteUnit(edge0, fallback = 0f)
+        val safeEdge1 = finiteUnit(edge1, fallback = safeEdge0)
+        val safeValue = finiteUnit(value, fallback = safeEdge0)
+        if (abs(safeEdge1 - safeEdge0) <= 0.0001f) return if (safeValue >= safeEdge1) 1f else 0f
+        val t = finiteUnit((safeValue - safeEdge0) / (safeEdge1 - safeEdge0), fallback = 0f)
         return t * t * (3f - 2f * t)
     }
 
@@ -268,7 +334,7 @@ internal object TrajectoryRibbonRenderer {
 
     private fun colorWithAlpha(argb: Long, alpha: Float): Int {
         return Color.argb(
-            (alpha.coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255),
+            (finiteUnit(alpha, fallback = 0f) * 255f).toInt().coerceIn(0, 255),
             ((argb ushr 16) and 0xFF).toInt(),
             ((argb ushr 8) and 0xFF).toInt(),
             (argb and 0xFF).toInt(),

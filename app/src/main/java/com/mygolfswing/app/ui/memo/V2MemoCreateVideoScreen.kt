@@ -2,12 +2,14 @@ package com.mygolfswing.app.ui.memo
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +20,12 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -32,8 +38,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.OndemandVideo
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
@@ -44,7 +53,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,11 +69,13 @@ import java.util.UUID
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -70,10 +83,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.store.V2CategoryStore
@@ -81,12 +96,15 @@ import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
+import com.mygolfswing.app.ui.common.V2MissingEntityScreen
 import com.mygolfswing.app.ui.common.isPermissionPermanentlyDenied
 import com.mygolfswing.app.ui.common.openAppSettings
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * 视频 Memo 创建页（对齐 iOS `V2MemoCreateVideoView`，3 个视频源）。
@@ -102,10 +120,12 @@ import java.util.Locale
 @Composable
 fun V2MemoCreateVideoScreen(
     onClose: () -> Unit = {},
+    onSaved: ((UUID) -> Unit)? = null,
     onOpenOnlinePicker: (() -> Unit)? = null,
     pendingOnline: V2OnlineVideoSelection? = null,
     onPendingOnlineConsumed: () -> Unit = {},
     editingMemoId: UUID? = null,
+    allowSourceReplacement: Boolean = false,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -116,7 +136,7 @@ fun V2MemoCreateVideoScreen(
     val isEditing = editingMemoId != null
 
     if (isEditing && editingMemo == null) {
-        Text("视频 Memo 不存在", modifier = Modifier.padding(24.dp), color = Color(0xFF1B2A21))
+        V2MissingEntityScreen(message = "视频 Memo 不存在或已被删除", onBack = onClose, title = "编辑视频 Memo")
         return
     }
 
@@ -128,10 +148,15 @@ fun V2MemoCreateVideoScreen(
     var onlineUrl by remember(editingMemo?.id) { mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.videoUrl else null) }
     var onlinePlatform by remember(editingMemo?.id) { mutableStateOf(editingMemo?.platform) }
     var onlineThumbUrl by remember(editingMemo?.id) { mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.thumbnailUrl else null) }
+    val originalLocalPath = remember(editingMemo?.id) { initialLocalPath(editingMemo) }
+    val originalLocalThumbPath = remember(editingMemo?.id) { initialLocalThumbPath(editingMemo) }
     var showOnlineDialog by remember { mutableStateOf(false) }
     var selectedTagIds by remember(editingMemo?.id) { mutableStateOf(editingMemo?.tagIds.orEmpty().toSet()) }
     var selectedGoalIds by remember(editingMemo?.id) { mutableStateOf(editingMemo?.linkedGoalIds.orEmpty().toSet()) }
+    var didAutoSelectGoal by remember(editingMemo?.id) { mutableStateOf(false) }
     var showDiscardConfirm by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<String?>(null) }
 
     val activeGoals by V2GoalStore.goals.collectAsState()
 
@@ -139,6 +164,18 @@ fun V2MemoCreateVideoScreen(
     var importError by remember { mutableStateOf<String?>(null) }
     var pendingCameraFile by remember { mutableStateOf<File?>(null) }
     var cameraPermissionDeniedPermanently by remember { mutableStateOf(false) }
+
+    fun protectedOriginalLocalMedia(): Set<String> =
+        if (isEditing) setOfNotNull(originalLocalPath, originalLocalThumbPath) else emptySet()
+
+    fun cleanupReplacedOriginalLocalMedia() {
+        if (!isEditing) return
+        deleteDraftLocalMedia(
+            videoPath = originalLocalPath,
+            thumbnailPath = originalLocalThumbPath,
+            protectedPaths = setOfNotNull(localAbsolutePath, localThumbPath),
+        )
+    }
 
     // 系统相机
     val captureLauncher = rememberLauncherForActivityResult(
@@ -149,11 +186,20 @@ fun V2MemoCreateVideoScreen(
         if (ok && file != null) {
             scope.launch {
                 importing = true
-                val r = V2VideoFileStore.adoptLocalFile(context, file)
-                importing = false
+                importError = null
+                val r = try {
+                    V2VideoFileStore.adoptLocalFile(context, file)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    importError = memoVideoSaveError("录制失败，请重试", e.message)
+                    null
+                } finally {
+                    importing = false
+                }
                 if (r == null) {
                     deleteFileCountingFreedBytes(file)
-                    importError = "录制失败，请重试"
+                    if (importError == null) importError = "录制失败，请重试"
                 } else {
                     val previousVideoPath = localAbsolutePath
                     val previousThumbPath = localThumbPath
@@ -165,7 +211,7 @@ fun V2MemoCreateVideoScreen(
                     deleteDraftLocalMedia(
                         videoPath = previousVideoPath,
                         thumbnailPath = previousThumbPath,
-                        protectedPaths = setOfNotNull(r.absolutePath, r.thumbnailPath),
+                        protectedPaths = setOfNotNull(r.absolutePath, r.thumbnailPath) + protectedOriginalLocalMedia(),
                     )
                 }
             }
@@ -177,7 +223,13 @@ fun V2MemoCreateVideoScreen(
     fun launchCameraCapture() {
         val (file, uri) = V2VideoFileStore.createCameraOutputUri(context)
         pendingCameraFile = file
-        captureLauncher.launch(uri)
+        runCatching {
+            captureLauncher.launch(uri)
+        }.onFailure {
+            pendingCameraFile = null
+            deleteFileCountingFreedBytes(file)
+            importError = memoVideoSaveError("无法打开相机，请稍后重试或改从相册选择", it.message)
+        }
     }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
@@ -196,6 +248,14 @@ fun V2MemoCreateVideoScreen(
         }
     }
 
+    fun requestCameraPermission() {
+        runCatching {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }.onFailure {
+            importError = memoVideoSaveError("无法请求相机权限，请稍后重试或改从相册选择", it.message)
+        }
+    }
+
     // 表单状态
     var title by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.displayTitle ?: editingMemo?.title ?: "") }
     var note by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.text ?: "") }
@@ -209,11 +269,20 @@ fun V2MemoCreateVideoScreen(
         onlinePlatform = pick.platform
         onlineThumbUrl = pick.thumbnailUrl
         localDurationSec = pick.durationSec
-        if (title.isBlank()) title = pick.title.take(24)
+        if (title.isBlank()) {
+            title = prefilledOnlineVideoMemoTitle(pick).take(VideoMemoTitleMaxLength)
+        }
+        if (note.isBlank()) {
+            val draftNote = prefilledOnlineVideoMemoNote(pick)
+            if (draftNote.isNotBlank()) {
+                note = draftNote.take(VideoMemoNoteMaxLength)
+                noteExpanded = true
+            }
+        }
         sourceKind = SourceKind.ONLINE
         localAbsolutePath = null
         localThumbPath = null
-        deleteDraftLocalMedia(previousVideoPath, previousThumbPath)
+        deleteDraftLocalMedia(previousVideoPath, previousThumbPath, protectedPaths = protectedOriginalLocalMedia())
         onPendingOnlineConsumed()
     }
 
@@ -224,10 +293,19 @@ fun V2MemoCreateVideoScreen(
         if (uri != null) {
             scope.launch {
                 importing = true
-                val r = V2VideoFileStore.importVideo(context, uri)
-                importing = false
+                importError = null
+                val r = try {
+                    V2VideoFileStore.importVideo(context, uri)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    importError = memoVideoSaveError("无法读取视频，请检查权限或换一个视频", e.message)
+                    null
+                } finally {
+                    importing = false
+                }
                 if (r == null) {
-                    importError = "无法读取视频，请检查权限或换一个视频"
+                    if (importError == null) importError = "无法读取视频，请检查权限或换一个视频"
                 } else {
                     val previousVideoPath = localAbsolutePath
                     val previousThumbPath = localThumbPath
@@ -239,7 +317,7 @@ fun V2MemoCreateVideoScreen(
                     deleteDraftLocalMedia(
                         videoPath = previousVideoPath,
                         thumbnailPath = previousThumbPath,
-                        protectedPaths = setOfNotNull(r.absolutePath, r.thumbnailPath),
+                        protectedPaths = setOfNotNull(r.absolutePath, r.thumbnailPath) + protectedOriginalLocalMedia(),
                     )
                 }
             }
@@ -247,48 +325,49 @@ fun V2MemoCreateVideoScreen(
     }
 
     val hasVideo = localAbsolutePath != null || onlineUrl != null
-    val canSave = hasVideo && title.isNotBlank() && !importing
+    val canReplaceSource = !isEditing || allowSourceReplacement
+    val isOnline = onlineUrl != null
+    val videoStringForStore = onlineUrl ?: localAbsolutePath?.let { "file://$it" }
+    val thumbStringForStore = localThumbPath?.let { "file://$it" }
+    val training = when (sourceKind) {
+        SourceKind.CAMERA -> "拍摄"
+        SourceKind.ALBUM -> "本地上传"
+        SourceKind.ONLINE -> "在线视频"
+        null -> null
+    }
+    LaunchedEffect(isEditing, hasVideo, activeGoals, selectedGoalIds, didAutoSelectGoal) {
+        if (!isEditing && hasVideo && selectedGoalIds.isEmpty() && !didAutoSelectGoal) {
+            defaultLinkedGoalIdForVideoMemo(activeGoals)?.let { goalId ->
+                selectedGoalIds = setOf(goalId)
+                didAutoSelectGoal = true
+            }
+        }
+    }
+
+    val canSave = hasVideo && title.isNotBlank() && !importing && !saving
     val hasDraft = if (isEditing) {
         title != (editingMemo?.displayTitle ?: editingMemo?.title ?: "") ||
             note != (editingMemo?.text ?: "") ||
             selectedTagIds != editingMemo?.tagIds.orEmpty().toSet() ||
-            selectedGoalIds != editingMemo?.linkedGoalIds.orEmpty().toSet()
+            selectedGoalIds != editingMemo?.linkedGoalIds.orEmpty().toSet() ||
+            videoStringForStore != editingMemo?.videoUrl ||
+            (if (isOnline) onlineThumbUrl else thumbStringForStore) != editingMemo?.thumbnailUrl ||
+            localDurationSec != editingMemo?.durationSec ||
+            isOnline != (editingMemo?.isOnlineVideo == true) ||
+            onlinePlatform != editingMemo?.platform ||
+            training != editingMemo?.trainingMethod
     } else {
         title.isNotBlank() || note.isNotBlank() || hasVideo ||
             selectedTagIds.isNotEmpty() || selectedGoalIds.isNotEmpty()
     }
 
     fun attemptClose() {
+        if (saving) return
         if (hasDraft) showDiscardConfirm = true else onClose()
     }
 
     fun buildAndSave() {
-        if (editingMemo != null) {
-            val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
-            val tagIds = selectedTagIds.toList()
-            val topic = V2MemoBridge.inferTopic(
-                category = V2CategoryStore.groupForItemId(tagIds.firstOrNull() ?: "")?.name,
-                tags = tagNames,
-                title = title.trim(),
-            )
-            V2MemoStore.update(
-                editingMemo.copy(
-                    title = title.trim().ifBlank { "视频 Memo" },
-                    displayTitle = title.trim().ifBlank { "视频 Memo" },
-                    text = note.trim(),
-                    topic = topic,
-                    tags = tagNames,
-                    tagIds = tagIds,
-                    linkedGoalIds = selectedGoalIds.toList(),
-                    thumbnailKind = V2MemoBridge.thumbnailKindFor(topic),
-                ),
-            )
-            V2GoalStore.replaceMemoLinks(editingMemo.id, selectedGoalIds)
-            onClose()
-            return
-        }
-        val isOnline = onlineUrl != null
-        val videoStringForStore = onlineUrl ?: localAbsolutePath?.let { "file://$it" }
+        if (!canSave) return
         if (!isOnline && !memoVideoPlayable(videoStringForStore)) {
             importError = "视频文件已不可用，请重新选择或录制"
             localAbsolutePath = null
@@ -297,7 +376,50 @@ fun V2MemoCreateVideoScreen(
             sourceKind = null
             return
         }
-        val thumbStringForStore = localThumbPath?.let { "file://$it" }
+        if (editingMemo != null) {
+            scope.launch {
+                saving = true
+                saveError = null
+                try {
+                    val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
+                    val tagIds = selectedTagIds.toList()
+                    val topic = V2MemoBridge.inferTopic(
+                        category = V2CategoryStore.groupForItemId(tagIds.firstOrNull() ?: "")?.name,
+                        tags = tagNames,
+                        title = title.trim(),
+                    )
+                    V2MemoStore.updateAndWait(
+                        editingMemo.copy(
+                            title = title.trim().ifBlank { "视频 Memo" },
+                            displayTitle = title.trim().ifBlank { "视频 Memo" },
+                            text = note.trim(),
+                            videoUrl = videoStringForStore,
+                            durationSec = localDurationSec,
+                            topic = topic,
+                            tags = tagNames,
+                            tagIds = tagIds,
+                            linkedGoalIds = selectedGoalIds.toList(),
+                            thumbnailUrl = if (isOnline) onlineThumbUrl else thumbStringForStore,
+                            trainingMethod = training,
+                            isOnlineVideo = isOnline,
+                            platform = if (isOnline) onlinePlatform else null,
+                            metaText = buildMetaText(isOnline = isOnline, durationSec = localDurationSec),
+                            thumbnailKind = V2MemoBridge.thumbnailKindFor(topic),
+                        ),
+                    )
+                    V2GoalStore.replaceMemoLinks(editingMemo.id, selectedGoalIds)
+                    cleanupReplacedOriginalLocalMedia()
+                    onSaved?.invoke(editingMemo.id) ?: onClose()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    saveError = memoVideoSaveError("保存失败，请稍后重试", e.message)
+                } finally {
+                    saving = false
+                }
+            }
+            return
+        }
         val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
         val tagIds = selectedTagIds.toList()
         val topic = V2MemoBridge.inferTopic(
@@ -305,12 +427,6 @@ fun V2MemoCreateVideoScreen(
             tags = tagNames,
             title = title.trim(),
         )
-        val training = when (sourceKind) {
-            SourceKind.CAMERA -> "拍摄"
-            SourceKind.ALBUM -> "本地上传"
-            SourceKind.ONLINE -> "在线视频"
-            null -> null
-        }
         val memo = V2Memo.mixedMemo(
             displayTitle = title.trim().ifBlank { "视频 Memo" },
             body = note.trim(),
@@ -328,9 +444,21 @@ fun V2MemoCreateVideoScreen(
             linkedGoalIds = selectedGoalIds.toList()
             thumbnailKind = V2MemoBridge.thumbnailKindFor(topic)
         }
-        V2MemoStore.create(memo)
-        selectedGoalIds.forEach { goalId -> V2GoalStore.linkMemo(memo.id, goalId) }
-        onClose()
+        scope.launch {
+            saving = true
+            saveError = null
+            try {
+                V2MemoStore.createAndWait(memo)
+                selectedGoalIds.forEach { goalId -> V2GoalStore.linkMemo(memo.id, goalId) }
+                onSaved?.invoke(memo.id) ?: onClose()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                saveError = memoVideoSaveError("保存失败，请稍后重试", e.message)
+            } finally {
+                saving = false
+            }
+        }
     }
 
     Box(
@@ -339,7 +467,10 @@ fun V2MemoCreateVideoScreen(
             .background(Color(0xFFFAF7F0)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            NavBar(canSave = canSave, title = if (isEditing) "编辑视频 Memo" else "新建视频 Memo", onClose = ::attemptClose, onSave = ::buildAndSave)
+            NavBar(
+                title = if (isEditing) "编辑视频 Memo" else "新建视频 Memo",
+                onClose = ::attemptClose,
+            )
 
             Column(
                 modifier = Modifier
@@ -358,6 +489,7 @@ fun V2MemoCreateVideoScreen(
                     durationSec = localDurationSec,
                     importing = importing,
                     editing = isEditing,
+                    canReplaceSource = canReplaceSource,
                     onPickCamera = {
                         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
                             == PackageManager.PERMISSION_GRANTED
@@ -367,22 +499,26 @@ fun V2MemoCreateVideoScreen(
                         } else if (cameraPermissionDeniedPermanently) {
                             importError = "请在系统设置中开启相机权限后再录制视频"
                         } else {
-                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            requestCameraPermission()
                         }
                     },
                     onPickAlbum = {
-                        pickLauncher.launch(
-                            androidx.activity.result.PickVisualMediaRequest(
-                                ActivityResultContracts.PickVisualMedia.VideoOnly,
-                            ),
-                        )
+                        runCatching {
+                            pickLauncher.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.VideoOnly,
+                                ),
+                            )
+                        }.onFailure {
+                            importError = memoVideoSaveError("无法打开相册，请稍后重试", it.message)
+                        }
                     },
                     onPickOnline = {
                         if (onOpenOnlinePicker != null) onOpenOnlinePicker()
                         else showOnlineDialog = true
                     },
                     onClear = {
-                        deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
+                        deleteDraftLocalMedia(localAbsolutePath, localThumbPath, protectedPaths = protectedOriginalLocalMedia())
                         sourceKind = null
                         localAbsolutePath = null
                         localThumbPath = null
@@ -392,12 +528,12 @@ fun V2MemoCreateVideoScreen(
                         onlineThumbUrl = null
                     },
                 )
-                TitleSection(title = title, onChange = { if (it.length <= 24) title = it })
+                TitleSection(title = title, onChange = { if (it.length <= VideoMemoTitleMaxLength) title = it })
                 NoteSection(
                     note = note,
                     expanded = noteExpanded,
                     onToggleExpand = { noteExpanded = !noteExpanded },
-                    onChange = { if (it.length <= 240) note = it },
+                    onChange = { if (it.length <= VideoMemoNoteMaxLength) note = it },
                 )
                 V2MemoTagPicker(
                     selectedTagIds = selectedTagIds,
@@ -414,6 +550,7 @@ fun V2MemoCreateVideoScreen(
         }
         BottomSaveBar(
             canSave = canSave,
+            saving = saving,
             editing = isEditing,
             onSave = ::buildAndSave,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -424,7 +561,7 @@ fun V2MemoCreateVideoScreen(
         OnlineUrlDialog(
             onConfirm = { url ->
                 showOnlineDialog = false
-                deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
+                deleteDraftLocalMedia(localAbsolutePath, localThumbPath, protectedPaths = protectedOriginalLocalMedia())
                 onlineUrl = url
                 onlinePlatform = detectPlatform(url)
                 sourceKind = SourceKind.ONLINE
@@ -446,7 +583,9 @@ fun V2MemoCreateVideoScreen(
                     onClick = {
                         val openSettings = cameraPermissionDeniedPermanently
                         importError = null
-                        if (openSettings) context.openAppSettings()
+                        if (openSettings && !context.openAppSettings()) {
+                            Toast.makeText(context, "系统设置暂时无法打开，请稍后重试", Toast.LENGTH_SHORT).show()
+                        }
                     },
                 ) {
                     Text(if (cameraPermissionDeniedPermanently) "打开设置" else "好")
@@ -462,6 +601,19 @@ fun V2MemoCreateVideoScreen(
         )
     }
 
+    saveError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { saveError = null },
+            title = { Text("保存失败") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { saveError = null }) {
+                    Text("好", color = Color(0xFF2D6A4F))
+                }
+            },
+        )
+    }
+
     if (showDiscardConfirm) {
         AlertDialog(
             onDismissRequest = { showDiscardConfirm = false },
@@ -469,13 +621,15 @@ fun V2MemoCreateVideoScreen(
             text = { Text("当前内容尚未保存，确定要离开吗？") },
             confirmButton = {
                 TextButton(onClick = {
-                    showDiscardConfirm = false
-                    if (!isEditing) {
-                        deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
-                        deleteFileCountingFreedBytes(pendingCameraFile)
-                    }
-                    onClose()
-                }) { Text("放弃", color = Color(0xFFC0392B)) }
+                showDiscardConfirm = false
+                if (!isEditing) {
+                    deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
+                    deleteFileCountingFreedBytes(pendingCameraFile)
+                } else {
+                    deleteDraftLocalMedia(localAbsolutePath, localThumbPath, protectedPaths = protectedOriginalLocalMedia())
+                }
+                onClose()
+            }) { Text("放弃", color = Color(0xFFC0392B)) }
             },
             dismissButton = {
                 TextButton(onClick = { showDiscardConfirm = false }) { Text("继续编辑") }
@@ -485,6 +639,18 @@ fun V2MemoCreateVideoScreen(
 }
 
 private enum class SourceKind { CAMERA, ALBUM, ONLINE }
+
+private const val VideoMemoTitleMaxLength = 24
+private const val VideoMemoNoteMaxLength = 240
+
+private enum class VideoCreateScrubFeel(
+    val title: String,
+    val pixelsPerSecond: Float,
+) {
+    Balanced("稳", 180f),
+    Precise("细", 280f),
+    Frame("帧", 420f),
+}
 
 private fun initialSourceKind(memo: V2Memo?): SourceKind? = when {
     memo == null -> null
@@ -500,23 +666,59 @@ private fun initialLocalThumbPath(memo: V2Memo?): String? =
     memo?.thumbnailUrl?.takeUnless { memo.isOnlineVideo }?.removePrefix("file://")
 
 private fun detectPlatform(url: String): String = when {
-    url.contains("bilibili", ignoreCase = true) -> "bilibili"
-    url.contains("douyin", ignoreCase = true) -> "douyin"
-    url.contains("xiaohongshu", ignoreCase = true) -> "xiaohongshu"
-    url.contains("youtube", ignoreCase = true) -> "youtube"
-    else -> "online"
+    url.contains("douyin.com", ignoreCase = true) || url.contains("iesdouyin.com", ignoreCase = true) -> "抖音"
+    url.contains("bilibili.com", ignoreCase = true) || url.contains("b23.tv", ignoreCase = true) -> "B站"
+    url.contains("xiaohongshu.com", ignoreCase = true) || url.contains("xhslink.com", ignoreCase = true) -> "小红书"
+    url.contains("youtube.com", ignoreCase = true) || url.contains("youtu.be", ignoreCase = true) -> "YouTube"
+    else -> "在线平台"
+}
+
+private fun videoMemoPlatformDisplayName(platform: String, url: String): String {
+    val trimmed = platform.trim()
+    return when {
+        trimmed.equals("哔哩哔哩", ignoreCase = true) || trimmed.equals("bilibili", ignoreCase = true) -> "B站"
+        trimmed.equals("douyin", ignoreCase = true) -> "抖音"
+        trimmed.equals("xiaohongshu", ignoreCase = true) -> "小红书"
+        trimmed.equals("youtube", ignoreCase = true) -> "YouTube"
+        trimmed.equals("其他", ignoreCase = true) || trimmed.equals("online", ignoreCase = true) || trimmed.isBlank() -> detectPlatform(url)
+        else -> trimmed
+    }
+}
+
+private fun prefilledOnlineVideoMemoTitle(selection: V2OnlineVideoSelection): String {
+    val cleanedTitle = selection.title.trim()
+    if (cleanedTitle.isNotEmpty() && cleanedTitle != selection.url.trim()) return cleanedTitle
+    val platform = videoMemoPlatformDisplayName(selection.platform, selection.url)
+    return "${platform}视频"
+}
+
+private fun prefilledOnlineVideoMemoNote(selection: V2OnlineVideoSelection): String {
+    val lines = mutableListOf<String>()
+    if (selection.durationSec != null && selection.durationSec > 0) {
+        lines.add("时长：${formatVideoMemoDuration(selection.durationSec)}")
+    }
+    val url = selection.url.trim()
+    if (url.isNotEmpty()) {
+        val platform = videoMemoPlatformDisplayName(selection.platform, url)
+        lines.add("来源：$platform $url")
+    }
+    return lines.joinToString("\n")
 }
 
 private fun buildMetaText(isOnline: Boolean, durationSec: Double?): String {
     val parts = mutableListOf<String>()
     if (isOnline) parts.add("在线视频") else parts.add("本地视频")
     if (durationSec != null && durationSec > 0) {
-        val total = durationSec.toInt()
-        val m = total / 60
-        val s = total % 60
-        parts.add(String.format(Locale.ROOT, "%d:%02d", m, s))
+        parts.add(formatVideoMemoDuration(durationSec))
     }
     return parts.joinToString(" · ")
+}
+
+private fun formatVideoMemoDuration(durationSec: Double): String {
+    val total = durationSec.toInt()
+    val m = total / 60
+    val s = total % 60
+    return String.format(Locale.ROOT, "%d:%02d", m, s)
 }
 
 internal fun deleteDraftLocalMedia(
@@ -544,6 +746,7 @@ internal fun deleteDraftLocalMedia(
 
 @Composable
 private fun TitleSection(title: String, onChange: (String) -> Unit) {
+    var titleFocused by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("标题", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
         Row(verticalAlignment = Alignment.Bottom) {
@@ -552,7 +755,9 @@ private fun TitleSection(title: String, onChange: (String) -> Unit) {
                 onValueChange = onChange,
                 textStyle = TextStyle(fontSize = 15.sp, color = Color(0xFF1B2A21)),
                 cursorBrush = SolidColor(Color(0xFF2D6A4F)),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { titleFocused = it.isFocused },
                 singleLine = true,
                 decorationBox = { inner ->
                     if (title.isEmpty()) {
@@ -563,7 +768,12 @@ private fun TitleSection(title: String, onChange: (String) -> Unit) {
             )
             Text("${title.length}/24", fontSize = 11.sp, color = Color(0xFF9CA3AF))
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE5E7EB)))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(if (titleFocused) Color(0xFF2D6A4F) else Color(0xFFE5E7EB)),
+        )
     }
 }
 
@@ -574,13 +784,18 @@ private fun NoteSection(
     onToggleExpand: () -> Unit,
     onChange: (String) -> Unit,
 ) {
+    val headerShape = if (expanded) {
+        RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    } else {
+        RoundedCornerShape(12.dp)
+    }
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
+                .clip(headerShape)
                 .background(Color(0xFFFAF7F0))
-                .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(12.dp))
+                .border(1.dp, Color(0xFFE5E7EB), headerShape)
                 .clickable { onToggleExpand() }
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -595,6 +810,7 @@ private fun NoteSection(
                 if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                 contentDescription = null,
                 tint = Color(0xFF9CA3AF),
+                modifier = Modifier.size(13.dp),
             )
         }
         if (expanded) {
@@ -612,10 +828,17 @@ private fun NoteSection(
                     onValueChange = onChange,
                     textStyle = TextStyle(fontSize = 15.sp, color = Color(0xFF1B2A21)),
                     cursorBrush = SolidColor(Color(0xFF2D6A4F)),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 80.dp),
                 )
                 if (note.isEmpty()) {
-                    Text("今天练习推杆时注意力不集中…", fontSize = 15.sp, color = Color(0xFFC5C5C5))
+                    Text(
+                        "今天练习推杆时注意力不集中…",
+                        fontSize = 15.sp,
+                        color = Color(0xFFC5C5C5),
+                        modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+                    )
                 }
                 Text(
                     "${note.length}/240",
@@ -629,32 +852,65 @@ private fun NoteSection(
 }
 
 @Composable
-private fun BottomSaveBar(canSave: Boolean, editing: Boolean, onSave: () -> Unit, modifier: Modifier = Modifier) {
+private fun BottomSaveBar(
+    canSave: Boolean,
+    saving: Boolean,
+    editing: Boolean,
+    onSave: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFFFAF7F0))
-            .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .navigationBarsPadding(),
     ) {
-        Text(
-            if (editing) "保留原视频源，仅更新标题、笔记、标签与目标" else "将保存到 视频笔记 · 视频 Memo",
-            fontSize = 11.sp,
-            color = Color(0xFF9CA3AF),
-        )
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
-                .clip(RoundedCornerShape(50))
-                .background(if (canSave) Color(0xFF2D6A4F) else Color(0xFF2D6A4F).copy(alpha = 0.4f))
-                .clickable(enabled = canSave, onClick = onSave),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
+                .height(1.dp)
+                .background(Color(0xFFE5E7EB)),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(top = 12.dp, bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(if (editing) "保存修改" else "保存视频 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(
+                if (editing) "将更新到 视频笔记 · 视频 Memo" else "将保存到 视频笔记 · 视频 Memo",
+                fontSize = 11.sp,
+                color = Color(0xFF9CA3AF),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (canSave) Color(0xFF2D6A4F) else Color(0xFF2D6A4F).copy(alpha = 0.4f))
+                    .clickable(enabled = canSave, onClick = onSave),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    if (saving) {
+                        if (editing) "更新中…" else "保存中…"
+                    } else if (editing) {
+                        "保存修改"
+                    } else {
+                        "保存视频 Memo"
+                    },
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            }
         }
     }
 }
@@ -664,38 +920,44 @@ private fun BottomSaveBar(canSave: Boolean, editing: Boolean, onSave: () -> Unit
 // =================================================================
 
 @Composable
-private fun NavBar(canSave: Boolean, title: String, onClose: () -> Unit, onSave: () -> Unit) {
-    Row(
+private fun NavBar(
+    title: String,
+    onClose: () -> Unit,
+) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .v2StatusBarPadding()
-            .background(Color.White.copy(alpha = 0.92f))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(Color(0xFFFAF7F0)),
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .border(width = 1.dp, color = Color(0xFFE5E7EB), shape = CircleShape)
+                    .clickable { onClose() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "关闭", tint = Color(0xFF1B2A21), modifier = Modifier.size(13.dp))
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+            Spacer(modifier = Modifier.weight(1f))
+            Spacer(Modifier.size(32.dp))
+        }
         Box(
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(Color.White)
-                .border(width = 1.dp, color = Color(0xFFE5E7EB), shape = CircleShape)
-                .clickable { onClose() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.Close, contentDescription = "关闭", tint = Color(0xFF1B2A21), modifier = Modifier.size(14.dp))
-        }
-        Spacer(modifier = Modifier.weight(1f))
-        Text(title, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
-        Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = "保存",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (canSave) Color(0xFF2D6A4F) else Color(0xFF9CA3AF),
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .clickable(enabled = canSave) { onSave() }
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(Color(0xFFE5E7EB)),
         )
     }
 }
@@ -715,6 +977,7 @@ private fun VideoSourceBlock(
     durationSec: Double?,
     importing: Boolean,
     editing: Boolean,
+    canReplaceSource: Boolean,
     onPickCamera: () -> Unit,
     onPickAlbum: () -> Unit,
     onPickOnline: () -> Unit,
@@ -722,19 +985,15 @@ private fun VideoSourceBlock(
 ) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
-            .background(Color.White.copy(alpha = 0.92f))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("视频来源", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
             Spacer(Modifier.weight(1f))
-            if (sourceKind != null && !importing && !editing) {
+            if (canReplaceSource && sourceKind != null && !importing) {
                 Text(
-                    text = "重新选择",
+                    text = if (editing) "更换视频" else "重新选择",
                     fontSize = 12.sp,
                     color = Color(0xFFC0392B),
                     modifier = Modifier
@@ -747,23 +1006,46 @@ private fun VideoSourceBlock(
 
         if (editing) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = when (sourceKind) {
-                        SourceKind.CAMERA -> "拍摄"
-                        SourceKind.ALBUM -> "本地上传"
-                        SourceKind.ONLINE -> "在线视频"
-                        null -> "视频源"
-                    },
-                    fontSize = 12.sp,
-                    color = Color(0xFF7B8A82),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0xFFE8F5E9))
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                )
-                Text("视频源已锁定，编辑模式下不可更换", fontSize = 12.sp, color = Color(0xFF9CA3AF))
+                if (canReplaceSource) {
+                    Text(
+                        text = when (sourceKind) {
+                            SourceKind.CAMERA -> "拍摄"
+                            SourceKind.ALBUM -> "本地上传"
+                            SourceKind.ONLINE -> "在线视频"
+                            null -> "视频源"
+                        },
+                        fontSize = 12.sp,
+                        color = Color(0xFF7B8A82),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFFE8F5E9))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                    Text(
+                        "当前视频源可在恢复模式下更换，保存成功后会替换原视频。",
+                        fontSize = 12.sp,
+                        color = Color(0xFF9CA3AF),
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = Color(0xFF9CA3AF),
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text(
+                            "视频源已锁定，编辑模式下不可更换",
+                            fontSize = 12.sp,
+                            color = Color(0xFF9CA3AF),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
             }
-        } else {
+        }
+
+        if (canReplaceSource) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 SourceChip(
                     icon = Icons.Filled.Videocam,
@@ -815,19 +1097,30 @@ private fun LinkedGoalsSection(
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(goals, key = { it.id }) { goal ->
                     val on = goal.id in selected
-                    Text(
-                        text = goal.title,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (on) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
-                        maxLines = 1,
+                    Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
                             .background(if (on) Color(0xFFE8F5E9) else Color.White)
                             .border(1.dp, if (on) Color(0xFF2D6A4F) else Color(0xFFE5E7EB), RoundedCornerShape(50))
                             .clickable { onToggle(goal.id) }
                             .padding(horizontal = 14.dp, vertical = 9.dp),
-                    )
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Flag,
+                            contentDescription = null,
+                            tint = if (on) Color(0xFF2D6A4F) else Color(0xFF9CA3AF),
+                            modifier = Modifier.size(10.dp),
+                        )
+                        Text(
+                            text = goal.title,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (on) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
@@ -844,13 +1137,13 @@ private fun SourceChip(
 ) {
     Column(
         modifier = modifier
-            .height(70.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .height(64.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(if (selected) Color(0xFFEBF5EC) else Color.White)
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) Color(0xFF2D6A4F) else Color(0xFFE5E7EB),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
             )
             .clickable { onClick() }
             .padding(8.dp),
@@ -861,13 +1154,13 @@ private fun SourceChip(
             imageVector = icon,
             contentDescription = null,
             tint = if (selected) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.height(4.dp))
         Text(
             text = label,
             fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            fontWeight = FontWeight.Medium,
             color = if (selected) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
         )
     }
@@ -900,31 +1193,16 @@ private fun PreviewArea(
                     Text("处理视频中…", color = Color.White, fontSize = 12.sp)
                 }
             }
-            localPath != null -> LocalPreview(localPath, localThumbPath)
+            localPath != null -> LocalPreview(localPath, durationSec)
             onlineUrl != null -> OnlinePreview(onlineUrl, onlineThumbUrl)
             else -> EmptyPlaceholder()
         }
 
-        if (!importing && (localPath != null || onlineUrl != null)) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.25f))
-                    .border(width = 2.dp, color = Color.White.copy(alpha = 0.7f), shape = CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.PlayCircle,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
+        if (!importing && onlineUrl != null) {
+            VideoPreviewPlayButton(modifier = Modifier.align(Alignment.Center))
         }
 
-        if (durationSec != null && durationSec > 0) {
+        if (durationSec != null && durationSec > 0 && localPath == null) {
             val total = durationSec.toInt()
             val m = total / 60
             val s = total % 60
@@ -946,38 +1224,190 @@ private fun PreviewArea(
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun LocalPreview(absolutePath: String, thumbPath: String?) {
-    // 优先用本地缩略图（静态图），点击之后用户去主播放页全屏播
-    if (!thumbPath.isNullOrBlank()) {
-        AsyncImage(
-            model = "file://$thumbPath",
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
-    } else {
-        // 没缩略图则用 ExoPlayer 暂停在第 0 帧
-        val context = LocalContext.current
-        val player = remember(absolutePath) {
-            ExoPlayer.Builder(context).build().apply {
-                setMediaItem(MediaItem.fromUri("file://$absolutePath"))
-                volume = 0f
-                prepare()
-                seekTo(0)
+private fun LocalPreview(absolutePath: String, durationSec: Double?) {
+    val context = LocalContext.current
+    var isPlaying by remember(absolutePath) { mutableStateOf(false) }
+    var currentTime by remember(absolutePath) { mutableFloatStateOf(0f) }
+    var duration by remember(absolutePath, durationSec) { mutableFloatStateOf(durationSec?.toFloat() ?: 0f) }
+    var scrubFeel by remember { mutableStateOf(VideoCreateScrubFeel.Precise) }
+    var wasPlayingBeforeScrub by remember { mutableStateOf(false) }
+    val player = remember(absolutePath) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri("file://$absolutePath"))
+            volume = 0f
+            playWhenReady = false
+            prepare()
+            seekTo(0)
+        }
+    }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    player.pause()
+                    player.seekTo(0)
+                    isPlaying = false
+                    currentTime = 0f
+                }
             }
         }
-        DisposableEffect(Unit) {
-            onDispose { player.release() }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
         }
+    }
+    LaunchedEffect(player) {
+        while (true) {
+            currentTime = (player.currentPosition / 1000f).coerceAtLeast(0f)
+            player.duration.takeIf { it > 0 }?.let { duration = it / 1000f }
+            isPlaying = player.isPlaying
+            kotlinx.coroutines.delay(120)
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable {
+                    if (player.isPlaying) {
+                        player.pause()
+                    } else {
+                        player.play()
+                    }
+                },
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     this.player = player
                     useController = false
                 }
             },
+            update = { it.player = player },
         )
+        if (!isPlaying) {
+            VideoPreviewPlayButton(modifier = Modifier.align(Alignment.Center))
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.68f)),
+                    ),
+                )
+                .padding(horizontal = 12.dp)
+                .padding(top = 20.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            VideoCreateScrubFeelControl(selected = scrubFeel, onSelected = { scrubFeel = it })
+            VideoCreateMiniScrubBar(
+                currentTime = currentTime,
+                duration = duration,
+                scrubFeel = scrubFeel,
+                onScrubStart = {
+                    wasPlayingBeforeScrub = player.isPlaying
+                    player.pause()
+                },
+                onScrubEnd = {
+                    if (wasPlayingBeforeScrub) player.play()
+                    wasPlayingBeforeScrub = false
+                },
+                onSeek = { seconds ->
+                    val targetMs = (seconds * 1000).roundToInt().toLong()
+                    player.seekTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
+                    currentTime = seconds
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun VideoCreateScrubFeelControl(
+    selected: VideoCreateScrubFeel,
+    onSelected: (VideoCreateScrubFeel) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.42f))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("手感", color = Color.White.copy(alpha = 0.68f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        VideoCreateScrubFeel.entries.forEach { feel ->
+            Box(
+                modifier = Modifier
+                    .size(width = 30.dp, height = 22.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (selected == feel) Color.White else Color.White.copy(alpha = 0.14f))
+                    .clickable { onSelected(feel) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = feel.title,
+                    color = if (selected == feel) Color.Black else Color.White.copy(alpha = 0.82f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VideoCreateMiniScrubBar(
+    currentTime: Float,
+    duration: Float,
+    scrubFeel: VideoCreateScrubFeel,
+    onScrubStart: () -> Unit,
+    onScrubEnd: () -> Unit,
+    onSeek: (Float) -> Unit,
+) {
+    val progress = if (duration > 0f) (currentTime / duration).coerceIn(0f, 1f) else 0f
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(26.dp)
+            .pointerInput(duration, currentTime, scrubFeel) {
+                var startTime = currentTime
+                var accumulatedX = 0f
+                detectDragGestures(
+                    onDragStart = {
+                        onScrubStart()
+                        startTime = currentTime
+                        accumulatedX = 0f
+                    },
+                    onDragEnd = onScrubEnd,
+                    onDragCancel = onScrubEnd,
+                    onDrag = { change, dragAmount ->
+                        accumulatedX += dragAmount.x
+                        val target = (startTime + accumulatedX / scrubFeel.pixelsPerSecond)
+                            .coerceIn(0f, duration.coerceAtLeast(0f))
+                        onSeek(target)
+                        change.consume()
+                    },
+                )
+            },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.28f)))
+        Box(
+            Modifier
+                .fillMaxWidth(progress.coerceAtLeast(0.001f))
+                .height(4.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White),
+        )
+        Box(
+            modifier = Modifier.fillMaxWidth(progress.coerceAtLeast(0.001f)),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
+            Box(Modifier.size(14.dp).clip(CircleShape).background(Color.White))
+        }
     }
 }
 
@@ -1020,13 +1450,32 @@ private fun OnlinePreview(url: String, thumbnailUrl: String?) {
 private fun EmptyPlaceholder() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(
-            imageVector = Icons.Filled.PlayCircle,
+            imageVector = Icons.Filled.OndemandVideo,
             contentDescription = null,
             tint = Color.White.copy(alpha = 0.55f),
-            modifier = Modifier.size(36.dp),
+            modifier = Modifier.size(28.dp),
         )
         Spacer(Modifier.height(6.dp))
         Text("先选择或拍摄一段视频", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun VideoPreviewPlayButton(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(Color.White.copy(alpha = 0.22f))
+            .border(width = 2.dp, color = Color.White.copy(alpha = 0.7f), shape = CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.PlayArrow,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(18.dp).offset(x = 1.5.dp),
+        )
     }
 }
 
@@ -1039,6 +1488,9 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
     var input by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .navigationBarsPadding(),
         onDismissRequest = onDismiss,
         title = { Text("在线视频 URL") },
         text = {
@@ -1076,4 +1528,15 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
+}
+
+private fun defaultLinkedGoalIdForVideoMemo(goals: List<V2Goal>): UUID? {
+    val active = goals.filter { it.status == V2Goal.Status.ACTIVE }
+    return active.firstOrNull { it.todayFocus }?.id
+        ?: active.singleOrNull()?.id
+}
+
+private fun memoVideoSaveError(base: String, debugDetail: String?): String {
+    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+    return if (detail == null) base else "$base（$detail）"
 }

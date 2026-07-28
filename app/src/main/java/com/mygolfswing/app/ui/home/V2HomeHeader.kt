@@ -2,6 +2,11 @@ package com.mygolfswing.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -22,14 +24,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.clickable
 import com.mygolfswing.app.ui.common.V2Format
 import com.mygolfswing.app.ui.common.V2UserAvatar
 import com.mygolfswing.app.ui.designsystem.DSColors
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+
+private const val HOME_AVATAR_DEV_LONG_PRESS_MS = 1_500L
 
 /**
  * V2 主页头部（对齐 iOS `V2HomeHeader`）。
@@ -45,6 +53,7 @@ fun V2HomeHeader(
     modifier: Modifier = Modifier,
     avatarUrl: String? = null,
     onAddTap: () -> Unit = {},
+    onAvatarLongPress: (() -> Unit)? = null,
 ) {
     val ringYellow = Color(0xFFE0A82E)
     val titleInk = Color(0xFF1B2A21)
@@ -62,8 +71,31 @@ fun V2HomeHeader(
         Box(
             modifier = Modifier
                 .size(48.dp)
-                .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
-                .border(width = 2.5.dp, color = ringYellow, shape = CircleShape),
+                .shadow(
+                    elevation = 10.dp,
+                    shape = CircleShape,
+                    clip = false,
+                    ambientColor = DSColors.fairway.copy(alpha = 0.18f),
+                    spotColor = DSColors.fairway.copy(alpha = 0.18f),
+                )
+                .border(width = 2.5.dp, color = ringYellow, shape = CircleShape)
+                .then(
+                    if (onAvatarLongPress == null) {
+                        Modifier
+                    } else {
+                        Modifier.pointerInput(onAvatarLongPress) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                try {
+                                    waitForUpOrCancellationOrTimeout(HOME_AVATAR_DEV_LONG_PRESS_MS)
+                                } catch (_: TimeoutCancellationException) {
+                                    onAvatarLongPress()
+                                    waitForUpOrCancellation()
+                                }
+                            }
+                        }
+                    },
+                ),
         ) {
             V2UserAvatar(
                 avatar = avatarUrl,
@@ -113,19 +145,51 @@ fun V2HomeHeader(
         Box(
             modifier = Modifier
                 .size(42.dp)
-                .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+                .shadow(
+                    elevation = 12.dp,
+                    shape = CircleShape,
+                    clip = false,
+                    ambientColor = DSColors.fairway.copy(alpha = 0.22f),
+                    spotColor = DSColors.fairway.copy(alpha = 0.22f),
+                )
                 .clip(CircleShape)
                 .background(Color.White)
                 .border(width = 1.5.dp, color = DSColors.fairway, shape = CircleShape)
                 .clickable { onAddTap() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = "添加",
-                tint = DSColors.fairway,
-                modifier = Modifier.size(20.dp),
-            )
+            LightPlusIcon()
         }
+    }
+}
+
+private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.waitForUpOrCancellationOrTimeout(
+    timeoutMillis: Long,
+) {
+    withTimeout(timeoutMillis) {
+        waitForUpOrCancellation()
+    }
+}
+
+@Composable
+private fun LightPlusIcon() {
+    Canvas(modifier = Modifier.size(20.dp)) {
+        val stroke = 1.5.dp.toPx()
+        val arm = size.minDimension * 0.34f
+        val center = Offset(size.width / 2f, size.height / 2f)
+        drawLine(
+            color = DSColors.fairway,
+            start = Offset(center.x - arm, center.y),
+            end = Offset(center.x + arm, center.y),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = DSColors.fairway,
+            start = Offset(center.x, center.y - arm),
+            end = Offset(center.x, center.y + arm),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
     }
 }

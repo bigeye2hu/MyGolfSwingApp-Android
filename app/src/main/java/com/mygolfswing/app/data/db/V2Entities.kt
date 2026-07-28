@@ -78,6 +78,7 @@ data class AIMessageEntity(
     val sessionId: String,
     val role: String,
     val text: String,
+    val attachmentsJson: String = "[]",
     val isStreaming: Boolean,
     val createdAt: Long,
 )

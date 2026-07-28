@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.R
+import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSTypography
 
@@ -78,6 +79,11 @@ internal val authHeroBrush: Brush
             1.00f to DSColors.warmWhite.copy(alpha = 0.88f),
         ),
     )
+
+internal fun authUserError(base: String, debugDetail: String?): String {
+    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+    return if (detail == null) base else "$base（$detail）"
+}
 
 private val rainbowRingBrush: Brush
     get() = Brush.sweepGradient(

@@ -16,6 +16,9 @@ interface V2DownloadApi {
     @GET("credits/balance")
     suspend fun creditsBalance(): JsonObject
 
+    @POST("credits/add-iap")
+    suspend fun addCreditsFromIap(@Body body: JsonObject): JsonObject
+
     @GET("ai/quota")
     suspend fun aiQuota(): JsonObject
 

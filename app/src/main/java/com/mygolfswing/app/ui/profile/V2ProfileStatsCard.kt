@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,14 +19,20 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
+import java.util.Locale
 
 @Composable
 fun V2ProfileStatsCard(
@@ -43,7 +50,12 @@ fun V2ProfileStatsCard(
         modifier = modifier
             .fillMaxWidth()
             .height(206.dp)
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp))
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(16.dp),
+                ambientColor = DSColors.fairway.copy(alpha = 0.08f),
+                spotColor = DSColors.fairway.copy(alpha = 0.08f),
+            )
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite),
     ) {
@@ -91,8 +103,8 @@ fun V2ProfileStatsCard(
 }
 
 private fun compact(n: Int): String = when {
-    n >= 10_000 -> "%.1fw".format(n / 10_000.0)
-    n >= 1_000 -> "%.1fk".format(n / 1_000.0)
+    n >= 10_000 -> String.format(Locale.US, "%.1f万", n / 10_000.0)
+    n >= 1_000 -> String.format(Locale.US, "%.1fk", n / 1_000.0)
     else -> n.toString()
 }
 
@@ -106,6 +118,7 @@ private fun StatCell(
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var valueFontSize by remember(value) { mutableStateOf(28.sp) }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -114,15 +127,21 @@ private fun StatCell(
         Column(
             modifier = Modifier
                 .fillMaxSize(),
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = value,
-                fontSize = 28.sp,
+                fontSize = valueFontSize,
                 fontWeight = FontWeight.Bold,
                 color = if (isPrimary) DSColors.fairway else DSColors.inkGreen,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { result ->
+                    if (result.hasVisualOverflow && valueFontSize.value > 16.8f) {
+                        valueFontSize = (valueFontSize.value - 0.5f).sp
+                    }
+                },
             )
             Text(text = label, fontSize = 11.sp, color = DSColors.shadowGray)
         }
@@ -134,15 +153,15 @@ private fun StatCell(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 12.dp, bottom = 12.dp)
-                .size(12.dp),
+                .size(10.dp),
         )
         // 右描边
         if (rightBorder) {
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
                     .width(1.dp)
-                    .fillMaxSize()
                     .background(DSColors.mistGreen),
             )
         }

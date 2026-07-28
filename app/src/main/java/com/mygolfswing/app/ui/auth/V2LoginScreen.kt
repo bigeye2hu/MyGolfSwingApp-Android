@@ -58,6 +58,7 @@ import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -132,10 +133,17 @@ fun V2LoginScreen(
                 }
                 scope.launch {
                     loading = true
-                    val r = ServiceLocator.authRepo.sendSmsCode(phone)
-                    loading = false
-                    r.onSuccess { countdown = 60 }
-                        .onFailure { error = it.message ?: "发送失败" }
+                    try {
+                        val r = ServiceLocator.authRepo.sendSmsCode(phone)
+                        r.onSuccess { countdown = 60 }
+                            .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        error = authUserError("验证码发送失败，请稍后重试", e.message)
+                    } finally {
+                        loading = false
+                    }
                 }
             },
             onForgot = onOpenResetPassword,
@@ -169,13 +177,20 @@ fun V2LoginScreen(
                 }
                 scope.launch {
                     loading = true
-                    val r = when (mode) {
-                        LoginMode.SMS -> ServiceLocator.authRepo.loginByPhone(phone, smsCode)
-                        LoginMode.PASSWORD -> ServiceLocator.authRepo.loginWithUsername(username, password)
+                    try {
+                        val r = when (mode) {
+                            LoginMode.SMS -> ServiceLocator.authRepo.loginByPhone(phone, smsCode)
+                            LoginMode.PASSWORD -> ServiceLocator.authRepo.loginWithUsername(username, password)
+                        }
+                        r.onSuccess { onLoginSuccess() }
+                            .onFailure { error = authUserError("登录失败，请检查账号信息后重试", it.message) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        error = authUserError("登录失败，请检查账号信息后重试", e.message)
+                    } finally {
+                        loading = false
                     }
-                    loading = false
-                    r.onSuccess { onLoginSuccess() }
-                        .onFailure { error = it.message ?: "登录失败" }
                 }
             },
             onOpenRegister = onOpenRegister,
@@ -284,16 +299,14 @@ private fun Card(
             onOpenTerms = onOpenTerms,
             onOpenPrivacy = onOpenPrivacy,
         )
-        if (mode == LoginMode.PASSWORD) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("没有账号？", style = DSTypography.caption, color = DSColors.shadowGray)
-                TextButton(onClick = onOpenRegister) {
-                    Text("立即注册", color = DSColors.fairway, style = DSTypography.bodyBold)
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("没有账号？", style = DSTypography.caption, color = DSColors.shadowGray)
+            TextButton(onClick = onOpenRegister) {
+                Text("立即注册", color = DSColors.fairway, style = DSTypography.bodyBold)
             }
         }
     }

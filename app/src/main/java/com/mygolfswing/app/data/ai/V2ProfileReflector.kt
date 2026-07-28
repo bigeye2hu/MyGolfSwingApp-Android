@@ -9,6 +9,7 @@ import com.mygolfswing.app.data.store.V2AIChatStore
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2GolfProfileStore
 import com.mygolfswing.app.data.store.V2MemoStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -52,6 +53,10 @@ object V2ProfileReflector {
             } else {
                 Result.NoChange
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return Result.Failed(e.message ?: "未知错误")
         } finally {
             isReflecting = false
         }

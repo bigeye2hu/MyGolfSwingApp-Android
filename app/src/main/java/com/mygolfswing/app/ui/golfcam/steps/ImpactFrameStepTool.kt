@@ -1,9 +1,6 @@
 package com.mygolfswing.app.ui.golfcam.steps
 
-import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import android.net.Uri
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,10 +40,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -61,16 +57,28 @@ import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
 import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.ImpactFrameSelection
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.withContext
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private const val THUMB_CELL_COUNT = 60       // 最多 60 张缩略图
-private val CELL_W: Dp = 32.dp
-private val CELL_H: Dp = 45.dp
-private val CELL_GAP: Dp = 2.dp
+internal const val IMPACT_FRAME_THUMBNAIL_COUNT = 60       // 最多 60 张缩略图
+internal const val IMPACT_FRAME_THUMBNAIL_CELL_WIDTH_DP = 32
+internal const val IMPACT_FRAME_THUMBNAIL_CELL_HEIGHT_DP = 45
+internal const val IMPACT_FRAME_TIMELINE_HEIGHT_DP = 50
+internal const val IMPACT_FRAME_THUMBNAIL_GAP_DP = 2
+internal const val IMPACT_FRAME_THUMBNAIL_CORNER_RADIUS_DP = 4
+internal const val IMPACT_FRAME_THUMBNAIL_SELECTED_BORDER_DP = 2
+internal const val IMPACT_FRAME_THUMBNAIL_SELECTED_SCALE = 1.1f
+internal const val IMPACT_FRAME_THUMBNAIL_UNSELECTED_ALPHA = 0.6f
+internal const val IMPACT_FRAME_CANDIDATE_DOT_SIZE_DP = 6
+internal const val IMPACT_FRAME_CANDIDATE_DOT_TOP_PADDING_DP = 2
+internal const val IMPACT_FRAME_NAV_BUTTON_WIDTH_DP = 44
+internal const val IMPACT_FRAME_NAV_BUTTON_HEIGHT_DP = 50
+private val CELL_W: Dp = IMPACT_FRAME_THUMBNAIL_CELL_WIDTH_DP.dp
+private val CELL_H: Dp = IMPACT_FRAME_THUMBNAIL_CELL_HEIGHT_DP.dp
+private val TIMELINE_H: Dp = IMPACT_FRAME_TIMELINE_HEIGHT_DP.dp
+private val CELL_GAP: Dp = IMPACT_FRAME_THUMBNAIL_GAP_DP.dp
 
 internal fun initialImpactFrameIndex(
     savedFrameIndex: Int?,
@@ -78,14 +86,151 @@ internal fun initialImpactFrameIndex(
     totalFrames: Int,
 ): Int {
     val lastFrame = (totalFrames - 1).coerceAtLeast(0)
-    return (savedFrameIndex ?: candidateFrames.firstOrNull()?.frameIndex ?: (totalFrames / 2))
+    return (savedFrameIndex ?: candidateFrames.maxByOrNull { finiteCandidateConfidence(it.confidence) }?.frameIndex ?: (totalFrames / 2))
         .coerceIn(0, lastFrame)
+}
+
+internal fun asyncImpactCandidateReplacementFrame(
+    savedFrameIndexOnEntry: Int?,
+    currentFrame: Int,
+    candidateFrames: List<CandidateImpactFrame>,
+    totalFrames: Int,
+): Int? {
+    if (savedFrameIndexOnEntry != null || candidateFrames.isEmpty()) return null
+    val lastFrame = (totalFrames - 1).coerceAtLeast(0)
+    val autoMiddleFrame = (totalFrames / 2).coerceIn(0, lastFrame)
+    if (currentFrame.coerceIn(0, lastFrame) != autoMiddleFrame) return null
+    return candidateFrames.maxByOrNull { finiteCandidateConfidence(it.confidence) }?.frameIndex?.coerceIn(0, lastFrame)
 }
 
 internal fun impactFrameDisplayText(currentFrame: Int, totalFrames: Int): String {
     val safeTotal = totalFrames.coerceAtLeast(1)
     val oneBasedFrame = currentFrame.coerceIn(0, safeTotal - 1) + 1
     return "$oneBasedFrame/$safeTotal"
+}
+
+internal fun impactFrameStepFrame(currentFrame: Int, totalFrames: Int, deltaFrames: Int): Int {
+    val lastFrame = (totalFrames - 1).coerceAtLeast(0)
+    return (currentFrame + deltaFrames).coerceIn(0, lastFrame)
+}
+
+internal fun formatImpactFrameTimeLabel(seconds: Double): String {
+    val safeSeconds = seconds.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
+    return String.format(Locale.US, "%.2fs", safeSeconds)
+}
+
+internal fun shouldUpdateImpactFrameSelection(
+    currentFrame: Int,
+    durationMs: Long,
+    frameRate: Double,
+    candidateFrames: List<CandidateImpactFrame>,
+): Boolean {
+    return currentFrame >= 0 && durationMs > 0L && frameRate.isFinite() && frameRate > 0.0
+}
+
+private fun finiteCandidateConfidence(confidence: Float): Float {
+    return (confidence.takeIf { it.isFinite() } ?: 0f).coerceIn(0f, 1f)
+}
+
+internal fun validImpactCandidateFramesForTrimRange(
+    candidateFrames: List<CandidateImpactFrame>,
+    trimStartMs: Long,
+    trimEndMs: Long,
+    frameRate: Double,
+): List<CandidateImpactFrame> {
+    val safeEndMs = GolfCamFrameTimeline.endExclusiveMsAfterStart(trimStartMs, trimEndMs)
+    val lastFrame = GolfCamFrameTimeline.lastFrameIndexForRange(trimStartMs, safeEndMs, frameRate)
+    val lastAnchorMs = GolfCamFrameTimeline.lastFrameTimeMsForRange(trimStartMs, safeEndMs, frameRate)
+    val maxRelativeSec = GolfCamFrameTimeline.nonNegativeDeltaMs(trimStartMs, lastAnchorMs) / 1000.0
+    return candidateFrames.mapNotNull { candidate ->
+        val relTime = candidate.timeSec
+        if (!relTime.isFinite()) return@mapNotNull null
+        if (relTime !in 0.0..maxRelativeSec) return@mapNotNull null
+        val frameIndex = if (relTime >= maxRelativeSec) {
+            lastFrame
+        } else {
+            GolfCamFrameTimeline.frameIndexAt(relTime, frameRate).coerceIn(0, lastFrame)
+        }
+        CandidateImpactFrame(
+            frameIndex = frameIndex,
+            confidence = finiteCandidateConfidence(candidate.confidence),
+            timeSec = relTime,
+        )
+    }
+}
+
+internal fun impactFrameSelectionForFrame(
+    trimStartMs: Long,
+    trimEndMs: Long,
+    currentFrame: Int,
+    durationMs: Long,
+    frameRate: Double,
+    candidateFrames: List<CandidateImpactFrame>,
+): ImpactFrameSelection? {
+    if (!shouldUpdateImpactFrameSelection(currentFrame, durationMs, frameRate, candidateFrames)) return null
+    val safeEndMs = GolfCamFrameTimeline.endExclusiveMsAfterStart(trimStartMs, trimEndMs)
+    val lastFrame = GolfCamFrameTimeline.lastFrameIndexForRange(trimStartMs, safeEndMs, frameRate)
+    val clampedFrame = currentFrame.coerceIn(0, lastFrame)
+    val lastAnchorMs = GolfCamFrameTimeline.lastFrameTimeMsForRange(trimStartMs, safeEndMs, frameRate)
+    val timeMs = GolfCamFrameTimeline.timeMsForFrame(trimStartMs, clampedFrame, frameRate)
+        .coerceIn(trimStartMs, lastAnchorMs)
+    return ImpactFrameSelection(
+        frameIndex = clampedFrame,
+        timeMs = timeMs,
+        candidateFrames = validImpactCandidateFramesForTrimRange(
+            candidateFrames = candidateFrames,
+            trimStartMs = trimStartMs,
+            trimEndMs = safeEndMs,
+            frameRate = frameRate,
+        ),
+    )
+}
+
+internal fun impactFrameThumbnailFrameIndices(
+    totalFrames: Int,
+    maxThumbs: Int = IMPACT_FRAME_THUMBNAIL_COUNT,
+): List<Int> {
+    val safeTotal = totalFrames.coerceAtLeast(1)
+    val thumbCount = maxThumbs.coerceIn(1, safeTotal)
+    if (thumbCount == 1) return listOf(0)
+    val lastFrame = safeTotal - 1
+    return (0 until thumbCount).map { index ->
+        (index * lastFrame.toDouble() / (thumbCount - 1))
+            .roundToInt()
+            .coerceIn(0, lastFrame)
+    }
+}
+
+internal fun impactFrameThumbnailSampleTimeMs(
+    trimStartMs: Long,
+    trimEndMs: Long,
+    frameRate: Double,
+    thumbIndex: Int,
+    maxThumbs: Int = IMPACT_FRAME_THUMBNAIL_COUNT,
+): Long {
+    val safeEndMs = GolfCamFrameTimeline.endExclusiveMsAfterStart(trimStartMs, trimEndMs)
+    val totalFrames = GolfCamFrameTimeline.totalFramesForRange(trimStartMs, safeEndMs, frameRate)
+    val frames = impactFrameThumbnailFrameIndices(totalFrames, maxThumbs)
+    val frameIndex = frames[thumbIndex.coerceIn(0, frames.lastIndex)]
+    return GolfCamFrameTimeline.timeMsForFrame(trimStartMs, frameIndex, frameRate)
+        .coerceIn(
+            trimStartMs,
+            GolfCamFrameTimeline.lastFrameTimeMsForRange(trimStartMs, safeEndMs, frameRate),
+        )
+}
+
+internal fun nearestImpactFrameThumbnailIndex(
+    frameIndex: Int,
+    totalFrames: Int,
+    thumbnailFrames: List<Int>,
+): Int {
+    if (thumbnailFrames.isEmpty()) return 0
+    val lastFrame = (totalFrames - 1).coerceAtLeast(0)
+    val safeFrame = frameIndex.coerceIn(0, lastFrame)
+    return thumbnailFrames
+        .indices
+        .minByOrNull { index -> golfCamFrameIndexDistance(thumbnailFrames[index], safeFrame) }
+        ?: 0
 }
 
 /**
@@ -104,7 +249,10 @@ fun ImpactFrameStepTool(
 ) {
     val safeFrameRate = GolfCamFrameTimeline.safeFrameRate(frameRate)
     val startMs = state.trimResult?.startMs ?: 0L
-    val endMs = (state.trimResult?.endMs?.takeIf { it > 0L } ?: durationMs).coerceAtLeast(startMs + 1L)
+    val endMs = GolfCamFrameTimeline.endExclusiveMsAfterStart(
+        startMs,
+        state.trimResult?.endMs?.takeIf { it > 0L } ?: durationMs,
+    )
     val trimDurationMs = (endMs - startMs).coerceAtLeast(1L)
     val totalFrames = GolfCamFrameTimeline.totalFrames(trimDurationMs, safeFrameRate)
     val savedFrameIndexOnEntry = remember(startMs, endMs) { state.impactFrame?.frameIndex }
@@ -118,20 +266,37 @@ fun ImpactFrameStepTool(
         )
     }
 
-    var currentFrame by remember(startMs, endMs, safeFrameRate, initialFrame) { mutableIntStateOf(initialFrame) }
+    var currentFrame by remember(startMs, endMs, safeFrameRate, totalFrames, savedFrameIndexOnEntry) {
+        mutableIntStateOf(initialFrame)
+    }
+    LaunchedEffect(savedFrameIndexOnEntry, candidateFrames, totalFrames) {
+        asyncImpactCandidateReplacementFrame(
+            savedFrameIndexOnEntry = savedFrameIndexOnEntry,
+            currentFrame = currentFrame,
+            candidateFrames = candidateFrames,
+            totalFrames = totalFrames,
+        )?.let { currentFrame = it }
+    }
 
     // step：多少个真实帧 对应 1个缩略图格
-    val step = (totalFrames.toFloat() / THUMB_CELL_COUNT).coerceAtLeast(1f)
-    val thumbCount = minOf(THUMB_CELL_COUNT, totalFrames)
+    val thumbnailFrames = remember(totalFrames) {
+        impactFrameThumbnailFrameIndices(totalFrames)
+    }
+    val thumbCount = thumbnailFrames.size
 
     // 通知父层
-    LaunchedEffect(currentFrame, durationMs, safeFrameRate) {
-        if (durationMs > 0L) {
-            val timeMs = GolfCamFrameTimeline.timeMsForFrame(startMs, currentFrame, safeFrameRate)
-                .coerceIn(startMs, endMs)
-            player.seekTo(timeMs)
+    LaunchedEffect(startMs, endMs, currentFrame, durationMs, safeFrameRate, candidateFrames) {
+        impactFrameSelectionForFrame(
+            trimStartMs = startMs,
+            trimEndMs = endMs,
+            currentFrame = currentFrame,
+            durationMs = durationMs,
+            frameRate = safeFrameRate,
+            candidateFrames = candidateFrames,
+        )?.let { selection ->
+            player.seekTo(selection.timeMs)
             player.pause()
-            onResult(ImpactFrameSelection(frameIndex = currentFrame, timeMs = timeMs, candidateFrames = candidateFrames))
+            onResult(selection)
         }
     }
 
@@ -155,7 +320,7 @@ fun ImpactFrameStepTool(
             Column {
                 Text("距离开始", color = DSColors.shadowGray, fontSize = 10.sp)
                 Text(
-                    "${"%.2f".format(elapsedSec)}s",
+                    formatImpactFrameTimeLabel(elapsedSec),
                     color = DSColors.inkGreen,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -192,7 +357,8 @@ fun ImpactFrameStepTool(
             trimDurationMs = trimDurationMs,
             totalFrames = totalFrames,
             thumbCount = thumbCount,
-            step = step,
+            thumbnailFrames = thumbnailFrames,
+            frameRate = safeFrameRate,
             currentFrame = currentFrame,
             candidateFrames = candidateFrames,
             onFrameChanged = { currentFrame = it },
@@ -213,7 +379,7 @@ fun ImpactFrameStepTool(
                 Box(modifier = Modifier.size(5.dp).background(DSColors.shadowGray, CircleShape))
             }
             Text(
-                "滑动选择球杆击中球的瞬间，上方视频同步跳帧",
+                "滑动选择球杆击中球的瞬间，或点击上方候选帧",
                 color = DSColors.shadowGray,
                 fontSize = 11.sp,
             )
@@ -230,7 +396,8 @@ private fun FrameFilmstrip(
     trimDurationMs: Long,
     totalFrames: Int,
     thumbCount: Int,
-    step: Float,
+    thumbnailFrames: List<Int>,
+    frameRate: Double,
     currentFrame: Int,
     candidateFrames: List<CandidateImpactFrame>,
     onFrameChanged: (Int) -> Unit,
@@ -238,37 +405,63 @@ private fun FrameFilmstrip(
     val context = LocalContext.current
     val density = LocalDensity.current
 
-    // 缩略图缓存
-    var thumbnails by remember(videoUri, startMs, thumbCount) { mutableStateOf<List<android.graphics.Bitmap?>>(List(thumbCount) { null }) }
+    val thumbnailSampleTimesMs = remember(startMs, trimDurationMs, thumbCount, frameRate) {
+        (0 until thumbCount).map { thumbIndex ->
+            impactFrameThumbnailSampleTimeMs(
+                trimStartMs = startMs,
+                trimEndMs = GolfCamFrameTimeline.timeMsAfter(startMs, trimDurationMs),
+                frameRate = frameRate,
+                thumbIndex = thumbIndex,
+                maxThumbs = thumbCount,
+            )
+        }
+    }
 
-    LaunchedEffect(videoUri, startMs, thumbCount, trimDurationMs) {
+    var thumbnails by remember(videoUri, thumbnailSampleTimesMs) {
+        mutableStateOf(GolfCamThumbnailCache.cachedTimelineThumbnails(videoUri, thumbnailSampleTimesMs))
+    }
+    val priorityTimeMs = GolfCamFrameTimeline.timeMsForFrame(startMs, currentFrame, frameRate)
+    val priorityThumbnailIndex = remember(thumbnailSampleTimesMs, priorityTimeMs) {
+        golfCamThumbnailPriorityIndex(thumbnailSampleTimesMs, priorityTimeMs)
+    }
+    val prioritySampleTimeMs = remember(thumbnailSampleTimesMs, priorityThumbnailIndex, priorityTimeMs) {
+        golfCamThumbnailPrioritySampleTimeMs(thumbnailSampleTimesMs, priorityTimeMs)
+    }
+
+    LaunchedEffect(videoUri, thumbnailSampleTimesMs, priorityThumbnailIndex) {
         if (thumbCount <= 0 || trimDurationMs <= 0) return@LaunchedEffect
-        thumbnails = withContext(Dispatchers.IO) {
-            val retriever = MediaMetadataRetriever()
-            try {
-                retriever.setDataSource(context, videoUri)
-                val metadata = retriever.thumbnailVideoMetadata()
-                (0 until thumbCount).map { i ->
-                    val frameMs = startMs + i.toLong() * trimDurationMs / (thumbCount - 1).coerceAtLeast(1)
-                    val bmp = retriever.getFrameAtTime(frameMs * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    bmp?.let {
-                        val visualBitmap = it.rotatedToVisualOrientation(metadata)
-                        val h = 180
-                        val w = (visualBitmap.width.toFloat() / visualBitmap.height * h).toInt().coerceAtLeast(1)
-                        Bitmap.createScaledBitmap(visualBitmap, w, h, false)
-                    }
-                }
-            } catch (_: Exception) {
-                List(thumbCount) { null }
-            } finally {
-                retriever.release()
-            }
+        val exactCachedSampleTimes = GolfCamThumbnailCache.cachedExactSampleTimes(videoUri, thumbnailSampleTimesMs)
+        thumbnails = GolfCamThumbnailCache.cachedTimelineThumbnails(videoUri, thumbnailSampleTimesMs)
+        GolfCamThumbnailCache.loadTimelineThumbnails(
+            context = context,
+            videoUri = videoUri,
+            sampleTimesMs = thumbnailSampleTimesMs,
+            priorityTimeMs = prioritySampleTimeMs,
+            skipCachedSampleTimesMs = exactCachedSampleTimes,
+        ) { index, bitmap ->
+            thumbnails = golfCamFillMissingThumbnailSlotsFromNearest(
+                thumbnails.toMutableList().also { current ->
+                    if (index in current.indices) current[index] = bitmap
+                },
+            )
+        }
+    }
+
+    val displayThumbnails = remember(thumbnails, thumbCount) {
+        if (thumbnails.size == thumbCount) {
+            thumbnails
+        } else {
+            List(thumbCount) { index -> thumbnails.getOrNull(index) }
         }
     }
 
     // 当前缩略图格（thumbIndex）对应的真实帧 index
-    fun thumbIndexToFrame(thumbIdx: Int): Int = (thumbIdx * step).roundToInt().coerceIn(0, totalFrames - 1)
-    fun frameToThumbIndex(frameIdx: Int): Int = (frameIdx / step).roundToInt().coerceIn(0, thumbCount - 1)
+    fun thumbIndexToFrame(thumbIdx: Int): Int {
+        return thumbnailFrames.getOrElse(thumbIdx.coerceIn(0, thumbCount - 1)) { 0 }
+    }
+    fun frameToThumbIndex(frameIdx: Int): Int {
+        return nearestImpactFrameThumbnailIndex(frameIdx, totalFrames, thumbnailFrames)
+    }
 
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = frameToThumbIndex(currentFrame))
 
@@ -308,8 +501,7 @@ private fun FrameFilmstrip(
         ) {
             // 上一帧
             NavButton(icon = Icons.Filled.ChevronLeft, label = "上一帧", enabled = currentFrame > 0) {
-                val newFrame = (currentFrame - 1).coerceAtLeast(0)
-                onFrameChanged(newFrame)
+                onFrameChanged(impactFrameStepFrame(currentFrame, totalFrames, deltaFrames = -1))
             }
 
             // 缩略图条
@@ -321,18 +513,19 @@ private fun FrameFilmstrip(
                     horizontalArrangement = Arrangement.spacedBy(CELL_GAP),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(CELL_H + 8.dp)  // 留空间给金点
+                        .height(TIMELINE_H)
                         .clip(RoundedCornerShape(6.dp)),
                 ) {
-                    itemsIndexed(thumbnails) { thumbIdx, bmp ->
+                    itemsIndexed(displayThumbnails) { thumbIdx, bmp ->
                         val frameIdx = thumbIndexToFrame(thumbIdx)
-                        val isSelected = abs(frameIdx - currentFrame) < step / 2f
-                        val isCandidate = candidateFrames.any { abs(it.frameIndex - frameIdx) < step }
+                        val selectedThumb = frameToThumbIndex(currentFrame)
+                        val isSelected = thumbIdx == selectedThumb
+                        val isCandidate = candidateFrames.any { frameToThumbIndex(it.frameIndex) == thumbIdx }
 
                         Box(
                             modifier = Modifier
                                 .width(CELL_W)
-                                .height(CELL_H + 8.dp)
+                                .height(TIMELINE_H)
                                 .clickable { onFrameChanged(frameIdx) },
                             contentAlignment = Alignment.TopCenter,
                         ) {
@@ -342,11 +535,18 @@ private fun FrameFilmstrip(
                                 modifier = Modifier
                                     .width(CELL_W)
                                     .height(CELL_H)
-                                    .clip(RoundedCornerShape(3.dp))
+                                    .graphicsLayer {
+                                        alpha = if (isSelected) 1f else IMPACT_FRAME_THUMBNAIL_UNSELECTED_ALPHA
+                                        scaleX = if (isSelected) IMPACT_FRAME_THUMBNAIL_SELECTED_SCALE else 1f
+                                        scaleY = if (isSelected) IMPACT_FRAME_THUMBNAIL_SELECTED_SCALE else 1f
+                                    }
+                                    .clip(RoundedCornerShape(IMPACT_FRAME_THUMBNAIL_CORNER_RADIUS_DP.dp))
                                     .background(Color(0xFF1A1A1A))
                                     .then(
                                         if (isSelected) Modifier.border(
-                                            2.dp, DSColors.fairway, RoundedCornerShape(3.dp),
+                                            IMPACT_FRAME_THUMBNAIL_SELECTED_BORDER_DP.dp,
+                                            DSColors.fairway,
+                                            RoundedCornerShape(IMPACT_FRAME_THUMBNAIL_CORNER_RADIUS_DP.dp),
                                         ) else Modifier,
                                     ),
                             ) {
@@ -355,11 +555,7 @@ private fun FrameFilmstrip(
                                         bitmap = imgBitmap,
                                         contentDescription = null,
                                         contentScale = ContentScale.Crop,
-                                        modifier = Modifier.matchParentSize().then(
-                                            if (!isSelected) Modifier.drawBehind {
-                                                drawRect(Color.Black.copy(alpha = 0.35f))
-                                            } else Modifier,
-                                        ),
+                                        modifier = Modifier.matchParentSize(),
                                     )
                                 }
                             }
@@ -368,8 +564,9 @@ private fun FrameFilmstrip(
                             if (isCandidate) {
                                 Box(
                                     modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .size(7.dp)
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = IMPACT_FRAME_CANDIDATE_DOT_TOP_PADDING_DP.dp)
+                                        .size(IMPACT_FRAME_CANDIDATE_DOT_SIZE_DP.dp)
                                         .background(Color(0xFFFFD700), CircleShape),
                                 )
                             }
@@ -389,8 +586,7 @@ private fun FrameFilmstrip(
 
             // 下一帧
             NavButton(icon = Icons.Filled.ChevronRight, label = "下一帧", enabled = currentFrame < totalFrames - 1) {
-                val newFrame = (currentFrame + 1).coerceAtMost(totalFrames - 1)
-                onFrameChanged(newFrame)
+                onFrameChanged(impactFrameStepFrame(currentFrame, totalFrames, deltaFrames = 1))
             }
         }
     }
@@ -407,8 +603,8 @@ private fun NavButton(
 ) {
     Column(
         modifier = Modifier
-            .width(36.dp)
-            .height(CELL_H)
+            .width(IMPACT_FRAME_NAV_BUTTON_WIDTH_DP.dp)
+            .height(IMPACT_FRAME_NAV_BUTTON_HEIGHT_DP.dp)
             .clip(RoundedCornerShape(6.dp))
             .background(if (enabled) DSColors.mistGreen else DSColors.mistGreen.copy(alpha = 0.4f))
             .clickable(enabled = enabled, onClick = onClick),

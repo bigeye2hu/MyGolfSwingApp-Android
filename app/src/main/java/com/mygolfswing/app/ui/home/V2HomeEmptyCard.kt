@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -42,7 +41,12 @@ fun V2HomeEmptyCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 4.dp, shape = RoundedCornerShape(DSSpacing.Radius.lg))
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(DSSpacing.Radius.lg),
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.06f),
+            )
             .clip(RoundedCornerShape(DSSpacing.Radius.lg))
             .background(DSColors.cardWhite)
             .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.xl),
@@ -51,6 +55,7 @@ fun V2HomeEmptyCard(
     ) {
         Box(
             modifier = Modifier
+                .padding(top = DSSpacing.sm)
                 .size(84.dp)
                 .clip(CircleShape)
                 .background(DSColors.sandBeige),
@@ -60,7 +65,7 @@ fun V2HomeEmptyCard(
                 imageVector = Icons.Filled.Adjust,
                 contentDescription = null,
                 tint = DSColors.trophyGold,
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(36.dp),
             )
         }
 
@@ -107,12 +112,12 @@ fun V2HomeEmptyCard(
             )
         }
 
-        Spacer(modifier = Modifier.height(0.dp))
-
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.clickable { onBrowsePlaza() },
+            modifier = Modifier
+                .clickable { onBrowsePlaza() }
+                .padding(bottom = DSSpacing.sm),
         ) {
             Text(
                 text = "浏览广场获取灵感",

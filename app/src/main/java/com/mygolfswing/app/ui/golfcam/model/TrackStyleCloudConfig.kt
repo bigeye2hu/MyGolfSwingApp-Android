@@ -3,15 +3,13 @@ package com.mygolfswing.app.ui.golfcam.model
 import com.mygolfswing.app.data.ServiceLocator
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.floatOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 data class TrackStyleCloudConfig(
     val presets: List<TrackColorPreset>,
@@ -19,9 +17,51 @@ data class TrackStyleCloudConfig(
     val defaultColorHex: Long?,
 )
 
+internal fun TrackStyle.refreshedWithCloudPreset(presets: List<TrackColorPreset>): TrackStyle {
+    val matchedPreset = presets.firstOrNull { it.name == colorPreset.name } ?: return this
+    val oldPresetColor = colorPreset.bandOuterColor()
+    val colorWasPresetDerived = colorHex == null || colorHex == oldPresetColor
+    return copy(
+        colorPreset = matchedPreset,
+        colorHex = if (colorWasPresetDerived) matchedPreset.bandOuterColor() else colorHex,
+        glowOpacity = matchedPreset.glowAlpha.toDouble(),
+    )
+}
+
+internal fun TrackStyle.refreshedWithCloudConfig(config: TrackStyleCloudConfig): TrackStyle {
+    return refreshedWithCloudPreset(config.presets).copy(
+        renderTuning = config.defaultStyle.renderTuning.clampedForGolfCamProduction(),
+    )
+}
+
+internal fun trackStyleAfterCloudConfigLoaded(
+    currentStyle: TrackStyle,
+    initialFallbackStyle: TrackStyle,
+    restoredStyle: TrackStyle?,
+    config: TrackStyleCloudConfig,
+): TrackStyle {
+    return if (restoredStyle == null && currentStyle == initialFallbackStyle) {
+        config.defaultStyle
+    } else {
+        currentStyle.refreshedWithCloudConfig(config)
+    }
+}
+
 object TrackStyleCloudConfigLoader {
     private const val PREFS_NAME = "golf_cam_track_style_config"
     private const val CACHE_KEY_CONFIG_JSON = "config_json"
+
+    private fun finiteDoubleIn(value: Double?, min: Double, max: Double, fallback: Double): Double {
+        return value?.takeIf { it.isFinite() }?.coerceIn(min, max) ?: fallback.coerceIn(min, max)
+    }
+
+    private fun finiteFloatIn(value: Float?, min: Float, max: Float, fallback: Float): Float {
+        return value?.takeIf { it.isFinite() }?.coerceIn(min, max) ?: fallback.coerceIn(min, max)
+    }
+
+    private fun finiteFloatAtLeast(value: Float?, min: Float, fallback: Float): Float {
+        return value?.takeIf { it.isFinite() }?.coerceAtLeast(min) ?: fallback.coerceAtLeast(min)
+    }
 
     suspend fun fetch(): Result<TrackStyleCloudConfig> {
         val remote = runCatching {
@@ -39,18 +79,34 @@ object TrackStyleCloudConfigLoader {
         val response = ServiceLocator.net.cloudApi.videoPlaza(
             JsonObject(mapOf("action" to JsonPrimitive("getTrackStyleConfig"))),
         )
-        val success = response["success"]?.jsonPrimitive?.booleanOrNull ?: false
-        require(success) { response["error"]?.jsonPrimitive?.contentOrNull ?: "getTrackStyleConfig failed" }
-        return response["config"]?.jsonObject ?: error("missing track style config")
+        return parseRemoteConfigResponse(response)
+    }
+
+    internal fun parseRemoteConfigResponse(response: JsonObject): JsonObject {
+        val success = response.booleanLiteral("success") ?: false
+        require(success) { response.string("error") ?: "getTrackStyleConfig failed" }
+        return parseRemoteConfigPayload(response["config"])
+    }
+
+    private fun parseRemoteConfigPayload(config: JsonElement?): JsonObject {
+        return when (config) {
+            is JsonObject -> config
+            is JsonPrimitive -> config.contentOrNull
+                ?.let { raw ->
+                    runCatching { Json.parseToJsonElement(raw) as? JsonObject }.getOrNull()
+                }
+            else -> null
+        } ?: error("missing track style config")
     }
 
     private fun cacheConfig(config: JsonObject): TrackStyleCloudConfig {
+        val parsed = parse(config)
         ServiceLocator.appContext
             .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
             .edit()
             .putString(CACHE_KEY_CONFIG_JSON, config.toString())
             .apply()
-        return parse(config)
+        return parsed
     }
 
     private fun readCachedConfig(): TrackStyleCloudConfig? {
@@ -59,7 +115,7 @@ object TrackStyleCloudConfigLoader {
             .getString(CACHE_KEY_CONFIG_JSON, null)
             ?: return null
         return runCatching {
-            parse(Json.parseToJsonElement(raw).jsonObject)
+            parse(Json.parseToJsonElement(raw) as? JsonObject ?: return@runCatching null)
         }.getOrNull()
     }
 
@@ -77,26 +133,23 @@ object TrackStyleCloudConfigLoader {
 
         val defaultPresetName = config.string("defaultPresetName")
         val defaultPreset = presets.firstOrNull { it.name == defaultPresetName }
+            ?: presets.firstOrNull { it.name == GOLF_CAM_DEFAULT_PRESET_NAME }
             ?: presets.firstOrNull()
             ?: TrackStyle().colorPreset
-        val defaultOpacity = config.double("defaultOpacity") ?: 0.75
-        val styleDefaults = config["styleDefaults"]?.jsonObject
-        val renderTuning = config["renderTuning"]?.jsonObject?.let(::parseRenderTuning) ?: TrackRenderTuning()
+        val defaultOpacity = finiteDoubleIn(config.double("defaultOpacity"), 0.0, 1.0, fallback = 0.75)
+        val styleDefaults = config["styleDefaults"] as? JsonObject
+        val renderTuning = (config["renderTuning"] as? JsonObject)?.let(::parseRenderTuning) ?: TrackRenderTuning()
 
         val defaultStyle = TrackStyle(
             colorPreset = defaultPreset,
             colorHex = defaultColorHex,
-            colorAlpha = defaultOpacity.coerceIn(0.0, 1.0),
+            colorAlpha = defaultOpacity,
             glowOpacity = defaultPreset.glowAlpha.toDouble(),
-            widthPct = (styleDefaults?.double("widthPct") ?: 40.0).coerceIn(5.0, 160.0),
-            tailHalfLife = (styleDefaults?.double("tailHalfLife") ?: 70.0).coerceIn(5.0, 100.0),
+            widthPct = finiteDoubleIn(styleDefaults?.double("widthPct"), 5.0, 160.0, fallback = 40.0),
+            tailHalfLife = finiteDoubleIn(styleDefaults?.double("tailHalfLife"), 5.0, 100.0, fallback = 70.0),
             showDistance = styleDefaults?.boolean("showDistance") ?: false,
-            totalDistance = GolfCamDistanceConfig.clamp(styleDefaults?.double("totalDistance") ?: 150.0),
-            distanceUnit = if (styleDefaults?.string("distanceUnit") == "meters") {
-                DistanceUnit.METERS
-            } else {
-                DistanceUnit.YARDS
-            },
+            totalDistance = GolfCamDistanceConfig.clamp(styleDefaults?.double("totalDistance") ?: GolfCamDistanceConfig.DEFAULT_DISTANCE),
+            distanceUnit = parseGolfCamDistanceUnit(styleDefaults?.string("distanceUnit")),
             speedLevel = GolfCamSpeedConfig.clamp(styleDefaults?.double("speedLevel") ?: GolfCamSpeedConfig.DEFAULT_LEVEL),
             renderTuning = renderTuning,
         )
@@ -109,9 +162,8 @@ object TrackStyleCloudConfigLoader {
     }
 
     internal fun localFallback(): TrackStyleCloudConfig {
-        val fallbackColor = 0xFF55F3D8
-        val fallbackPreset = defaultTrackColorPresets.firstOrNull { it.name == "青蓝薄荷" }
-            ?: defaultTrackColorPresets.first()
+        val fallbackColor = GOLF_CAM_DEFAULT_COLOR_HEX
+        val fallbackPreset = defaultGolfCamTrackColorPreset()
         return TrackStyleCloudConfig(
             presets = defaultTrackColorPresets,
             defaultColorHex = fallbackColor,
@@ -134,16 +186,16 @@ object TrackStyleCloudConfigLoader {
     private fun parsePreset(element: kotlinx.serialization.json.JsonElement): TrackColorPreset? {
         val obj = element as? JsonObject ?: return null
         val colors = obj["gradientColors"]
-            ?.jsonArray
-            ?.mapNotNull { it.jsonPrimitive.contentOrNull?.hexToArgbLong() }
+            ?.let { it as? JsonArray }
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.hexToArgbLong() }
             ?.takeIf { it.isNotEmpty() }
             ?: return null
         return TrackColorPreset(
             name = obj.string("name")?.takeIf { it.isNotBlank() } ?: "颜色",
             gradientColors = colors,
-            glowBlur = obj.float("glowBlur") ?: 30f,
-            glowAlpha = (obj.float("glowAlpha") ?: 0.68f).coerceIn(0f, 1f),
-            bandAlpha = (obj.float("bandAlpha") ?: 1f).coerceIn(0f, 1f),
+            glowBlur = finiteFloatAtLeast(obj.float("glowBlur"), min = 0f, fallback = 30f),
+            glowAlpha = finiteFloatIn(obj.float("glowAlpha"), 0f, 1f, fallback = 0.68f),
+            bandAlpha = finiteFloatIn(obj.float("bandAlpha"), 0f, 1f, fallback = 1f),
         )
     }
 
@@ -170,60 +222,17 @@ object TrackStyleCloudConfigLoader {
             apexThinStrength = obj.float("apexThinStrength") ?: 0.60f,
             apexThinRadius = obj.float("apexThinRadius") ?: 0.20f,
             highlightFalloffPower = obj.float("highlightFalloffPower") ?: 0.82f,
-        ).clamped()
+        ).clampedForGolfCamProduction()
     }
 
-    private fun TrackRenderTuning.clamped(): TrackRenderTuning {
-        var start = highlightStart
-        var end = highlightEnd
-        var peak = highlightPeak
-        if (kotlin.math.abs(start - 0.20f) < 0.001f &&
-            kotlin.math.abs(end - 0.60f) < 0.001f &&
-            kotlin.math.abs(peak - 0.42f) < 0.001f
-        ) {
-            start = 0.00f
-            end = 0.96f
-            peak = 0.32f
-        }
-        if (kotlin.math.abs(start - 0.18f) < 0.001f &&
-            kotlin.math.abs(end - 0.96f) < 0.001f
-        ) {
-            start = 0.00f
-        }
-
-        start = start.coerceIn(0.00f, 0.90f)
-        end = end.coerceIn(0.05f, 1.00f)
-        if (end <= start + 0.05f) {
-            end = minOf(1.0f, start + 0.05f)
-        }
-        peak = peak.coerceIn(start, end)
-
-        return copy(
-            bandAlphaMultiplier = bandAlphaMultiplier.coerceIn(0.00f, 1.40f),
-            bodyAlphaBase = bodyAlphaBase.coerceIn(0.00f, 0.16f),
-            bodyAlphaScale = bodyAlphaScale.coerceIn(0.50f, 1.20f),
-            glowBlurMultiplier = glowBlurMultiplier.coerceIn(0.25f, 1.20f),
-            outerGlowMultiplier = outerGlowMultiplier.coerceIn(0.20f, 1.00f),
-            fillGlowMultiplier = fillGlowMultiplier.coerceIn(0.08f, 0.45f),
-            highlightWidthRatio = highlightWidthRatio.coerceIn(0.30f, 0.85f),
-            highlightAlphaMax = highlightAlphaMax.coerceIn(0.00f, 0.90f),
-            highlightWhiteLiftBase = highlightWhiteLiftBase.coerceIn(0.00f, 0.00f),
-            highlightWhiteLiftScale = highlightWhiteLiftScale.coerceIn(0.00f, 0.00f),
-            highlightStart = start,
-            highlightEnd = end,
-            highlightPeak = peak,
-            highlightStrength = highlightStrength.coerceIn(0.00f, 1.60f),
-            widthTaperPower = widthTaperPower.coerceIn(0.70f, 2.20f),
-            apexThinStrength = apexThinStrength.coerceIn(0.00f, 0.85f),
-            apexThinRadius = apexThinRadius.coerceIn(0.04f, 0.35f),
-            highlightFalloffPower = highlightFalloffPower.coerceIn(0.45f, 1.80f),
-        )
+    private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject.double(key: String): Double? = (this[key] as? JsonPrimitive)?.doubleOrNull
+    private fun JsonObject.float(key: String): Float? = (this[key] as? JsonPrimitive)?.floatOrNull
+    private fun JsonObject.boolean(key: String): Boolean? = (this[key] as? JsonPrimitive)?.booleanOrNull
+    private fun JsonObject.booleanLiteral(key: String): Boolean? {
+        val primitive = this[key] as? JsonPrimitive ?: return null
+        return if (primitive.isString) null else primitive.booleanOrNull
     }
-
-    private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
-    private fun JsonObject.double(key: String): Double? = this[key]?.jsonPrimitive?.doubleOrNull
-    private fun JsonObject.float(key: String): Float? = this[key]?.jsonPrimitive?.floatOrNull
-    private fun JsonObject.boolean(key: String): Boolean? = this[key]?.jsonPrimitive?.booleanOrNull
 
     private fun String.hexToArgbLong(): Long? {
         val clean = trim().removePrefix("#")

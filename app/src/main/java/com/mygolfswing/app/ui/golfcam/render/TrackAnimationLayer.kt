@@ -46,17 +46,6 @@ fun TrajectoryStaticOverlay(
             tailProgress = 0f,
             style = style,
         )
-        drawHeadGlow(
-            headPoint = bezier.pointAtArcProgress(1f, arcTable),
-            color = Color(style.primaryColorArgb()),
-            radius = TrajectoryOverlayRenderSpec.headGlowRadius(
-                style = style,
-                videoHeight = size.height,
-                headProgress = 1f,
-                apexProgress = arcTable.apexProgress(),
-            ),
-            alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
-        )
     }
 }
 
@@ -124,7 +113,7 @@ fun TrajectoryAnimationOverlay(
                         headProgress = frame.headProgress,
                         apexProgress = frame.apexProgress,
                     ),
-                    alphaMultiplier = style.glowOpacity.toFloat().coerceIn(0f, 1f),
+                    alphaMultiplier = style.glowOpacity.toFloat(),
                 )
             }
             frame.distance?.let { displayDist ->

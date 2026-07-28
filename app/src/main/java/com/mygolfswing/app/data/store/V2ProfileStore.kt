@@ -19,6 +19,7 @@ import java.time.format.DateTimeFormatter
  * - 拉取最新积分 / 用户信息由 [refresh] 触发，UI 通过 [isRefreshing] 控制 loading
  */
 data class V2UserProfile(
+    val userId: String? = null,
     val nickname: String = "未登录",
     val username: String = "@guest",
     val avatar: String? = null,
@@ -60,6 +61,7 @@ object V2ProfileStore {
         scope.launch {
             session.state.onEach { s ->
                 _profile.value = V2UserProfile(
+                    userId = s.userId,
                     nickname = s.nickname ?: s.username ?: if (s.isLoggedIn) "高尔夫球友" else "未登录",
                     username = buildUsernameDisplay(s.username, s.phone, s.userId),
                     avatar = s.avatar,

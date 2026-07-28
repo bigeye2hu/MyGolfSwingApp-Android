@@ -111,6 +111,9 @@ interface AIChatDao {
     @Query("DELETE FROM v2_ai_session WHERE id = :id AND ownerUserId = :ownerUserId")
     suspend fun deleteSession(id: String, ownerUserId: String)
 
+    @Query("DELETE FROM v2_ai_message WHERE sessionId = :sessionId AND ownerUserId = :ownerUserId")
+    suspend fun deleteMessagesForSession(sessionId: String, ownerUserId: String)
+
     @Query("DELETE FROM v2_ai_message WHERE ownerUserId = :ownerUserId")
     suspend fun clearMessages(ownerUserId: String)
 
@@ -121,6 +124,12 @@ interface AIChatDao {
     suspend fun clearAll(ownerUserId: String) {
         clearMessages(ownerUserId)
         clearSessions(ownerUserId)
+    }
+
+    @Transaction
+    suspend fun deleteSessionWithMessages(id: String, ownerUserId: String) {
+        deleteMessagesForSession(id, ownerUserId)
+        deleteSession(id, ownerUserId)
     }
 }
 

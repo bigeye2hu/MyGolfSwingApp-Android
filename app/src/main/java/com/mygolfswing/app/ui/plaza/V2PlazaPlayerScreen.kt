@@ -75,6 +75,8 @@ import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoSource
 import com.mygolfswing.app.data.repo.V2PlazaComment
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.data.store.plazaReleaseSafeError
+import com.mygolfswing.app.data.store.plazaThrowableError
 import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
@@ -193,7 +195,7 @@ fun V2PlazaPlayerScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                toastMessage = plazaUserError("创建 Memo 失败，请稍后重试", e.message)
+                toastMessage = plazaThrowableError("创建 Memo 失败，请稍后重试", e)
             } finally {
                 memoCreating = false
             }
@@ -216,11 +218,11 @@ fun V2PlazaPlayerScreen(
             try {
                 ServiceLocator.plazaRepo.fetchComments(cloudVideoId)
                     .onSuccess { comments = it }
-                    .onFailure { commentError = plazaUserError("评论加载失败，请稍后重试", it.message) }
+                    .onFailure { commentError = plazaThrowableError("评论加载失败，请稍后重试", it) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                commentError = plazaUserError("评论加载失败，请稍后重试", e.message)
+                commentError = plazaThrowableError("评论加载失败，请稍后重试", e)
             } finally {
                 commentsLoading = false
             }
@@ -548,11 +550,11 @@ fun V2PlazaPlayerScreen(
                                     comments = listOf(it) + comments
                                     commentDraft = ""
                                 }
-                                .onFailure { commentError = plazaUserError("发送失败，请重试", it.message) }
+                                .onFailure { commentError = plazaThrowableError("发送失败，请重试", it) }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
-                            commentError = plazaUserError("发送失败，请重试", e.message)
+                            commentError = plazaThrowableError("发送失败，请重试", e)
                         } finally {
                             commentSubmitting = false
                         }
@@ -586,13 +588,13 @@ fun V2PlazaPlayerScreen(
                                     toastMessage = "举报已提交，感谢反馈"
                                 }.onFailure {
                                     commentReportTarget = null
-                                    commentError = plazaUserError("举报失败，请稍后重试", it.message)
+                                    commentError = plazaThrowableError("举报失败，请稍后重试", it)
                                 }
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Throwable) {
                                 commentReportTarget = null
-                                commentError = plazaUserError("举报失败，请稍后重试", e.message)
+                                commentError = plazaThrowableError("举报失败，请稍后重试", e)
                             } finally {
                                 commentReportSubmittingId = null
                             }
@@ -679,7 +681,7 @@ fun V2PlazaPlayerScreen(
                                 .onFailure {
                                     reportResult = PlazaSubmitResult(
                                         success = false,
-                                        message = plazaUserError("提交失败，请稍后重试", it.message),
+                                        message = plazaThrowableError("提交失败，请稍后重试", it),
                                     )
                                 }
                         } catch (e: CancellationException) {
@@ -687,7 +689,7 @@ fun V2PlazaPlayerScreen(
                         } catch (e: Throwable) {
                             reportResult = PlazaSubmitResult(
                                 success = false,
-                                message = plazaUserError("提交失败，请稍后重试", e.message),
+                                message = plazaThrowableError("提交失败，请稍后重试", e),
                             )
                         } finally {
                             reportSubmitting = false
@@ -1540,6 +1542,5 @@ private fun ReportResultBanner(result: PlazaSubmitResult) {
 }
 
 private fun plazaUserError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-    return if (detail == null) base else "$base（$detail）"
+    return plazaReleaseSafeError(base, debugDetail)
 }

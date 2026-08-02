@@ -92,6 +92,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
+import androidx.core.graphics.scale
+import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
@@ -1109,9 +1111,9 @@ private fun ComparisonVideoPane(
     time: Float,
     duration: Float,
     scrubFeel: TimelineScrubFeel,
-    showControls: Boolean = true,
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    showControls: Boolean = true,
 ) {
     Box(modifier = modifier.background(Color.Black)) {
         AndroidView(
@@ -2111,12 +2113,12 @@ private suspend fun loadVideoMemoTimelineFrames(
         val times = buildFallbackTimelineFrames(duration)
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(context, Uri.parse(playbackUrl))
+            retriever.setDataSource(context, playbackUrl.toUri())
             times.map { frame ->
                 val sampleTime = frame.timeSec.coerceAtMost((duration - 0.05f).coerceAtLeast(0f))
                 val bitmap = retriever
                     .getFrameAtTime((sampleTime * 1_000_000L).toLong(), MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    ?.let { Bitmap.createScaledBitmap(it, 160, 90, true) }
+                    ?.scale(160, 90)
                 frame.copy(bitmap = bitmap)
             }
         } finally {
@@ -2134,7 +2136,7 @@ private suspend fun saveVideoFrameToGallery(
     val retriever = MediaMetadataRetriever()
     var pendingUri: Uri? = null
     try {
-        retriever.setDataSource(context, Uri.parse(playbackUrl))
+        retriever.setDataSource(context, playbackUrl.toUri())
         val bitmap = retriever.getFrameAtTime(
             (timeSec.coerceAtLeast(0f) * 1_000_000L).toLong(),
             MediaMetadataRetriever.OPTION_CLOSEST,
@@ -2168,9 +2170,12 @@ private suspend fun saveVideoFrameToGallery(
             resolver.update(uri, values, null, null)
         }
         "已保存当前帧截图"
-    } catch (_: Throwable) {
+    } catch (error: CancellationException) {
         pendingUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-        "截图保存失败，请稍后重试"
+        throw error
+    } catch (error: Throwable) {
+        pendingUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+        videoMemoGalleryFailureMessage("截图保存失败，请稍后重试", error)
     } finally {
         runCatching { retriever.release() }
     }
@@ -2190,20 +2195,14 @@ private suspend fun saveVideoMemoToGallery(
     }
 
     val resolver = context.contentResolver
-    val extension = sourceFile.extension.takeIf { it.isNotBlank() }?.lowercase(Locale.ROOT) ?: "mp4"
-    val mime = when (extension) {
-        "mov", "qt" -> "video/quicktime"
-        "m4v" -> "video/x-m4v"
-        "webm" -> "video/webm"
-        else -> "video/mp4"
-    }
+    val gallerySpec = videoMemoGalleryVideoSpec(sourceFile)
     val displayBase = (memo.displayTitle ?: memo.title ?: "video_memo")
         .replace(Regex("[\\\\/:*?\"<>|\\n\\r\\t]"), "_")
         .take(42)
         .ifBlank { "video_memo" }
     val values = ContentValues().apply {
-        put(MediaStore.Video.Media.DISPLAY_NAME, "${displayBase}_${System.currentTimeMillis()}.$extension")
-        put(MediaStore.Video.Media.MIME_TYPE, mime)
+        put(MediaStore.Video.Media.DISPLAY_NAME, "${displayBase}_${System.currentTimeMillis()}.${gallerySpec.extension}")
+        put(MediaStore.Video.Media.MIME_TYPE, gallerySpec.mimeType)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MyGolfSwing")
             put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -2227,10 +2226,39 @@ private suspend fun saveVideoMemoToGallery(
             resolver.update(uri, values, null, null)
         }
         "视频已保存到相册"
-    } catch (_: Throwable) {
+    } catch (error: CancellationException) {
         pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
-        "保存到相册失败，请稍后重试"
+        throw error
+    } catch (error: Throwable) {
+        pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
+        videoMemoGalleryFailureMessage("保存到相册失败，请稍后重试", error)
     }
+}
+
+internal fun videoMemoGalleryFailureMessage(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return base
+}
+
+internal data class VideoMemoGalleryVideoSpec(
+    val extension: String,
+    val mimeType: String,
+)
+
+internal fun videoMemoGalleryVideoSpec(source: File): VideoMemoGalleryVideoSpec {
+    val extension = when (source.extension.lowercase(Locale.ROOT)) {
+        "mov", "qt" -> "mov"
+        "m4v" -> "m4v"
+        "webm" -> "webm"
+        else -> "mp4"
+    }
+    val mimeType = when (extension) {
+        "mov" -> "video/quicktime"
+        "m4v" -> "video/x-m4v"
+        "webm" -> "video/webm"
+        else -> "video/mp4"
+    }
+    return VideoMemoGalleryVideoSpec(extension = extension, mimeType = mimeType)
 }
 
 private fun buildComparisonReviewMemo(

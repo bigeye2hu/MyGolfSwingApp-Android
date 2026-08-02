@@ -15,6 +15,7 @@ import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
 import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.video.V2VideoThumbnailUtil
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -117,7 +118,14 @@ class V2MemoRepository(
         val uid = session.current().userId ?: return@withContext
         dao.getAll(uid).forEach { row ->
             val memo = runCatching { decode(row) }.getOrNull() ?: return@forEach
-            if (memo.isDemoMemo()) dao.delete(row.id, uid)
+            if (shouldDeleteLocalDemoMemo(
+                    title = memo.title ?: memo.displayTitle,
+                    body = memo.text,
+                    isDirty = row.dirty,
+                )
+            ) {
+                dao.delete(row.id, uid)
+            }
         }
     }
 
@@ -126,7 +134,7 @@ class V2MemoRepository(
         dao.dirty(uid).mapNotNull { runCatching { decode(it) }.getOrNull() }.forEach { pushSingle(it) }
     }
 
-    suspend fun pullFromCloud(): Result<Int> = runCatching {
+    suspend fun pullFromCloud(): Result<Int> = runMemoSyncCatching {
         val uid = session.current().userId ?: error("未登录")
         flushPendingDeletes(uid)
         var merged = pullVideoMemos(uid)
@@ -152,7 +160,7 @@ class V2MemoRepository(
         val isText = bucket == BUCKET_INSIGHT_CARD
         val action = if (isText) "deleteInsightCard" else "deleteVideoMemo"
         val idKey = if (isText) "cardId" else "memoId"
-        return runCatching {
+        return runMemoCloudBooleanCatching {
             val resp = net.cloudApi.dataSync(
                 JsonObject(
                     mapOf(
@@ -163,7 +171,7 @@ class V2MemoRepository(
                 ),
             )
             resp.success
-        }.getOrDefault(false)
+        }
     }
 
     /**
@@ -375,19 +383,6 @@ class V2MemoRepository(
         )
     }
 
-    private fun V2Memo.isDemoMemo(): Boolean {
-        val title = title ?: displayTitle
-        val body = text.orEmpty()
-        return when (title) {
-            "握把压力的微调" -> body == "今天发现握把太用力会让手腕僵硬，松一点反而更顺。下次保持 6 分力试试。"
-            "推杆距离感的练习" -> body == "5 米推杆把节奏拉长，先 1 下半挥杆，再回正。今天命中率明显提升。"
-            "教练点评：上杆速度" -> body == "教练说上杆太快了，建议加一拍。回去录一段慢动作对比。"
-            "下杆节奏练习 · 7号铁" -> body == "录了 3 球。第 2 球节奏最稳，标记为 ⭐。"
-            "沙坑救球角度" -> body == "杆面打开 30°，瞄球后 5cm 落地，效果不错。"
-            else -> false
-        }
-    }
-
     private fun parseTagsJson(raw: String?): List<String> = runCatching {
         if (raw.isNullOrBlank()) return emptyList()
         net.json.parseToJsonElement(raw).jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
@@ -401,7 +396,7 @@ class V2MemoRepository(
 
     private suspend fun pushSingle(memo: V2Memo) {
         val uid = session.current().userId ?: return
-        val ok = runCatching {
+        val ok = runMemoCloudBooleanCatching {
             when (memo.kind) {
                 V2MemoKind.TEXT -> {
                     val resp = net.cloudApi.dataSync(
@@ -430,7 +425,7 @@ class V2MemoRepository(
                     resp.success
                 }
             }
-        }.getOrDefault(false)
+        }
         if (ok) withContext(Dispatchers.IO) { dao.markClean(memo.id.toString(), uid) }
     }
 
@@ -541,4 +536,36 @@ class V2MemoRepository(
         const val BUCKET_VIDEO_MEMO = "videoMemo"
         const val BUCKET_INSIGHT_CARD = "insightCard"
     }
+}
+
+internal fun shouldDeleteLocalDemoMemo(title: String?, body: String?, isDirty: Boolean): Boolean {
+    if (isDirty) return false
+    return when (title) {
+        "握把压力的微调" -> body == "今天发现握把太用力会让手腕僵硬，松一点反而更顺。下次保持 6 分力试试。"
+        "推杆距离感的练习" -> body == "5 米推杆把节奏拉长，先 1 下半挥杆，再回正。今天命中率明显提升。"
+        "教练点评：上杆速度" -> body == "教练说上杆太快了，建议加一拍。回去录一段慢动作对比。"
+        "下杆节奏练习 · 7号铁" -> body == "录了 3 球。第 2 球节奏最稳，标记为 ⭐。"
+        "沙坑救球角度" -> body == "杆面打开 30°，瞄球后 5cm 落地，效果不错。"
+        else -> false
+    }
+}
+
+internal suspend inline fun <T> runMemoSyncCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
+
+internal suspend inline fun runMemoCloudBooleanCatching(
+    crossinline block: suspend () -> Boolean,
+): Boolean = try {
+    block()
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    false
 }

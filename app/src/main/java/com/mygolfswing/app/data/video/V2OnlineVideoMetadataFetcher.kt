@@ -1,5 +1,6 @@
 package com.mygolfswing.app.data.video
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -83,7 +84,7 @@ object V2OnlineVideoMetadataFetcher {
         val bvid = extractBvid(finalUrl) ?: return V2OnlineVideoMetadata()
         val api = "https://api.bilibili.com/x/web-interface/view?bvid=$bvid"
         val body = getString(api) ?: return V2OnlineVideoMetadata()
-        return runCatching {
+        return runOnlineVideoMetadataCatching {
             val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject ?: return V2OnlineVideoMetadata()
             val pic = data["pic"]?.jsonPrimitive?.content?.replace("http://", "https://")
             val title = data["title"]?.jsonPrimitive?.content
@@ -97,7 +98,9 @@ object V2OnlineVideoMetadataFetcher {
         val encoded = java.net.URLEncoder.encode(url, Charsets.UTF_8.name())
         val oembed = getString("https://www.youtube.com/oembed?url=$encoded&format=json")
         val title = oembed?.let {
-            runCatching { json.parseToJsonElement(it).jsonObject["title"]?.jsonPrimitive?.content }.getOrNull()
+            runOnlineVideoMetadataCatching {
+                json.parseToJsonElement(it).jsonObject["title"]?.jsonPrimitive?.content
+            }.getOrNull()
         }
         return V2OnlineVideoMetadata(title = title, thumbnailUrl = thumb)
     }
@@ -133,7 +136,7 @@ object V2OnlineVideoMetadataFetcher {
             .header("User-Agent", mobileUa())
             .get()
             .build()
-        return runCatching {
+        return runOnlineVideoMetadataCatching {
             http.newCall(req).execute().use { it.request.url.toString() }
         }.getOrNull()
     }
@@ -141,7 +144,7 @@ object V2OnlineVideoMetadataFetcher {
     private fun getString(url: String, userAgent: Boolean = false): String? {
         val builder = Request.Builder().url(url).get()
         if (userAgent) builder.header("User-Agent", mobileUa())
-        return runCatching {
+        return runOnlineVideoMetadataCatching {
             http.newCall(builder.build()).execute().use { resp ->
                 if (!resp.isSuccessful) return null
                 resp.body?.string()
@@ -174,3 +177,11 @@ private fun String.replaceHttpWithHttps(): String =
     } else {
         this
     }
+
+internal inline fun <T> runOnlineVideoMetadataCatching(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}

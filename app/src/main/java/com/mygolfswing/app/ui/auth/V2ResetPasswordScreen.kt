@@ -2,7 +2,6 @@ package com.mygolfswing.app.ui.auth
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -61,6 +60,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -181,7 +181,7 @@ fun V2ResetPasswordScreen(
                                     } catch (e: CancellationException) {
                                         throw e
                                     } catch (e: Throwable) {
-                                        error = authUserError("验证码发送失败，请稍后重试", e.message)
+                                        error = authThrowableError("验证码发送失败，请稍后重试", e)
                                     } finally {
                                         loading = false
                                     }
@@ -236,7 +236,7 @@ fun V2ResetPasswordScreen(
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Throwable) {
-                                error = authUserError("重置失败，请检查验证码和新密码后重试", e.message)
+                                error = authThrowableError("重置失败，请检查验证码和新密码后重试", e)
                             } finally {
                                 loading = false
                             }
@@ -431,7 +431,7 @@ private const val SUPPORT_PHONE = "18851310088"
 
 private fun Context.openSupportEmail(): Boolean = runCatching {
     val intent = Intent(Intent.ACTION_SENDTO).apply {
-        data = Uri.parse("mailto:$SUPPORT_EMAIL")
+        data = "mailto:$SUPPORT_EMAIL".toUri()
         putExtra(Intent.EXTRA_SUBJECT, "挥呗账号密码重置协助")
     }
     startActivity(intent)
@@ -439,7 +439,7 @@ private fun Context.openSupportEmail(): Boolean = runCatching {
 
 private fun Context.openSupportPhone(): Boolean = runCatching {
     val intent = Intent(Intent.ACTION_DIAL).apply {
-        data = Uri.parse("tel:$SUPPORT_PHONE")
+        data = "tel:$SUPPORT_PHONE".toUri()
     }
     startActivity(intent)
 }.isSuccess

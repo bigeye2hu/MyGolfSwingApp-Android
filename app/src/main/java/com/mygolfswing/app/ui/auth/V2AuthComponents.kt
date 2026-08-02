@@ -54,6 +54,7 @@ import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 
 internal object AuthPalette {
     val goldAccent = Color(0xFFE0A82E)
@@ -81,8 +82,17 @@ internal val authHeroBrush: Brush
     )
 
 internal fun authUserError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+    return authUserError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun authUserError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun authThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return authUserError(base, error.message)
 }
 
 private val rainbowRingBrush: Brush

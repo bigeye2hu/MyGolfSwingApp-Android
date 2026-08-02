@@ -187,7 +187,7 @@ fun V2FeedbackScreen(onBack: () -> Unit) {
                         }
                         r.onSuccess { showSuccess = true }
                             .onFailure {
-                                submitError = feedbackSubmitError("提交失败，反馈通道暂不可用，请稍后重试", it.message)
+                                submitError = feedbackSubmitThrowableError("提交失败，反馈通道暂不可用，请稍后重试", it)
                             }
                     }
                 },
@@ -292,9 +292,18 @@ private fun FeedbackTopBar(onCancel: () -> Unit) {
     }
 }
 
-private fun feedbackSubmitError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun feedbackSubmitError(base: String, debugDetail: String?): String {
+    return feedbackSubmitError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun feedbackSubmitError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun feedbackSubmitThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return feedbackSubmitError(base, error.message)
 }
 
 @Composable

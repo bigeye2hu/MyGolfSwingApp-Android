@@ -175,7 +175,7 @@ fun V2NewGoalScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                saveError = goalSaveError("保存失败，请稍后重试", e.message)
+                saveError = goalThrowableError("保存失败，请稍后重试", e)
             } finally {
                 saving = false
             }
@@ -194,7 +194,7 @@ fun V2NewGoalScreen(
                 throw e
             } catch (e: Throwable) {
                 showDeleteConfirm = false
-                deleteError = goalSaveError("删除失败，请稍后重试", e.message)
+                deleteError = goalThrowableError("删除失败，请稍后重试", e)
             } finally {
                 deleting = false
             }
@@ -2147,7 +2147,16 @@ private fun ChipPill(
     }
 }
 
-private fun goalSaveError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun goalSaveError(base: String, debugDetail: String?): String {
+    return goalSaveError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun goalSaveError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun goalThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return goalSaveError(base, error.message)
 }

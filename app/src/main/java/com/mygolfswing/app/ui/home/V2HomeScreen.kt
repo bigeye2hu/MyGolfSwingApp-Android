@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
+import androidx.core.content.edit
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -496,9 +497,9 @@ private fun readHomeForceEmptyState(context: Context): Boolean =
 
 private fun saveHomeForceEmptyState(context: Context, enabled: Boolean) {
     context.getSharedPreferences("v2_home_dev_switcher", Context.MODE_PRIVATE)
-        .edit()
-        .putBoolean("force_empty_state", enabled)
-        .apply()
+        .edit {
+            putBoolean("force_empty_state", enabled)
+        }
 }
 
 private fun readHomeToolOrder(context: Context): List<String> {
@@ -519,10 +520,10 @@ private fun readHomeToolEnabledIds(context: Context): Set<String> {
 
 private fun saveHomeToolConfig(context: Context, order: List<String>, enabledIds: Set<String>) {
     context.getSharedPreferences("v2_home_quick_tools", Context.MODE_PRIVATE)
-        .edit()
-        .putString("order", order.joinToString(","))
-        .putString("enabled", enabledIds.joinToString(","))
-        .apply()
+        .edit {
+            putString("order", order.joinToString(","))
+            putString("enabled", enabledIds.joinToString(","))
+        }
 }
 
 @Composable

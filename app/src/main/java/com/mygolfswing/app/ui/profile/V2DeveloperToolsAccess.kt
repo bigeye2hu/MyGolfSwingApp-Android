@@ -14,9 +14,13 @@ object V2DeveloperToolsAccess {
     private const val CLOUD_AUDIT_USERNAME = "test1"
 
     fun isCloudAuditEnabled(profile: V2UserProfile): Boolean {
-        if (!ServiceLocator.isDebuggable) return false
+        return isCloudAuditEnabled(profile, ServiceLocator.isDebuggable)
+    }
+
+    internal fun isCloudAuditEnabled(profile: V2UserProfile, isDebuggable: Boolean): Boolean {
+        if (!isDebuggable) return false
         if (!profile.isLoggedIn) return false
-        val displayUsername = profile.username.removePrefix("@").trim()
+        val displayUsername = profile.username.trim().removePrefix("@").trim()
         return displayUsername.equals(CLOUD_AUDIT_USERNAME, ignoreCase = true)
     }
 }

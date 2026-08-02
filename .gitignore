@@ -15,3 +15,9 @@
 .cxx
 local.properties
 .kotlin/
+
+# Release signing material must stay outside git.
+*.jks
+*.keystore
+*.p12
+*.pfx

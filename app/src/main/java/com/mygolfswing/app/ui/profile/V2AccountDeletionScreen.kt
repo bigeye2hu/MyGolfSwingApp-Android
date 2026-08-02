@@ -104,7 +104,7 @@ fun V2AccountDeletionScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                errorMessage = accountDeletionError("删除失败，请稍后重试；如多次失败，请联系客服协助处理", e.message)
+                errorMessage = accountDeletionThrowableError("删除失败，请稍后重试；如多次失败，请联系客服协助处理", e)
                 showError = true
             } finally {
                 isDeleting = false
@@ -346,7 +346,16 @@ private fun CompletedView(onDeletionComplete: () -> Unit) {
     }
 }
 
-private fun accountDeletionError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun accountDeletionError(base: String, debugDetail: String?): String {
+    return accountDeletionError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun accountDeletionError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun accountDeletionThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return accountDeletionError(base, error.message)
 }

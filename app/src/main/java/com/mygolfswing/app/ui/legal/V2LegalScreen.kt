@@ -44,8 +44,8 @@ import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 
 enum class V2LegalDocType(val title: String, val assetPath: String, val updated: String) {
-    TERMS("用户服务协议", "legal/terms_of_service.md", "2026年2月6日"),
-    PRIVACY("隐私政策", "legal/privacy_policy.md", "2026年2月12日"),
+    TERMS("用户服务协议", "legal/terms_of_service.md", "2026年7月28日"),
+    PRIVACY("隐私政策", "legal/privacy_policy.md", "2026年7月28日"),
 }
 
 /**

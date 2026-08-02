@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 import java.util.UUID
@@ -49,7 +50,7 @@ object V2MemoStore {
                     .groupBy({ it.first }, { it.second })
                 memos.map { memo ->
                     memo.copy(linkedGoalIds = linkedGoalIdsByMemo[memo.id].orEmpty().distinct())
-                }.filterNot(::isDemoMemo)
+                }
             }.onEach { latest -> _allMemos.value = mergeObservedMemos(latest) }.collect()
         }
     }
@@ -170,9 +171,9 @@ object V2MemoStore {
         scope.launch {
             _isSyncing.value = true
             try {
-                runCatching { repo.deleteLocalDemoMemos() }
-                runCatching { repo.pullFromCloud() }
-                runCatching { repo.pushDirty() }
+                runMemoStoreSyncCatching { repo.deleteLocalDemoMemos() }
+                runMemoStoreSyncCatching { repo.pullFromCloud() }
+                runMemoStoreSyncCatching { repo.pushDirty() }
             } finally {
                 _isSyncing.value = false
             }
@@ -185,15 +186,9 @@ object V2MemoStore {
 
 }
 
-private fun isDemoMemo(memo: V2Memo): Boolean {
-    val title = memo.title ?: memo.displayTitle
-    val body = memo.text.orEmpty()
-    return when (title) {
-        "握把压力的微调" -> body == "今天发现握把太用力会让手腕僵硬，松一点反而更顺。下次保持 6 分力试试。"
-        "推杆距离感的练习" -> body == "5 米推杆把节奏拉长，先 1 下半挥杆，再回正。今天命中率明显提升。"
-        "教练点评：上杆速度" -> body == "教练说上杆太快了，建议加一拍。回去录一段慢动作对比。"
-        "下杆节奏练习 · 7号铁" -> body == "录了 3 球。第 2 球节奏最稳，标记为 ⭐。"
-        "沙坑救球角度" -> body == "杆面打开 30°，瞄球后 5cm 落地，效果不错。"
-        else -> false
-    }
+internal suspend fun <T> runMemoStoreSyncCatching(block: suspend () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: Throwable) {
+    if (e is CancellationException) throw e
+    Result.failure(e)
 }

@@ -45,10 +45,10 @@ class V2NetClient(
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .apply {
-            if (enableHttpLogging) {
+            networkLoggingLevel(enableHttpLogging)?.let { loggingLevel ->
                 addInterceptor(
                     HttpLoggingInterceptor().apply {
-                        level = HttpLoggingInterceptor.Level.BASIC
+                        level = loggingLevel
                     },
                 )
             }
@@ -91,3 +91,6 @@ class V2NetClient(
     /** 暴露给上层捕获响应 ok 字段的 helper */
     fun unwrap(response: Response): String? = response.body?.string()
 }
+
+internal fun networkLoggingLevel(enableHttpLogging: Boolean): HttpLoggingInterceptor.Level? =
+    if (enableHttpLogging) HttpLoggingInterceptor.Level.BASIC else null

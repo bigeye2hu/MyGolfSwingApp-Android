@@ -89,7 +89,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Throwable) {
-                failureMsg = "存储信息刷新失败，请稍后重试"
+                failureMsg = storageOperationFailureMessage(StorageOperationErrorKind.REFRESH)
             } finally {
                 loading = false
             }
@@ -192,7 +192,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Throwable) {
-                            failureMsg = "缓存清理失败，请稍后重试"
+                            failureMsg = storageOperationFailureMessage(StorageOperationErrorKind.CACHE_CLEAR)
                         } finally {
                             loading = false
                         }
@@ -228,7 +228,7 @@ fun V2StorageManagementScreen(onBack: () -> Unit) {
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Throwable) {
-                            failureMsg = "清理失败，请稍后重试"
+                            failureMsg = storageOperationFailureMessage(StorageOperationErrorKind.VIDEO_CLEAR)
                         } finally {
                             loading = false
                         }
@@ -456,7 +456,22 @@ private fun StorageRow(
     }
 }
 
-private fun calculateCacheBytes(context: android.content.Context): Long {
+internal enum class StorageOperationErrorKind {
+    REFRESH,
+    CACHE_CLEAR,
+    VIDEO_CLEAR,
+}
+
+internal fun storageOperationFailureMessage(kind: StorageOperationErrorKind): String = when (kind) {
+    StorageOperationErrorKind.REFRESH -> "存储信息刷新失败，请稍后重试"
+    StorageOperationErrorKind.CACHE_CLEAR -> "缓存清理失败，请稍后重试"
+    StorageOperationErrorKind.VIDEO_CLEAR -> "清理失败，请稍后重试"
+}
+
+private fun calculateCacheBytes(context: android.content.Context): Long =
+    calculateCacheBytes(context.cacheDir, context.externalCacheDir)
+
+internal fun calculateCacheBytes(cacheDir: File?, externalCacheDir: File?): Long {
     fun dirSizeExcludingTemporaryVideos(dir: File?): Long {
         if (dir == null || !dir.exists()) return 0L
         val temporaryVideosDir = File(dir, "videos")
@@ -470,15 +485,21 @@ private fun calculateCacheBytes(context: android.content.Context): Long {
             }
             .sumOf { it.length() }
     }
-    return dirSizeExcludingTemporaryVideos(context.cacheDir) + dirSizeExcludingTemporaryVideos(context.externalCacheDir)
+    return dirSizeExcludingTemporaryVideos(cacheDir) + dirSizeExcludingTemporaryVideos(externalCacheDir)
 }
 
 private fun calculateTemporaryVideoBytes(context: android.content.Context): Long =
-    listOf(File(context.cacheDir, "videos"), context.externalCacheDir?.let { File(it, "videos") })
+    calculateTemporaryVideoBytes(context.cacheDir, context.externalCacheDir)
+
+internal fun calculateTemporaryVideoBytes(cacheDir: File, externalCacheDir: File?): Long =
+    listOf(File(cacheDir, "videos"), externalCacheDir?.let { File(it, "videos") })
         .sumOf { it?.dirSizeBytes() ?: 0L }
 
 private fun clearTemporaryVideos(context: android.content.Context): Long =
-    listOf(File(context.cacheDir, "videos"), context.externalCacheDir?.let { File(it, "videos") })
+    clearTemporaryVideos(context.cacheDir, context.externalCacheDir)
+
+internal fun clearTemporaryVideos(cacheDir: File, externalCacheDir: File?): Long =
+    listOf(File(cacheDir, "videos"), externalCacheDir?.let { File(it, "videos") })
         .sumOf { it?.clearDirContentsCountingBytes() ?: 0L }
 
 private fun File.dirSizeBytes(): Long {
@@ -486,7 +507,10 @@ private fun File.dirSizeBytes(): Long {
     return walkTopDown().filter { it.isFile }.sumOf { it.length() }
 }
 
-private fun clearAppCache(context: android.content.Context): Long {
+private fun clearAppCache(context: android.content.Context): Long =
+    clearAppCache(context.cacheDir, context.externalCacheDir)
+
+internal fun clearAppCache(cacheDir: File?, externalCacheDir: File?): Long {
     fun clearDir(dir: File?): Long {
         if (dir == null || !dir.exists()) return 0L
         var freed = 0L
@@ -497,7 +521,7 @@ private fun clearAppCache(context: android.content.Context): Long {
         }
         return freed
     }
-    return clearDir(context.cacheDir) + clearDir(context.externalCacheDir)
+    return clearDir(cacheDir) + clearDir(externalCacheDir)
 }
 
 private fun File.clearDirContentsCountingBytes(): Long {

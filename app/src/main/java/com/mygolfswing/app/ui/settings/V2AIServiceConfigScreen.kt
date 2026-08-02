@@ -252,7 +252,7 @@ fun V2AIServiceConfigScreen(onBack: () -> Unit) {
                             throw e
                         } catch (e: Throwable) {
                             saved = false
-                            saveError = aiConfigError("保存失败，请稍后重试", e.message)
+                            saveError = aiConfigThrowableError("保存失败，请稍后重试", e)
                         } finally {
                             saving = false
                         }
@@ -338,9 +338,18 @@ private fun aiBaseUrlForProvider(
         provider.defaultBase.orEmpty()
     }
 
-private fun aiConfigError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun aiConfigError(base: String, debugDetail: String?): String {
+    return aiConfigError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun aiConfigError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun aiConfigThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return aiConfigError(base, error.message)
 }
 
 private fun maskedAIKey(key: String): String {

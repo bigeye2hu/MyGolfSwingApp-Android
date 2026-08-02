@@ -2,18 +2,26 @@ package com.mygolfswing.app.data.video
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import android.media.MediaMuxer
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import com.mygolfswing.app.data.ServiceLocator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToLong
 
 internal fun deleteRecursivelyCountingFreedBytes(vararg dirs: File): Long =
     dirs.sumOf { dir ->
@@ -29,6 +37,111 @@ internal fun deleteFileCountingFreedBytes(file: File?): Long {
     if (file == null || !file.exists() || !file.isFile) return 0L
     val bytes = file.length()
     return if (runCatching { file.delete() }.getOrDefault(false)) bytes else 0L
+}
+
+internal fun normalizedRemoteVideoDownloadUrl(url: String): String? {
+    val trimmed = url.trim()
+    return when {
+        trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+        trimmed.startsWith("http://", ignoreCase = true) -> "https://" + trimmed.drop("http://".length)
+        else -> null
+    }
+}
+
+internal const val MAX_IMPORT_VIDEO_SIZE_BYTES: Long = 2L * 1024L * 1024L * 1024L
+internal const val MIN_VIDEO_TRIM_DURATION_MS: Long = 500L
+internal const val MAX_VIDEO_TRIM_DURATION_MS: Long = Long.MAX_VALUE / 1_000L
+
+internal fun sourceVideoSizeIsAllowed(sizeBytes: Long?): Boolean =
+    sizeBytes == null || sizeBytes in 0..MAX_IMPORT_VIDEO_SIZE_BYTES
+
+internal fun localVideoFileIsUsableForImport(file: File): Boolean =
+    file.exists() && file.isFile && file.length() > 0L && sourceVideoSizeIsAllowed(file.length())
+
+internal fun importedVideoDurationMs(durationSec: Double): Long? {
+    if (!durationSec.isFinite() || durationSec <= 0.0) return null
+    val durationMs = durationSec * 1_000.0
+    if (!durationMs.isFinite() || durationMs > MAX_VIDEO_TRIM_DURATION_MS.toDouble()) return null
+    return durationMs.roundToLong().coerceAtLeast(1L)
+}
+
+internal data class VideoTrimRange(val startMs: Long, val endMs: Long) {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
+}
+
+internal fun normalizedVideoTrimRange(
+    durationMs: Long,
+    startMs: Long,
+    endMs: Long,
+): VideoTrimRange? {
+    val safeDurationMs = durationMs.takeIf { it > 0L } ?: return null
+    if (safeDurationMs <= MIN_VIDEO_TRIM_DURATION_MS) {
+        return VideoTrimRange(startMs = 0L, endMs = safeDurationMs)
+    }
+    val safeStartMs = startMs.coerceIn(0L, safeDurationMs - MIN_VIDEO_TRIM_DURATION_MS)
+    val safeEndMs = endMs.coerceIn(safeStartMs + MIN_VIDEO_TRIM_DURATION_MS, safeDurationMs)
+    return VideoTrimRange(startMs = safeStartMs, endMs = safeEndMs)
+}
+
+internal fun videoTrimKeepsFullSource(
+    durationMs: Long,
+    range: VideoTrimRange,
+    toleranceMs: Long = 100L,
+): Boolean =
+    range.startMs <= toleranceMs && range.endMs >= durationMs - toleranceMs
+
+internal fun shouldStopTrimmedTrackCopy(sampleTimeUs: Long, endUs: Long): Boolean =
+    sampleTimeUs < 0L || sampleTimeUs >= endUs
+
+internal fun supportedVideoExtensionFromName(name: String?): String? {
+    val cleaned = name
+        ?.substringBefore('?')
+        ?.substringBefore('#')
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: return null
+    val ext = cleaned.substringAfterLast('.', missingDelimiterValue = "")
+        .lowercase(Locale.US)
+        .takeIf { it.isNotBlank() }
+        ?: return null
+    return when (ext) {
+        "mp4", "m4v", "mov" -> ext
+        "qt" -> "mov"
+        else -> null
+    }
+}
+
+internal fun videoFileName(prefix: String, timestamp: String, sourceName: String?): String {
+    val ext = supportedVideoExtensionFromName(sourceName) ?: "mp4"
+    return "${prefix}_${timestamp}.${ext}"
+}
+
+internal inline fun <T> runVideoFileStoreCatching(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
+
+internal fun archiveLocalVideoFile(source: File, target: File): Boolean {
+    if (source.absolutePath == target.absolutePath) {
+        return source.exists() && source.isFile && source.length() > 0L
+    }
+    target.parentFile?.mkdirs()
+    if (runCatching { source.renameTo(target) }.getOrDefault(false)) {
+        return target.exists() && target.isFile && target.length() > 0L
+    }
+    val copied = runCatching {
+        source.copyTo(target, overwrite = true)
+        target.exists() && target.isFile && target.length() > 0L
+    }.getOrDefault(false)
+    if (!copied) {
+        deleteFileCountingFreedBytes(target)
+        return false
+    }
+    source.delete()
+    return true
 }
 
 internal fun deleteMediaFilesCountingFreedBytes(userRoot: File, protectedAbsolutePaths: Set<String> = emptySet()): Long {
@@ -89,17 +202,31 @@ object V2VideoFileStore {
      */
     suspend fun importVideo(context: Context, src: Uri): ImportResult? = withContext(Dispatchers.IO) {
         val userId = ServiceLocator.session.current().userId ?: return@withContext null
+        val declaredSize = sourceVideoSizeBytes(context, src)
+        if (!sourceVideoSizeIsAllowed(declaredSize)) return@withContext null
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val videoFile = File(videoDir(context, userId), "memo_$ts.mp4")
-        val ok = runCatching {
+        val sourceName = sourceVideoDisplayName(context, src) ?: src.lastPathSegment
+        val videoFile = File(videoDir(context, userId), videoFileName("memo", ts, sourceName))
+        val ok = runVideoFileStoreCatching {
             context.contentResolver.openInputStream(src)?.use { input ->
                 FileOutputStream(videoFile).use { out ->
-                    input.copyTo(out)
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var copied = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read == -1) break
+                        copied += read
+                        if (!sourceVideoSizeIsAllowed(copied)) return@runVideoFileStoreCatching false
+                        out.write(buffer, 0, read)
+                    }
                 }
-            } ?: return@runCatching false
+            } ?: return@runVideoFileStoreCatching false
             true
         }.getOrDefault(false)
-        if (!ok || !videoFile.exists() || videoFile.length() == 0L) return@withContext null
+        if (!ok || !videoFile.exists() || videoFile.length() == 0L || !sourceVideoSizeIsAllowed(videoFile.length())) {
+            deleteFileCountingFreedBytes(videoFile)
+            return@withContext null
+        }
 
         val (duration, w, h, thumb) = extractMetadata(context, userId, videoFile)
         ImportResult(
@@ -118,17 +245,10 @@ object V2VideoFileStore {
      */
     suspend fun adoptLocalFile(context: Context, file: File): ImportResult? = withContext(Dispatchers.IO) {
         val userId = ServiceLocator.session.current().userId ?: return@withContext null
-        if (!file.exists() || file.length() == 0L) return@withContext null
+        if (!localVideoFileIsUsableForImport(file)) return@withContext null
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val target = File(videoDir(context, userId), "memo_$ts.mp4")
-        // FileProvider 临时文件通常在 cacheDir/videos/，rename 到 filesDir/videos/
-        val moved = runCatching {
-            if (file.absolutePath == target.absolutePath) return@runCatching true
-            file.copyTo(target, overwrite = true)
-            file.delete()
-            true
-        }.getOrDefault(false)
-        if (!moved) return@withContext null
+        val target = File(videoDir(context, userId), videoFileName("memo", ts, file.name))
+        if (!archiveLocalVideoFile(file, target)) return@withContext null
         val (duration, w, h, thumb) = extractMetadata(context, userId, target)
         ImportResult(
             absolutePath = target.absolutePath,
@@ -151,16 +271,17 @@ object V2VideoFileStore {
         onProgress: (Double) -> Unit = {},
     ): ImportResult? = withContext(Dispatchers.IO) {
         val userId = ServiceLocator.session.current().userId ?: return@withContext null
-        val cleaned = url.trim().takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        val cleaned = normalizedRemoteVideoDownloadUrl(url)
             ?: return@withContext null
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val target = File(videoDir(context, userId), "download_$ts.mp4")
+        val target = File(videoDir(context, userId), videoFileName("download", ts, cleaned))
         val request = Request.Builder().url(cleaned).get().build()
-        val ok = runCatching {
+        val ok = runVideoFileStoreCatching {
             ServiceLocator.net.httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@runCatching false
-                val body = response.body ?: return@runCatching false
+                if (!response.isSuccessful) return@runVideoFileStoreCatching false
+                val body = response.body ?: return@runVideoFileStoreCatching false
                 val total = body.contentLength()
+                if (total > MAX_IMPORT_VIDEO_SIZE_BYTES) return@runVideoFileStoreCatching false
                 var copied = 0L
                 body.byteStream().use { input ->
                     FileOutputStream(target).use { out ->
@@ -170,6 +291,7 @@ object V2VideoFileStore {
                             if (read == -1) break
                             out.write(buffer, 0, read)
                             copied += read
+                            if (!sourceVideoSizeIsAllowed(copied)) return@runVideoFileStoreCatching false
                             if (total > 0L) onProgress((copied.toDouble() / total.toDouble()).coerceIn(0.0, 1.0))
                             else onProgress(-1.0)
                         }
@@ -184,6 +306,57 @@ object V2VideoFileStore {
         }
         onProgress(1.0)
         val (duration, w, h, thumb) = extractMetadata(context, userId, target)
+        ImportResult(
+            absolutePath = target.absolutePath,
+            thumbnailPath = thumb,
+            durationSec = duration,
+            widthPx = w,
+            heightPx = h,
+            sizeBytes = target.length(),
+        )
+    }
+
+    /**
+     * Creates a passthrough-trimmed copy of an already imported local video.
+     *
+     * MediaMuxer trims on sample/keyframe boundaries, so the physical start can be slightly earlier
+     * than the requested start; replay analysis favors preserving source quality over re-encoding.
+     */
+    suspend fun trimImportedVideo(
+        context: Context,
+        imported: ImportResult,
+        startMs: Long,
+        endMs: Long,
+    ): ImportResult? = withContext(Dispatchers.IO) {
+        val userId = ServiceLocator.session.current().userId ?: return@withContext null
+        val source = File(imported.absolutePath)
+        if (!localVideoFileIsUsableForImport(source)) return@withContext null
+        val sourceDurationMs = importedVideoDurationMs(imported.durationSec)
+            ?: return@withContext null
+        val trimRange = normalizedVideoTrimRange(sourceDurationMs, startMs, endMs)
+            ?: return@withContext null
+        if (videoTrimKeepsFullSource(sourceDurationMs, trimRange)) return@withContext imported
+
+        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val target = File(videoDir(context, userId), "memo_trim_$ts.mp4")
+        val trimmed = runVideoFileStoreCatching {
+            trimVideoPassthrough(
+                source = source,
+                target = target,
+                trimRange = trimRange,
+            )
+        }.getOrDefault(false)
+        if (!trimmed || !target.exists() || target.length() == 0L || !sourceVideoSizeIsAllowed(target.length())) {
+            deleteFileCountingFreedBytes(target)
+            return@withContext null
+        }
+
+        val (duration, w, h, thumb) = extractMetadata(context, userId, target)
+        if (duration <= 0.0) {
+            deleteFileCountingFreedBytes(target)
+            thumb?.let { deleteFileCountingFreedBytes(File(it)) }
+            return@withContext null
+        }
         ImportResult(
             absolutePath = target.absolutePath,
             thumbnailPath = thumb,
@@ -243,6 +416,22 @@ object V2VideoFileStore {
     private fun userRootPath(context: Context, userId: String): File =
         File(context.filesDir, "users/$userId")
 
+    private fun sourceVideoSizeBytes(context: Context, uri: Uri): Long? =
+        runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0 && cursor.moveToFirst()) cursor.getLong(sizeIndex).takeIf { it >= 0 } else null
+            }
+        }.getOrNull()
+
+    private fun sourceVideoDisplayName(context: Context, uri: Uri): String? =
+        runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
+            }
+        }.getOrNull()
+
     private fun userRoot(context: Context, userId: String): File =
         userRootPath(context, userId).apply { mkdirs() }
 
@@ -279,5 +468,149 @@ object V2VideoFileStore {
             }
             out.absolutePath
         }.getOrNull()
+    }
+
+    private data class MuxTrack(val sourceTrackIndex: Int, val muxerTrackIndex: Int, val format: MediaFormat)
+
+    private fun trimVideoPassthrough(
+        source: File,
+        target: File,
+        trimRange: VideoTrimRange,
+    ): Boolean {
+        target.parentFile?.mkdirs()
+        if (target.exists()) target.delete()
+        val sourceTracks = readPassthroughTracks(source)
+        if (sourceTracks.none { it.format.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }) {
+            return false
+        }
+
+        var muxer: MediaMuxer? = null
+        var muxerStarted = false
+        return try {
+            val activeMuxer = MediaMuxer(target.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = activeMuxer
+            videoRotationDegrees(source)?.let(activeMuxer::setOrientationHint)
+            val muxTracks = sourceTracks.map { track ->
+                MuxTrack(
+                    sourceTrackIndex = track.sourceTrackIndex,
+                    muxerTrackIndex = activeMuxer.addTrack(track.format),
+                    format = track.format,
+                )
+            }
+            activeMuxer.start()
+            muxerStarted = true
+            val startUs = trimRange.startMs * 1_000L
+            val endUs = trimRange.endMs * 1_000L
+            muxTracks.forEach { track ->
+                copyTrimmedTrack(
+                    source = source,
+                    track = track,
+                    muxer = activeMuxer,
+                    startUs = startUs,
+                    endUs = endUs,
+                )
+            }
+            activeMuxer.stop()
+            muxerStarted = false
+            true
+        } catch (_: Throwable) {
+            false
+        } finally {
+            if (muxerStarted) runCatching { muxer?.stop() }
+            runCatching { muxer?.release() }
+            if (!target.exists() || target.length() == 0L) target.delete()
+        }
+    }
+
+    private data class SourceTrack(val sourceTrackIndex: Int, val format: MediaFormat)
+
+    private fun readPassthroughTracks(source: File): List<SourceTrack> {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(source.absolutePath)
+            buildList {
+                for (trackIndex in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(trackIndex)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                    if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+                        add(SourceTrack(trackIndex, format))
+                    }
+                }
+            }
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun copyTrimmedTrack(
+        source: File,
+        track: MuxTrack,
+        muxer: MediaMuxer,
+        startUs: Long,
+        endUs: Long,
+    ) {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(source.absolutePath)
+            extractor.selectTrack(track.sourceTrackIndex)
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            val buffer = ByteBuffer.allocate(trackCopyBufferSize(track.format))
+            val bufferInfo = MediaCodec.BufferInfo()
+            var firstSampleTimeUs: Long? = null
+
+            while (true) {
+                val sampleTimeUs = extractor.sampleTime
+                if (shouldStopTrimmedTrackCopy(sampleTimeUs, endUs)) break
+                buffer.clear()
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
+                val baseTimeUs = firstSampleTimeUs ?: sampleTimeUs.also { firstSampleTimeUs = it }
+                bufferInfo.set(
+                    0,
+                    sampleSize,
+                    (sampleTimeUs - baseTimeUs).coerceAtLeast(0L),
+                    muxerSampleFlags(extractor.sampleFlags),
+                )
+                muxer.writeSampleData(track.muxerTrackIndex, buffer, bufferInfo)
+                if (!extractor.advance()) break
+            }
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun trackCopyBufferSize(format: MediaFormat): Int {
+        val defaultSize = 4 * 1024 * 1024
+        val maxInputSize = if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+        } else {
+            defaultSize
+        }
+        return maxInputSize.coerceIn(DEFAULT_BUFFER_SIZE, 16 * 1024 * 1024)
+    }
+
+    internal fun muxerSampleFlags(extractorSampleFlags: Int): Int {
+        var flags = 0
+        if (extractorSampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) {
+            flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+        }
+        if (extractorSampleFlags and MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME != 0) {
+            flags = flags or MediaCodec.BUFFER_FLAG_PARTIAL_FRAME
+        }
+        return flags
+    }
+
+    private fun videoRotationDegrees(source: File): Int? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(source.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                ?.toIntOrNull()
+                ?.takeIf { it == 90 || it == 180 || it == 270 }
+        } catch (_: Throwable) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
     }
 }

@@ -28,7 +28,14 @@ internal object TrajectoryOverlayFrameSampler {
         legacyProgressAtTime: ((Double) -> Double)? = null,
     ): TrajectoryOverlayFrameSnapshot? {
         val rawHeadProgress = if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
-            GolfCamSpeedConfig.progress(elapsedSec / timing.totalDurationSec, style.speedLevel)
+            GolfCamSpeedConfig.trajectoryHeadProgress(
+                elapsedSec = elapsedSec,
+                totalDurationSec = timing.totalDurationSec,
+                speedLevel = style.speedLevel,
+                bezier = bezier,
+                arcTable = arcTable,
+                style = style,
+            )
         } else {
             legacyProgressAtTime?.invoke(elapsedSec)
                 ?: TrajectoryMotionModel(
@@ -49,13 +56,26 @@ internal object TrajectoryOverlayFrameSampler {
             apexProgress = apexProgress.toDouble(),
         ).toFloat()
         val distance = if (style.showDistance) {
-            GolfCamSpeedConfig.displayDistance(
-                totalDistance = style.totalDistance,
-                elapsedSec = elapsedSec,
-                totalDurationSec = timing.totalDurationSec,
-                speedLevel = style.speedLevel,
-                frameRate = timing.fps,
-            )
+            if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+                GolfCamSpeedConfig.trajectoryDisplayDistance(
+                    totalDistance = style.totalDistance,
+                    elapsedSec = elapsedSec,
+                    totalDurationSec = timing.totalDurationSec,
+                    speedLevel = style.speedLevel,
+                    bezier = bezier,
+                    arcTable = arcTable,
+                    style = style,
+                    frameRate = timing.fps,
+                )
+            } else {
+                GolfCamSpeedConfig.displayDistance(
+                    totalDistance = style.totalDistance,
+                    elapsedSec = elapsedSec,
+                    totalDurationSec = timing.totalDurationSec,
+                    speedLevel = style.speedLevel,
+                    frameRate = timing.fps,
+                )
+            }
         } else {
             null
         }

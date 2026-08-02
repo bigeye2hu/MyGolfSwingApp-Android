@@ -58,15 +58,16 @@ class V2VideoDownloadRepository(
     private fun JsonObject.string(key: String): String? =
         this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
-    private suspend inline fun <T> runDownloadCatching(
-        crossinline block: suspend () -> T,
-    ): Result<T> = try {
-        Result.success(block())
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.failure(e)
-    }
+}
+
+internal suspend inline fun <T> runDownloadCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
 }
 
 data class V2DownloadStartResult(

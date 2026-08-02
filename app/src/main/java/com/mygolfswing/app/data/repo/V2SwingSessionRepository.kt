@@ -34,6 +34,9 @@ import java.util.UUID
 internal fun localSwingMediaFile(pathOrUrl: String?): File? =
     V2MemoBridge.localVideoAbsolutePath(pathOrUrl)?.let(::File)
 
+internal fun swingMediaFileIsSafeToDelete(file: File?): Boolean =
+    file != null && file.exists() && file.isFile
+
 internal fun decodeSwingSessionJson(sessionJson: String, json: Json): V2SwingSession? = runCatching {
     val root = json.parseToJsonElement(sessionJson).jsonObject
     val id = UUID.fromString(root["id"]!!.jsonPrimitive.content)
@@ -184,7 +187,7 @@ class V2SwingSessionRepository(
         decodeSwingSessionJson(row.sessionJson, net.json)
 
     private fun V2SwingClip.deleteFiles() {
-        runCatching { localSwingMediaFile(videoPath)?.delete() }
-        runCatching { localSwingMediaFile(thumbnailPath)?.delete() }
+        runCatching { localSwingMediaFile(videoPath).takeIf(::swingMediaFileIsSafeToDelete)?.delete() }
+        runCatching { localSwingMediaFile(thumbnailPath).takeIf(::swingMediaFileIsSafeToDelete)?.delete() }
     }
 }

@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +54,7 @@ import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2PlazaCoach
 import com.mygolfswing.app.data.model.V2PlazaCoachProfile
 import com.mygolfswing.app.data.model.V2PlazaVideo
+import com.mygolfswing.app.data.store.plazaThrowableError
 import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.V2NavTopBar
@@ -75,7 +77,7 @@ fun V2CoachProfileScreen(
     var videos by remember(coachId) { mutableStateOf<List<V2PlazaVideo>>(emptyList()) }
     var loading by remember(coachId) { mutableStateOf(true) }
     var error by remember(coachId) { mutableStateOf<String?>(null) }
-    var reloadNonce by remember(coachId) { mutableStateOf(0) }
+    var reloadNonce by remember(coachId) { mutableIntStateOf(0) }
 
     LaunchedEffect(coachId, reloadNonce) {
         loading = true
@@ -86,7 +88,7 @@ fun V2CoachProfileScreen(
             videos = local
             ServiceLocator.plazaRepo.fetchCoachProfile(coachId)
                 .onSuccess { profile = it }
-                .onFailure { error = coachProfileError("教练资料加载失败，请稍后重试", it.message) }
+                .onFailure { error = plazaThrowableError("教练资料加载失败，请稍后重试", it) }
             ServiceLocator.plazaRepo.fetchCoachVideos(coachId)
                 .onSuccess {
                     videos = it
@@ -94,14 +96,14 @@ fun V2CoachProfileScreen(
                 }
                 .onFailure {
                     if (videos.isEmpty()) {
-                        error = coachProfileError("教练视频加载失败，请稍后重试", it.message)
+                        error = plazaThrowableError("教练视频加载失败，请稍后重试", it)
                     }
                 }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
             if (videos.isEmpty()) {
-                error = coachProfileError("教练主页加载失败，请稍后重试", e.message)
+                error = plazaThrowableError("教练主页加载失败，请稍后重试", e)
             }
         } finally {
             loading = false
@@ -409,9 +411,4 @@ private fun EmptyState(
             )
         }
     }
-}
-
-private fun coachProfileError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-    return if (detail == null) base else "$base（$detail）"
 }

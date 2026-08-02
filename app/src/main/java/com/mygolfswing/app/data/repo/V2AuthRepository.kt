@@ -6,6 +6,7 @@ import androidx.core.graphics.scale
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2Session
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -29,7 +30,7 @@ class V2AuthRepository(
 
     // ============ 登录 / 注册 ============
 
-    suspend fun loginWithUsername(username: String, password: String): Result<V2Session> = runCatching {
+    suspend fun loginWithUsername(username: String, password: String): Result<V2Session> = runAuthCatching {
         val data = call(
             "login",
             "username" to username,
@@ -45,7 +46,7 @@ class V2AuthRepository(
         password: String,
         nickname: String? = null,
         avatar: String? = null,
-    ): Result<V2Session> = runCatching {
+    ): Result<V2Session> = runAuthCatching {
         val data = call(
             "register",
             "username" to username,
@@ -58,7 +59,7 @@ class V2AuthRepository(
         s
     }
 
-    suspend fun sendSmsCode(phone: String, purpose: SmsPurpose = SmsPurpose.LOGIN): Result<Unit> = runCatching {
+    suspend fun sendSmsCode(phone: String, purpose: SmsPurpose = SmsPurpose.LOGIN): Result<Unit> = runAuthCatching {
         call(
             "sendSmsCode",
             "phoneNumber" to phone,
@@ -67,7 +68,7 @@ class V2AuthRepository(
         Unit
     }
 
-    suspend fun loginByPhone(phone: String, code: String): Result<V2Session> = runCatching {
+    suspend fun loginByPhone(phone: String, code: String): Result<V2Session> = runAuthCatching {
         val data = call(
             "loginByPhone",
             "phoneNumber" to phone,
@@ -80,7 +81,7 @@ class V2AuthRepository(
 
     // ============ 密码 ============
 
-    suspend fun updatePassword(oldPassword: String, newPassword: String): Result<Unit> = runCatching {
+    suspend fun updatePassword(oldPassword: String, newPassword: String): Result<Unit> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         call(
             "updatePassword",
@@ -91,7 +92,7 @@ class V2AuthRepository(
         session.mergeProfile { copy(hasPassword = true) }
     }
 
-    suspend fun setPasswordWithSms(phone: String, code: String, newPassword: String): Result<Unit> = runCatching {
+    suspend fun setPasswordWithSms(phone: String, code: String, newPassword: String): Result<Unit> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         call(
             "setPasswordWithSms",
@@ -103,7 +104,7 @@ class V2AuthRepository(
         session.mergeProfile { copy(hasPassword = true) }
     }
 
-    suspend fun resetPasswordWithSms(phone: String, code: String, newPassword: String): Result<Unit> = runCatching {
+    suspend fun resetPasswordWithSms(phone: String, code: String, newPassword: String): Result<Unit> = runAuthCatching {
         call(
             "resetPasswordWithSms",
             "phoneNumber" to phone,
@@ -114,7 +115,7 @@ class V2AuthRepository(
 
     // ============ 用户资料 ============
 
-    suspend fun refreshUserSig(): Result<String> = runCatching {
+    suspend fun refreshUserSig(): Result<String> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         val data = call("getUserSig", "userId" to uid)
         val sig = data["userSig"]?.jsonPrimitive?.contentOrNull ?: error("返回无 userSig")
@@ -122,7 +123,7 @@ class V2AuthRepository(
         sig
     }
 
-    suspend fun fetchUserInfo(): Result<V2Session> = runCatching {
+    suspend fun fetchUserInfo(): Result<V2Session> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         val data = call("getUserInfo", "userId" to uid)
         val merged = session.current().mergedWith(data)
@@ -148,7 +149,7 @@ class V2AuthRepository(
         dominantHand: String? = null,
         golfBrands: List<String>? = null,
         email: String? = null,
-    ): Result<V2Session> = runCatching {
+    ): Result<V2Session> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         val body = buildMap<String, Any?> {
             put("action", "updateUserInfo")
@@ -196,7 +197,7 @@ class V2AuthRepository(
      * - 压到 ≤ 50KB JPEG，先 quality=0.6，每次失败减 0.1
      * - 返回云端的 `avatarUrl`，并自动写到 session
      */
-    suspend fun uploadAvatar(bitmap: Bitmap): Result<String> = runCatching {
+    suspend fun uploadAvatar(bitmap: Bitmap): Result<String> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         val resized = resizeBitmap(bitmap, maxSide = 300)
         var quality = 60
@@ -225,7 +226,7 @@ class V2AuthRepository(
         session.logout()
     }
 
-    suspend fun bindPhoneNumber(phone: String, code: String): Result<V2Session> = runCatching {
+    suspend fun bindPhoneNumber(phone: String, code: String): Result<V2Session> = runAuthCatching {
         val uid = session.current().userId ?: error("未登录")
         call(
             "bindPhoneNumber",
@@ -360,6 +361,16 @@ private fun V2Session.mergedWith(data: JsonObject): V2Session = copy(
     hasPassword = data["hasPassword"]?.jsonPrimitive?.booleanOrNull ?: hasPassword,
     createdAt = data.stringField("createdAt") ?: createdAt,
 )
+
+internal suspend inline fun <T> runAuthCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
 
 /** 工具：bitmap 等比缩放到最长边 ≤ [maxSide] */
 internal fun resizeBitmap(src: Bitmap, maxSide: Int): Bitmap {

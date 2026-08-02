@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -185,7 +186,15 @@ object V2GolfProfileStore {
     private fun persist() {
         val snapshot = _profile.value
         scope.launch {
-            runCatching { repo.saveAndSync(snapshot) }
+            runGolfProfilePersistCatching { repo.saveAndSync(snapshot) }
         }
     }
+}
+
+internal suspend fun runGolfProfilePersistCatching(block: suspend () -> Unit): Result<Unit> = try {
+    block()
+    Result.success(Unit)
+} catch (e: Throwable) {
+    if (e is CancellationException) throw e
+    Result.failure(e)
 }

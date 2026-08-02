@@ -46,6 +46,7 @@ import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -143,13 +144,20 @@ fun V2ChangePasswordScreen(
                             onClick = {
                                 scope.launch {
                                     loading = true
-                                    val r = ServiceLocator.authRepo.sendSmsCode(
-                                        phone.orEmpty(),
-                                        purpose = com.mygolfswing.app.data.repo.V2AuthRepository.SmsPurpose.SET_PASSWORD,
-                                    )
-                                    loading = false
-                                    r.onSuccess { countdown = 60 }
-                                        .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
+                                    try {
+                                        val r = ServiceLocator.authRepo.sendSmsCode(
+                                            phone.orEmpty(),
+                                            purpose = com.mygolfswing.app.data.repo.V2AuthRepository.SmsPurpose.SET_PASSWORD,
+                                        )
+                                        r.onSuccess { countdown = 60 }
+                                            .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Throwable) {
+                                        error = authThrowableError("验证码发送失败，请稍后重试", e)
+                                    } finally {
+                                        loading = false
+                                    }
                                 }
                             },
                             enabled = countdown == 0 && !loading,
@@ -202,14 +210,21 @@ fun V2ChangePasswordScreen(
                         }
                         scope.launch {
                             loading = true
-                            val r = if (hasPassword) {
-                                ServiceLocator.authRepo.updatePassword(oldPw, newPw)
-                            } else {
-                                ServiceLocator.authRepo.setPasswordWithSms(phone!!, code, newPw)
+                            try {
+                                val r = if (hasPassword) {
+                                    ServiceLocator.authRepo.updatePassword(oldPw, newPw)
+                                } else {
+                                    ServiceLocator.authRepo.setPasswordWithSms(phone!!, code, newPw)
+                                }
+                                r.onSuccess { onChangeSuccess() }
+                                    .onFailure { error = authUserError("操作失败，请检查输入后重试", it.message) }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Throwable) {
+                                error = authThrowableError("操作失败，请检查输入后重试", e)
+                            } finally {
+                                loading = false
                             }
-                            loading = false
-                            r.onSuccess { onChangeSuccess() }
-                                .onFailure { error = authUserError("操作失败，请检查输入后重试", it.message) }
                         }
                     },
                     enabled = !loading,

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2MemoKind
+import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -56,7 +57,7 @@ fun V2TextMemoListScreen(
     var filterId by rememberSaveable { mutableStateOf("all") }
     val texts = remember(all) { all.filter { it.kind == V2MemoKind.TEXT }.sortedByDescending { it.createdAt } }
     val filtered = remember(texts, filterId) {
-        texts.filter { matchesTextFilter(it, filterId) }
+        textMemoListVisibleMemos(texts, filterId)
     }
     val stats = remember(texts) {
         val now = LocalDateTime.now()
@@ -94,7 +95,6 @@ fun V2TextMemoListScreen(
                     icon = Icons.Filled.Search,
                     contentDescription = "搜索",
                     enabled = false,
-                    onClick = {},
                 )
             },
         )
@@ -106,9 +106,7 @@ fun V2TextMemoListScreen(
             TextMemoListEmptyState(
                 filterId = filterId,
                 hasAnyText = texts.isNotEmpty(),
-                onClearFilter = {
-                    filterId = "all"
-                },
+                onClearFilter = { filterId = "all" },
             )
         } else {
             LazyColumn(Modifier.weight(1f)) {
@@ -135,6 +133,12 @@ fun V2TextMemoListScreen(
     }
 }
 
+internal fun textMemoListVisibleMemos(
+    memos: List<V2Memo>,
+    filterId: String,
+): List<V2Memo> = memos
+    .filter { matchesTextFilter(it, filterId) }
+
 @Composable
 private fun TextMemoListEmptyState(
     filterId: String,
@@ -157,7 +161,10 @@ private fun TextMemoListEmptyState(
         )
         Spacer(Modifier.height(if (isAll) 8.dp else 12.dp))
         Text(
-            text = if (isAll) "暂无随手记" else "当前筛选下没有随手记",
+            text = when {
+                isAll -> "暂无随手记"
+                else -> "当前筛选下没有随手记"
+            },
             color = DSColors.inkGreen,
             fontSize = if (isAll) 14.sp else 13.sp,
             fontWeight = FontWeight.Medium,

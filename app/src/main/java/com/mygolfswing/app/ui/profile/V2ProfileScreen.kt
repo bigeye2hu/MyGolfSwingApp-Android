@@ -48,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.data.model.V2Goal
+import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
@@ -126,8 +128,8 @@ fun V2ProfileScreen(
         }
     }
 
-    val displayGoals = if (profile.isLoggedIn) goals.filterNot { it.title in demoGoalTitles } else emptyList()
-    val displayMemos = if (profile.isLoggedIn) memos.filterNot { it.displayTitle in demoMemoTitles || it.title in demoMemoTitles } else emptyList()
+    val displayGoals = profileDisplayGoals(profile.isLoggedIn, goals)
+    val displayMemos = profileDisplayMemos(profile.isLoggedIn, memos)
     val activeGoals = displayGoals.count { it.status.name == "ACTIVE" }
     val completedGoals = displayGoals.count { it.status.name == "COMPLETED" }
     val videoMemoCount = displayMemos.count {
@@ -241,8 +243,8 @@ fun V2ProfileScreen(
                             onLogoutComplete()
                         } catch (e: CancellationException) {
                             throw e
-                        } catch (_: Throwable) {
-                            logoutError = "退出登录失败，请稍后重试"
+                        } catch (e: Throwable) {
+                            logoutError = profileLogoutThrowableError(e)
                         }
                     }
                 }) {
@@ -272,20 +274,16 @@ fun V2ProfileScreen(
 
 }
 
-private val demoGoalTitles = setOf(
-    "用 7 号铁打 50 球",
-    "练习 40 分钟挥杆基础",
-    "推杆 5 米精度训练",
-    "每日复盘心法",
-)
+internal fun profileDisplayGoals(isLoggedIn: Boolean, goals: List<V2Goal>): List<V2Goal> =
+    if (isLoggedIn) goals else emptyList()
 
-private val demoMemoTitles = setOf(
-    "握把压力的微调",
-    "推杆距离感的练习",
-    "教练点评：上杆速度",
-    "下杆节奏练习 · 7号铁",
-    "沙坑救球角度",
-)
+internal fun profileDisplayMemos(isLoggedIn: Boolean, memos: List<V2Memo>): List<V2Memo> =
+    if (isLoggedIn) memos else emptyList()
+
+internal fun profileLogoutThrowableError(error: Throwable): String {
+    if (error is CancellationException) throw error
+    return "退出登录失败，请稍后重试"
+}
 
 @Composable
 private fun Header() {

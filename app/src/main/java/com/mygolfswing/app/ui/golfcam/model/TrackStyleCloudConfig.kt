@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.golfcam.model
 
+import androidx.core.content.edit
 import com.mygolfswing.app.data.ServiceLocator
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -103,9 +104,9 @@ object TrackStyleCloudConfigLoader {
         val parsed = parse(config)
         ServiceLocator.appContext
             .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-            .edit()
-            .putString(CACHE_KEY_CONFIG_JSON, config.toString())
-            .apply()
+            .edit {
+                putString(CACHE_KEY_CONFIG_JSON, config.toString())
+            }
         return parsed
     }
 

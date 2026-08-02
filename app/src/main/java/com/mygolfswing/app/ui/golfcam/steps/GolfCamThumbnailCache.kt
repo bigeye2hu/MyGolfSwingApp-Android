@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.core.graphics.scale
 import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -411,6 +412,6 @@ internal object GolfCamThumbnailCache {
         val targetWidth = (safeWidth.toFloat() / safeHeight * DEFAULT_THUMBNAIL_HEIGHT_PX)
             .toInt()
             .coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(this, targetWidth, DEFAULT_THUMBNAIL_HEIGHT_PX, false)
+        return scale(targetWidth, DEFAULT_THUMBNAIL_HEIGHT_PX, filter = false)
     }
 }

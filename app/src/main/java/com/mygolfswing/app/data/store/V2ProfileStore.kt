@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -98,8 +99,10 @@ object V2ProfileStore {
             if (!session.current().isLoggedIn) return@launch
             _isRefreshing.value = true
             try {
-                ServiceLocator.authRepo.fetchUserInfo()
-                ServiceLocator.creditsRepo.fetchBalance(force = force)
+                runProfileRefreshCatching {
+                    ServiceLocator.authRepo.fetchUserInfo()
+                    ServiceLocator.creditsRepo.fetchBalance(force = force)
+                }
             } finally {
                 _isRefreshing.value = false
             }
@@ -156,4 +159,12 @@ object V2ProfileStore {
 
     @Suppress("unused")
     private val isoFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+}
+
+internal suspend fun <T> runProfileRefreshCatching(block: suspend () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
 }

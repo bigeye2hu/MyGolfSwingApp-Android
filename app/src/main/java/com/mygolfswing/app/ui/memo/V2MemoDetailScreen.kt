@@ -52,7 +52,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoSource
@@ -149,7 +148,7 @@ fun V2MemoDetailScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                saveError = memoTextSaveError("保存失败，请稍后重试", e.message)
+                saveError = memoTextThrowableError("保存失败，请稍后重试", e)
             } finally {
                 saving = false
             }
@@ -168,7 +167,7 @@ fun V2MemoDetailScreen(
                 throw e
             } catch (e: Throwable) {
                 showDeleteConfirm = false
-                deleteError = memoTextSaveError("删除失败，请稍后重试", e.message)
+                deleteError = memoTextThrowableError("删除失败，请稍后重试", e)
             } finally {
                 deleting = false
             }
@@ -749,11 +748,6 @@ private fun parentCategoryNameFor(tagIds: Set<String>): String? =
     tagIds.firstNotNullOfOrNull { tagId ->
         V2CategoryStore.groupForItemId(tagId)?.name
     }
-
-private fun memoTextSaveError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-    return if (detail == null) base else "$base（$detail）"
-}
 
 @Composable
 private fun DeleteBtn(onClick: () -> Unit) {

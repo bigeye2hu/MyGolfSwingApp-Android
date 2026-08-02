@@ -13,6 +13,7 @@ import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import androidx.core.content.edit
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.store.V2ProfileStore
 import kotlinx.coroutines.CoroutineScope
@@ -64,6 +65,10 @@ class V2CreditsBillingManager(
     private val _state = MutableStateFlow(V2CreditsPurchaseState())
     val state: StateFlow<V2CreditsPurchaseState> = _state.asStateFlow()
     private val processingPurchaseTokens = mutableSetOf<String>()
+    private val grantedPurchaseStore = appContext.getSharedPreferences(
+        GRANTED_PURCHASE_PREFS,
+        Context.MODE_PRIVATE,
+    )
 
     private val billingClient: BillingClient = BillingClient.newBuilder(appContext)
         .setListener(this)
@@ -202,20 +207,21 @@ class V2CreditsBillingManager(
     }
 
     fun close() {
-        runCatching { billingClient.endConnection() }
+        runBillingCloseCatching { billingClient.endConnection() }
     }
 
     private fun handlePurchase(purchase: Purchase) {
         if (!processingPurchaseTokens.add(purchase.purchaseToken)) return
-        val productId = purchase.products.firstOrNull().orEmpty()
+        val productId = billingCreditProductId(purchase.products).orEmpty()
         val catalogProduct = V2CreditProductCatalog.productFor(productId)
         if (catalogProduct == null) {
             processingPurchaseTokens.remove(purchase.purchaseToken)
             _state.value = _state.value.copy(
                 purchasingProductId = null,
-                error = releaseSafeError(
+                error = V2BillingCopy.releaseSafeError(
                     base = "积分商品信息异常，请点“刷新/恢复”后重试",
                     debugDetail = productId.takeIf { it.isNotBlank() }?.let { "未知积分商品：$it" },
+                    isDebuggable = ServiceLocator.isDebuggable,
                 ),
             )
             return
@@ -229,10 +235,25 @@ class V2CreditsBillingManager(
             processingPurchaseTokens.remove(purchase.purchaseToken)
             return
         }
+        if (isGrantedPurchaseTokenRecorded(purchase.purchaseToken)) {
+            _state.value = _state.value.copy(
+                purchasingProductId = null,
+                message = "正在完成已发放订单确认",
+                error = null,
+            )
+            consumePurchase(
+                purchaseToken = purchase.purchaseToken,
+                successMessage = "已完成订单确认，积分已发放",
+            )
+            return
+        }
         scope.launch {
             val quantity = purchase.quantity.coerceAtLeast(1)
             val transactionId = purchase.orderId?.takeIf { it.isNotBlank() } ?: purchase.purchaseToken
-            val orderLabel = purchase.supportOrderLabel()
+            val orderLabel = V2BillingCopy.supportOrderLabel(
+                orderId = purchase.orderId,
+                purchaseToken = purchase.purchaseToken,
+            )
             val grant = ServiceLocator.creditsRepo.addCreditsFromIap(
                 amount = catalogProduct.credits * quantity,
                 transactionId = transactionId,
@@ -242,6 +263,7 @@ class V2CreditsBillingManager(
                 quantity = quantity,
             )
             grant.onSuccess { balance ->
+                recordGrantedPurchaseToken(purchase.purchaseToken)
                 consumePurchase(purchase.purchaseToken)
                 V2ProfileStore.refresh(force = true)
                 _state.value = _state.value.copy(
@@ -280,13 +302,22 @@ class V2CreditsBillingManager(
         })
     }
 
-    private fun consumePurchase(purchaseToken: String) {
+    private fun consumePurchase(purchaseToken: String, successMessage: String? = null) {
         val params = ConsumeParams.newBuilder()
             .setPurchaseToken(purchaseToken)
             .build()
         billingClient.consumeAsync(params) { result, _ ->
             processingPurchaseTokens.remove(purchaseToken)
-            if (!result.isOk) {
+            if (result.isOk) {
+                forgetGrantedPurchaseToken(purchaseToken)
+                if (successMessage != null) {
+                    _state.value = _state.value.copy(
+                        purchasingProductId = null,
+                        message = successMessage,
+                        error = null,
+                    )
+                }
+            } else {
                 _state.value = _state.value.copy(
                     purchasingProductId = null,
                     error = result.userFacingMessage("积分已发放，但订单消费确认失败；请点“刷新/恢复”再次同步"),
@@ -299,41 +330,20 @@ class V2CreditsBillingManager(
         get() = responseCode == BillingClient.BillingResponseCode.OK
 
     private fun BillingResult.userFacingMessage(fallback: String): String {
-        val base = when (responseCode) {
-            BillingClient.BillingResponseCode.SERVICE_UNAVAILABLE,
-            BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
-            BillingClient.BillingResponseCode.NETWORK_ERROR ->
-                "Google Play 购买服务暂时不可用，请检查网络后重试"
-            BillingClient.BillingResponseCode.BILLING_UNAVAILABLE ->
-                "当前设备暂不可使用 Google Play 购买，请确认已登录 Google Play"
-            BillingClient.BillingResponseCode.FEATURE_NOT_SUPPORTED ->
-                "当前 Google Play 版本暂不支持此购买功能，请更新后再试"
-            BillingClient.BillingResponseCode.ITEM_UNAVAILABLE ->
-                "该积分商品暂不可购买，请稍后刷新"
-            BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
-                "已有未完成订单，请点“刷新/恢复”同步积分"
-            BillingClient.BillingResponseCode.ITEM_NOT_OWNED ->
-                "未找到可恢复的积分订单"
-            BillingClient.BillingResponseCode.DEVELOPER_ERROR,
-            BillingClient.BillingResponseCode.ERROR ->
-                fallback
-            BillingClient.BillingResponseCode.USER_CANCELED ->
-                "已取消购买"
-            else -> fallback
-        }
-        return releaseSafeError(base, debugMessage)
-    }
-
-    private fun creditGrantFailureMessage(cause: Throwable, orderLabel: String): String {
-        return releaseSafeError(
-            base = "购买成功但积分发放失败，请点“刷新/恢复”重试；如仍未到账，请联系客服处理订单。$orderLabel",
-            debugDetail = cause.message,
+        return V2BillingCopy.billingMessage(
+            responseCode = responseCode,
+            debugMessage = debugMessage,
+            fallback = fallback,
+            isDebuggable = ServiceLocator.isDebuggable,
         )
     }
 
-    private fun releaseSafeError(base: String, debugDetail: String?): String {
-        val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-        return if (detail == null) base else "$base（$detail）"
+    private fun creditGrantFailureMessage(cause: Throwable, orderLabel: String): String {
+        return V2BillingCopy.creditGrantFailureMessage(
+            causeMessage = cause.message,
+            orderLabel = orderLabel,
+            isDebuggable = ServiceLocator.isDebuggable,
+        )
     }
 
     private fun okBillingResult(): BillingResult =
@@ -341,19 +351,125 @@ class V2CreditsBillingManager(
             .setResponseCode(BillingClient.BillingResponseCode.OK)
             .build()
 
-    private fun Purchase.supportOrderLabel(): String {
-        val orderId = orderId?.takeIf { it.isNotBlank() }
-        return if (orderId != null) {
-            "订单号：$orderId"
-        } else {
-            "订单凭据尾号：${purchaseToken.takeLast(8)}"
+    private fun currentObfuscatedAccountId(): String? {
+        val userId = V2ProfileStore.profile.value.userId?.takeIf { it.isNotBlank() } ?: return null
+        return billingObfuscatedAccountId(appContext.packageName, userId)
+    }
+
+    private fun isGrantedPurchaseTokenRecorded(purchaseToken: String): Boolean =
+        purchaseToken.trim().takeIf { it.isNotBlank() } in
+            billingGrantedTokensFromRecords(grantedPurchaseTokenRecords())
+
+    private fun recordGrantedPurchaseToken(purchaseToken: String) {
+        grantedPurchaseStore.edit {
+            putStringSet(
+                GRANTED_PURCHASE_TOKENS_KEY,
+                billingGrantedTokenRecordsAfterRecord(grantedPurchaseTokenRecords(), purchaseToken),
+            )
         }
     }
 
-    private fun currentObfuscatedAccountId(): String? {
-        val userId = V2ProfileStore.profile.value.userId?.takeIf { it.isNotBlank() } ?: return null
-        val input = "${appContext.packageName}:$userId"
-        val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
-        return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+    private fun forgetGrantedPurchaseToken(purchaseToken: String) {
+        grantedPurchaseStore.edit {
+            putStringSet(
+                GRANTED_PURCHASE_TOKENS_KEY,
+                billingGrantedTokenRecordsAfterForget(grantedPurchaseTokenRecords(), purchaseToken),
+            )
+        }
     }
+
+    private fun grantedPurchaseTokenRecords(): Set<String> =
+        grantedPurchaseStore.getStringSet(GRANTED_PURCHASE_TOKENS_KEY, emptySet()).orEmpty()
 }
+
+internal fun billingObfuscatedAccountId(packageName: String, userId: String?): String? {
+    val normalizedUserId = userId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    val normalizedPackageName = packageName.trim().takeIf { it.isNotBlank() } ?: return null
+    val input = "$normalizedPackageName:$normalizedUserId"
+    val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+    return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+}
+
+internal fun billingCreditProductId(products: List<String>): String? =
+    products.firstOrNull { V2CreditProductCatalog.productFor(it) != null }
+
+internal inline fun runBillingCloseCatching(block: () -> Unit): Result<Unit> = try {
+    block()
+    Result.success(Unit)
+} catch (e: Throwable) {
+    Result.failure(e)
+}
+
+private const val GRANTED_PURCHASE_PREFS = "v2_google_play_billing"
+private const val GRANTED_PURCHASE_TOKENS_KEY = "granted_purchase_tokens"
+internal const val MAX_GRANTED_PURCHASE_TOKENS = 64
+private const val GRANTED_PURCHASE_TOKEN_RECORD_SEPARATOR = ":"
+
+private data class BillingGrantedTokenRecord(
+    val sequence: Long,
+    val token: String,
+)
+
+internal fun billingGrantedTokenRecordsAfterRecord(
+    existing: Set<String>,
+    purchaseToken: String,
+): Set<String> {
+    val token = purchaseToken.trim().takeIf { it.isNotBlank() } ?: return existing
+    val records = normalizedGrantedTokenRecords(existing)
+    val existingRecord = records.lastOrNull { it.token == token }
+    if (existingRecord != null) {
+        return (records.filterNot { it.token == token }.takeLast(MAX_GRANTED_PURCHASE_TOKENS - 1) +
+            existingRecord)
+            .map { it.serialize() }
+            .toSet()
+    }
+    val nextSequence = records.maxOfOrNull { it.sequence }?.let { last ->
+        if (last == Long.MAX_VALUE) 1L else last + 1L
+    } ?: 1L
+    return (records.filterNot { it.token == token }.takeLast(MAX_GRANTED_PURCHASE_TOKENS - 1) +
+        BillingGrantedTokenRecord(nextSequence, token))
+        .map { it.serialize() }
+        .toSet()
+}
+
+internal fun billingGrantedTokenRecordsAfterForget(
+    existing: Set<String>,
+    purchaseToken: String,
+): Set<String> {
+    val token = purchaseToken.trim().takeIf { it.isNotBlank() } ?: return existing
+    return normalizedGrantedTokenRecords(existing)
+        .filterNot { it.token == token }
+        .map { it.serialize() }
+        .toSet()
+}
+
+internal fun billingGrantedTokensFromRecords(records: Set<String>): Set<String> =
+    normalizedGrantedTokenRecords(records)
+        .map { it.token }
+        .toSet()
+
+private fun normalizedGrantedTokenRecords(records: Set<String>): List<BillingGrantedTokenRecord> {
+    val latestByToken = mutableMapOf<String, BillingGrantedTokenRecord>()
+    records.mapIndexedNotNull { index, raw ->
+        val trimmed = raw.trim().takeIf { it.isNotBlank() } ?: return@mapIndexedNotNull null
+        parseGrantedTokenRecord(trimmed)
+            ?: BillingGrantedTokenRecord(sequence = index.toLong(), token = trimmed)
+    }.sortedBy { it.sequence }.forEach { record ->
+        latestByToken[record.token] = record
+    }
+    return latestByToken.values.sortedBy { it.sequence }
+}
+
+private fun parseGrantedTokenRecord(raw: String): BillingGrantedTokenRecord? {
+    val separatorIndex = raw.indexOf(GRANTED_PURCHASE_TOKEN_RECORD_SEPARATOR)
+    if (separatorIndex <= 0) return null
+    val sequence = raw.substring(0, separatorIndex)
+        .takeIf { it.all(Char::isDigit) }
+        ?.toLongOrNull()
+        ?: return null
+    val token = raw.substring(separatorIndex + 1).trim().takeIf { it.isNotBlank() } ?: return null
+    return BillingGrantedTokenRecord(sequence = sequence, token = token)
+}
+
+private fun BillingGrantedTokenRecord.serialize(): String =
+    sequence.toString().padStart(19, '0') + GRANTED_PURCHASE_TOKEN_RECORD_SEPARATOR + token

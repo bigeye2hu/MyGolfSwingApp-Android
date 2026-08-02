@@ -9,6 +9,7 @@ import com.mygolfswing.app.data.model.V2UserNode
 import com.mygolfswing.app.data.model.V2UserNodeGroup
 import com.mygolfswing.app.data.model.V2UserTree
 import com.mygolfswing.app.data.net.V2NetClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
@@ -71,7 +72,7 @@ class V2CategoryRepository(
 
     suspend fun fetchUserCategory(userId: String): V2UserCategoryData? = withContext(Dispatchers.IO) {
         loadLocalCache(userId)?.let { return@withContext it }
-        val resp = runCatching {
+        val resp = runCategorySyncCatching {
             net.cloudApi.dataSync(
                 JsonObject(
                     mapOf(
@@ -95,7 +96,7 @@ class V2CategoryRepository(
                 put("lastSyncedAt", JsonPrimitive(System.currentTimeMillis()))
             },
         )
-        val ok = runCatching {
+        val ok = runCategoryCloudBooleanCatching {
             net.cloudApi.dataSync(
                 JsonObject(
                     mapOf(
@@ -105,7 +106,7 @@ class V2CategoryRepository(
                     ),
                 ),
             ).success
-        }.getOrDefault(false)
+        }
         if (ok) saveLocalCache(data.copy(lastSyncedAt = System.currentTimeMillis()))
         ok
     }
@@ -423,4 +424,24 @@ class V2CategoryRepository(
         )
 
     private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+}
+
+internal suspend inline fun <T> runCategorySyncCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
+
+internal suspend inline fun runCategoryCloudBooleanCatching(
+    crossinline block: suspend () -> Boolean,
+): Boolean = try {
+    block()
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    false
 }

@@ -140,7 +140,7 @@ fun V2LoginScreen(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Throwable) {
-                        error = authUserError("验证码发送失败，请稍后重试", e.message)
+                        error = authThrowableError("验证码发送失败，请稍后重试", e)
                     } finally {
                         loading = false
                     }
@@ -187,7 +187,7 @@ fun V2LoginScreen(
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Throwable) {
-                        error = authUserError("登录失败，请检查账号信息后重试", e.message)
+                        error = authThrowableError("登录失败，请检查账号信息后重试", e)
                     } finally {
                         loading = false
                     }

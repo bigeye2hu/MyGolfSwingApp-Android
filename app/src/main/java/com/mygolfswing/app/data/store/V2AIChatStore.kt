@@ -5,6 +5,7 @@ import com.mygolfswing.app.data.ai.V2AIMockProvider
 import com.mygolfswing.app.data.ai.V2AIProvider
 import com.mygolfswing.app.data.ai.V2AIService
 import com.mygolfswing.app.data.ai.V2ProfileReflector
+import com.mygolfswing.app.data.ai.profileReflectionFailureResult
 import com.mygolfswing.app.data.model.V2AIMessageRole
 import com.mygolfswing.app.data.model.V2AISession
 import com.mygolfswing.app.data.model.V2ChatMessage
@@ -38,6 +39,7 @@ import java.util.UUID
 object V2AIChatStore {
 
     private const val STREAM_TIMEOUT_MS = 75_000L
+    internal const val AI_REFLECTION_STATUS = "正在沉淀到训练档案…"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -238,7 +240,7 @@ object V2AIChatStore {
 
             val buffer = StringBuilder()
             try {
-                val flow = if (useMockProvider) {
+                val flow = if (shouldUseAIChatMockProvider(useMockProvider, ServiceLocator.isDebuggable)) {
                     provider.streamReply(trimmed, outboundHistory)
                 } else {
                     ServiceLocator.aiService.streamChat(outboundHistory)
@@ -320,13 +322,16 @@ object V2AIChatStore {
 
     private fun launchReflection() {
         scope.launch {
-            setStatusBar("正在沉淀到训练档案…")
+            setStatusBar(AI_REFLECTION_STATUS)
             val result = try {
                 V2ProfileReflector.reflectAll(_currentSession.value.id)
             } catch (e: CancellationException) {
+                if (shouldClearAIChatReflectionStatusOnCancellation(_statusBar.value)) {
+                    setStatusBar(null)
+                }
                 throw e
             } catch (e: Throwable) {
-                V2ProfileReflector.Result.Failed(e.message ?: "未知错误")
+                profileReflectionFailureResult(e)
             }
             when (result) {
                 is V2ProfileReflector.Result.Updated -> {
@@ -365,8 +370,7 @@ object V2AIChatStore {
     }
 
     private fun aiUserError(base: String, debugDetail: String?): String {
-        val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-        return if (detail == null) base else "$base（$detail）"
+        return aiChatUserError(base, debugDetail)
     }
 
     private fun clearStatusBarIf(text: String) {
@@ -375,7 +379,7 @@ object V2AIChatStore {
 
     private suspend fun modelDisplayFor(providerId: V2AIService.ProviderId, model: String): String {
         if (providerId != V2AIService.ProviderId.BUILTIN) return model
-        val quota = runCatching { ServiceLocator.net.downloadApi.aiQuota() }.getOrNull()
+        val quota = runAIQuotaCatching { ServiceLocator.net.downloadApi.aiQuota() }.getOrNull()
         val remaining = quota?.get("remaining")?.jsonPrimitive?.intOrNull
         val limit = quota?.get("daily_limit")?.jsonPrimitive?.intOrNull
         if (remaining != null && limit != null) {
@@ -416,7 +420,7 @@ object V2AIChatStore {
     }
 
     private suspend fun refreshTrainingContextBeforeSend() {
-        runCatching { V2GolfProfileStore.reloadFromLocal() }
+        runAITrainingContextCatching { V2GolfProfileStore.reloadFromLocal() }
     }
 
     private fun buildAccountProfilePrompt(): String? {
@@ -542,4 +546,27 @@ private inline fun <T> MutableStateFlow<T>.update(transform: (T) -> T) {
         val next = transform(current)
         if (compareAndSet(current, next)) return
     }
+}
+
+internal fun shouldClearAIChatReflectionStatusOnCancellation(currentStatus: String?): Boolean =
+    currentStatus == V2AIChatStore.AI_REFLECTION_STATUS
+
+internal suspend inline fun <T> runAIQuotaCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
+
+internal suspend inline fun <T> runAITrainingContextCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
 }

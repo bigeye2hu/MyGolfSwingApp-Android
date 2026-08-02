@@ -119,7 +119,7 @@ object V2SwingSessionStore {
             } catch (e: Throwable) {
                 pendingClipRetentions.remove(clipId)
                 setSessions(previousSessions)
-                _lastError.value = swingStoreError("挥杆状态保存失败，请稍后重试", e.message)
+                _lastError.value = swingStoreThrowableError("挥杆状态保存失败，请稍后重试", e)
             } finally {
                 pendingClipRetentions.remove(clipId)
             }
@@ -140,7 +140,7 @@ object V2SwingSessionStore {
             } catch (e: Throwable) {
                 pendingDeletedClipIds -= clipIds
                 setSessions(previousSessions)
-                _lastError.value = swingStoreError("删除挥杆失败，请稍后重试", e.message)
+                _lastError.value = swingStoreThrowableError("删除挥杆失败，请稍后重试", e)
             } finally {
                 pendingDeletedClipIds -= clipIds
             }
@@ -180,11 +180,6 @@ object V2SwingSessionStore {
             val clips = session.clips.filterNot { it.id in clipIds }
             session.copy(clips = clips).takeIf { it.clips.isNotEmpty() }
         }
-
-    private fun swingStoreError(base: String, debugDetail: String?): String {
-        val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-        return if (detail == null) base else "$base（$detail）"
-    }
 
     private fun buildDayItems(sessions: List<V2SwingSession>, limit: Int): List<V2SwingDayItem> {
         val today = LocalDate.now()

@@ -220,7 +220,7 @@ fun V2EditProfileScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                error = profileEditError("头像上传失败，请换一张图片或稍后重试", e.message)
+                error = profileEditThrowableError("头像上传失败，请换一张图片或稍后重试", e)
             } finally {
                 uploadingAvatar = false
             }
@@ -1075,7 +1075,6 @@ private fun NumberWheelColumn(
             text = label(clampedValue),
             selected = true,
             enabled = false,
-            onClick = {},
         )
         WheelOption(
             text = next?.let(label).orEmpty(),
@@ -1091,14 +1090,14 @@ private fun WheelOption(
     text: String,
     selected: Boolean,
     enabled: Boolean,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(36.dp)
             .clip(RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -1246,9 +1245,18 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
     cursorColor = DSColors.fairway,
 )
 
-private fun profileEditError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun profileEditError(base: String, debugDetail: String?): String {
+    return profileEditError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun profileEditError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun profileEditThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return profileEditError(base, error.message)
 }
 
 private fun parseHandicapParts(text: String): Pair<Int, Int> {

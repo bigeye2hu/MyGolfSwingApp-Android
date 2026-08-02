@@ -216,7 +216,7 @@ fun V2RegisterScreen(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
-                            error = authUserError("注册失败，请检查账号信息后重试", e.message)
+                            error = authThrowableError("注册失败，请检查账号信息后重试", e)
                         } finally {
                             loading = false
                         }

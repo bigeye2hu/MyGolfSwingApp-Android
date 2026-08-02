@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.repo
 
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
@@ -34,7 +35,7 @@ class V2CreditsRepository(
         if (!force && now - (lastFetchAtByUser[uid] ?: 0L) < cacheTtlMs) {
             return session.current().credits
         }
-        return runCatching {
+        return runCreditsCatching {
             val resp = net.downloadApi.creditsBalance()
             val available = resp["credits_available"]?.jsonPrimitive?.intOrNull
                 ?: resp["credits_balance"]?.jsonPrimitive?.intOrNull
@@ -58,7 +59,7 @@ class V2CreditsRepository(
         purchaseToken: String,
         packageName: String,
         quantity: Int,
-    ): Result<Int> = runCatching {
+    ): Result<Int> = runCreditsCatching {
         require(session.current().isLoggedIn) { "请先登录后再充值积分" }
         require(amount > 0) { "充值积分数量异常" }
         require(transactionId.isNotBlank()) { "订单号为空" }
@@ -67,17 +68,13 @@ class V2CreditsRepository(
         require(packageName.isNotBlank()) { "应用包名为空" }
 
         val resp = net.downloadApi.addCreditsFromIap(
-            JsonObject(
-                mapOf(
-                    "amount" to JsonPrimitive(amount),
-                    "transaction_id" to JsonPrimitive(transactionId),
-                    "product_id" to JsonPrimitive(productId),
-                    "purchase_token" to JsonPrimitive(purchaseToken),
-                    "package_name" to JsonPrimitive(packageName),
-                    "quantity" to JsonPrimitive(quantity.coerceAtLeast(1)),
-                    "platform" to JsonPrimitive("google_play"),
-                    "reason" to JsonPrimitive("Google Play购买"),
-                ),
+            iapCreditGrantPayload(
+                amount = amount,
+                transactionId = transactionId,
+                productId = productId,
+                purchaseToken = purchaseToken,
+                packageName = packageName,
+                quantity = quantity,
             ),
         )
         val available = resp["credits_available"]?.jsonPrimitive?.intOrNull
@@ -93,4 +90,35 @@ class V2CreditsRepository(
     fun reset() {
         lastFetchAtByUser.clear()
     }
+}
+
+internal fun iapCreditGrantPayload(
+    amount: Int,
+    transactionId: String,
+    productId: String,
+    purchaseToken: String,
+    packageName: String,
+    quantity: Int,
+): JsonObject =
+    JsonObject(
+        mapOf(
+            "amount" to JsonPrimitive(amount),
+            "transaction_id" to JsonPrimitive(transactionId),
+            "product_id" to JsonPrimitive(productId),
+            "purchase_token" to JsonPrimitive(purchaseToken),
+            "package_name" to JsonPrimitive(packageName),
+            "quantity" to JsonPrimitive(quantity.coerceAtLeast(1)),
+            "platform" to JsonPrimitive("google_play"),
+            "reason" to JsonPrimitive("Google Play购买"),
+        ),
+    )
+
+internal suspend inline fun <T> runCreditsCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
 }

@@ -80,7 +80,7 @@ class V2AccountDeletionRepository {
     } catch (e: CancellationException) {
         throw e
     } catch (e: Throwable) {
-        Result.failure(e)
+        accountDeletionFailureResult(e)
     }
 
     private suspend fun callAccountManagement(action: String, userId: String) {
@@ -94,4 +94,9 @@ class V2AccountDeletionRepository {
         )
         if (!resp.success) error(resp.error ?: "删除失败")
     }
+}
+
+internal fun <T> accountDeletionFailureResult(error: Throwable): Result<T> {
+    if (error is CancellationException) throw error
+    return Result.failure(error)
 }

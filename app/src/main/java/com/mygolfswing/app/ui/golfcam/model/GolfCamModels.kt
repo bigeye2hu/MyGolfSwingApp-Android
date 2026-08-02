@@ -6,6 +6,8 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
+import kotlin.math.sqrt
 
 // ─── 几何基础 ──────────────────────────────────────────────────────────────────
 
@@ -750,6 +752,13 @@ object GolfCamSpeedConfig {
     fun normalized(v: Double) = (clamp(v) - MIN_LEVEL) / (MAX_LEVEL - MIN_LEVEL)
     fun percentText(v: Double) = "${(clamp(v) * 100).toInt()}%"
 
+    internal fun golfCamV8StartSpeedLimit(activeDurationSec: Double, speedLevel: Double): Double {
+        val activeDuration = max(finiteDouble(activeDurationSec, fallback = 0.0), 0.0)
+        val speedNorm = normalized(speedLevel)
+        return (V8DepthDensity.START_SPEED_LIMIT_BASE + V8DepthDensity.START_SPEED_LIMIT_DURATION_GAIN * activeDuration) *
+            (V8DepthDensity.START_SPEED_LIMIT_SPEED_BASE_WEIGHT + V8DepthDensity.START_SPEED_LIMIT_SPEED_GAIN * speedNorm)
+    }
+
     private fun finiteDouble(value: Double, fallback: Double): Double {
         return value.takeIf { it.isFinite() } ?: fallback
     }
@@ -767,6 +776,34 @@ object GolfCamSpeedConfig {
         if (tau <= 0.0) return 0.0
         if (tau >= 1.0) return 1.0
         return tau.pow(calibratedGamma(speedLevel)).coerceIn(0.0, 1.0)
+    }
+
+    fun trajectoryHeadProgress(
+        elapsedSec: Double,
+        totalDurationSec: Double,
+        speedLevel: Double,
+        bezier: BezierPath,
+        arcTable: ArcLengthTable,
+        style: TrackStyle,
+    ): Double {
+        val totalDuration = max(finiteDouble(totalDurationSec, fallback = 1e-6), 1e-6)
+        val elapsed = finiteDouble(elapsedSec, fallback = 0.0).coerceIn(0.0, totalDuration)
+        if (elapsed <= 0.0) return 0.0
+        if (elapsed >= totalDuration) return 1.0
+
+        val delayTime = golfCamV8StartDelay(totalDuration)
+        if (elapsed <= delayTime) return 0.0
+        val activeDuration = max(totalDuration - delayTime, 1e-6)
+        val tau = ((elapsed - delayTime) / activeDuration).coerceIn(0.0, 1.0)
+        val mapping = golfCamV8HeadMapping(
+            totalDuration = totalDuration,
+            activeDuration = activeDuration,
+            speedLevel = speedLevel,
+            bezier = bezier,
+            arcTable = arcTable,
+            style = style,
+        )
+        return sForTime(tau, mapping.sSamples, mapping.tSamples).coerceIn(0.0, 1.0)
     }
 
     fun previewAnchorProgress(v: Double): Double {
@@ -818,6 +855,38 @@ object GolfCamSpeedConfig {
         return max(0, min(final, (safeDistance * p).toInt()))
     }
 
+    fun trajectoryDisplayDistance(
+        totalDistance: Double,
+        elapsedSec: Double,
+        totalDurationSec: Double,
+        speedLevel: Double,
+        bezier: BezierPath,
+        arcTable: ArcLengthTable,
+        style: TrackStyle,
+        frameRate: Double = 30.0,
+        updateIntervalFrames: Int = 2,
+    ): Int {
+        val dur = max(finiteDouble(totalDurationSec, fallback = 1e-6), 1e-6)
+        val elapsed = max(0.0, finiteDouble(elapsedSec, fallback = 0.0))
+        val safeDistance = GolfCamDistanceConfig.clamp(totalDistance)
+        val final = safeDistance.roundToInt()
+        if (elapsed >= dur) return max(0, final)
+        val fps = finiteDouble(frameRate, fallback = 30.0).takeIf { it > 1.0 } ?: 30.0
+        val frameIndex = (elapsed * fps).toInt()
+        val sampledFrame = frameIndex - (frameIndex % max(updateIntervalFrames, 1))
+        val sampledTime = sampledFrame / fps
+        val p = trajectoryHeadProgress(
+            elapsedSec = sampledTime,
+            totalDurationSec = dur,
+            speedLevel = speedLevel,
+            bezier = bezier,
+            arcTable = arcTable,
+            style = style,
+        )
+        if (p >= 1.0) return max(0, final)
+        return max(0, min(final, (safeDistance * p).toInt()))
+    }
+
     fun visibleTailStartProgress(
         headProgress: Double,
         tailHalfLife: Double,
@@ -853,6 +922,602 @@ object GolfCamSpeedConfig {
         val landingStart = max(0.0, apex - visualTailPercent * 0.42)
         val golfCamTailStart = preApexStart + (landingStart - preApexStart) * smoothTransition
         return min(golfCamTailStart, requestedTailStart)
+    }
+
+    private data class GolfCamV8HeadMapping(
+        val sSamples: DoubleArray,
+        val tSamples: DoubleArray,
+    )
+
+    private data class GolfCamV8HeadCacheKey(
+        val totalDurationMs: Long,
+        val speedLevelScaled: Int,
+        val apexProgressScaled: Int,
+        val anchorTimeMs: Long,
+        val liftHoldScaled: Int,
+        val arcHeightRatioScaled: Int,
+        val landingSteepnessScaled: Int,
+        val descentArcShareScaled: Int,
+        val progressDensityStrengthScaled: Int,
+        val tailReleaseStrengthScaled: Int,
+        val tailReleaseStartScaled: Int,
+        val startSpeedLimitScaled: Int,
+        val motionAnchorTimeMs: Long?,
+    )
+
+    private var golfCamV8HeadCache: Pair<GolfCamV8HeadCacheKey, GolfCamV8HeadMapping>? = null
+
+    private object V5Rhythm {
+        const val HOLD_WIDTH_BASE = 0.2192
+        const val HOLD_WIDTH_LIFT_GAIN = 0.08
+        const val HOLD_STRENGTH_BASE = 0.723
+        const val HOLD_STRENGTH_LIFT_GAIN = 0.20
+        const val HOLD_STRENGTH_MAX = 0.92
+        const val APEX_MIN_SPEED_BASE = 0.62
+        const val APEX_MIN_SPEED_LIFT_REDUCTION = 0.24
+        const val APEX_MIN_SPEED_FLOOR = 0.30
+        const val END_SPEED_BASE = 2.15
+        const val END_SPEED_SPEED_GAIN = 0.70
+        const val END_SPEED_HIGH_ARC_GAIN = 0.30
+        const val HIGH_ARC_APEX_REFERENCE = 0.62
+        const val HIGH_ARC_APEX_RANGE = 0.24
+        const val PRE_APEX_POWER_BASE = 1.55
+        const val PRE_APEX_POWER_SLOW_GAIN = 0.35
+        const val DESCENT_POWER_BASE = 2.35
+        const val DESCENT_POWER_SPEED_GAIN = 0.65
+        const val DESCENT_POWER_LOW_ARC_GAIN = 0.35
+    }
+
+    private object V6Geometry {
+        const val HEIGHT_REFERENCE = 0.36
+        const val STEEPNESS_REFERENCE = 0.48
+        const val HOLD_WIDTH_HEIGHT_GAIN = 0.055
+        const val HOLD_STRENGTH_HEIGHT_GAIN = 0.085
+        const val END_SPEED_LANDING_GAIN = 0.0
+        const val END_SPEED_HEIGHT_DAMPING = 2.0
+        const val END_SPEED_DURATION_GAIN = 0.0
+        const val DESCENT_POWER_LANDING_GAIN = 0.0
+        const val DESCENT_POWER_HEIGHT_DAMPING = 2.0
+        const val MIN_END_SPEED = 0.80
+        const val MAX_END_SPEED = 1.30
+        const val MIN_DESCENT_POWER = 1.00
+        const val MAX_DESCENT_POWER = 1.65
+    }
+
+    private object V7ApexBound {
+        const val APEX_CLAMP_MAX = 0.995
+        const val FAST_ANCHOR_CAP_BASE = 0.89
+        const val FAST_ANCHOR_ORDINARY_APEX_BOOST = 0.055
+        const val FAST_ANCHOR_LATE_APEX_BOOST = 0.21
+        const val FAST_ANCHOR_TINY_DESCENT_DAMPING = 0.06
+        const val HIGH_SPEED_BOOST_THRESHOLD = 0.55
+        const val POST_APEX_HOLD_BASE = 0.06
+        const val POST_APEX_HOLD_LIFT_GAIN = 0.08
+        const val RELEASE_POWER_BASE = 1.45
+        const val RELEASE_POWER_LIFT_GAIN = 0.28
+        const val RELEASE_POWER_SPEED_DAMPING = 0.18
+        const val TAIL_EASE_BASE = 0.10
+        const val TAIL_EASE_LIFT_GAIN = 0.18
+        const val SPEED_VALLEY_DRIFT_RATIO = 0.86
+    }
+
+    private object V8DepthDensity {
+        const val DENSITY_STRENGTH_BASE = 0.18
+        const val DENSITY_STRENGTH_LIFT_GAIN = 0.08
+        const val DENSITY_STRENGTH_HEIGHT_GAIN = 0.08
+        const val DENSITY_STRENGTH_SPEED_DAMPING = 0.04
+        const val DENSITY_SATURATION_START = 0.22
+        const val DENSITY_SATURATION_END = 0.94
+        const val TAIL_RELEASE_STRENGTH_BASE = 0.03
+        const val TAIL_RELEASE_STRENGTH_SPEED_GAIN = 0.08
+        const val TAIL_RELEASE_STRENGTH_DESCENT_GAIN = 0.03
+        const val TAIL_RELEASE_START = 0.86
+        const val END_SPEED_MID_BOOST = 0.05
+        const val DESCENT_POWER_DAMPING = 0.20
+        const val START_SPEED_LIMIT_BASE = 8.0
+        const val START_SPEED_LIMIT_DURATION_GAIN = 6.0
+        const val START_SPEED_LIMIT_SPEED_BASE_WEIGHT = 0.55
+        const val START_SPEED_LIMIT_SPEED_GAIN = 0.45
+    }
+
+    private data class GolfCamV8GeometryMetrics(
+        val arcHeightRatio: Double,
+        val landingSteepness: Double,
+        val descentArcShare: Double,
+    )
+
+    private fun golfCamV8StartDelay(totalDuration: Double): Double {
+        return 0.0
+    }
+
+    private fun golfCamV8AnchorTime(totalDuration: Double, delayTime: Double, style: TrackStyle): Double {
+        val measuredAnchor = 15.0 / 30.0
+        val requested = style.motionAnchorTime ?: measuredAnchor
+        val minAnchor = min(totalDuration, delayTime + 1.0 / 30.0)
+        val fallback = max(minAnchor, totalDuration * 0.35)
+        return requested.coerceAtMost(totalDuration).coerceIn(minAnchor, min(measuredAnchor, fallback))
+    }
+
+    private fun golfCamV8HeadMapping(
+        totalDuration: Double,
+        activeDuration: Double,
+        speedLevel: Double,
+        bezier: BezierPath,
+        arcTable: ArcLengthTable,
+        style: TrackStyle,
+    ): GolfCamV8HeadMapping {
+        val delayTime = golfCamV8StartDelay(totalDuration)
+        val anchorTime = golfCamV8AnchorTime(totalDuration, delayTime, style)
+        val anchorTau = ((anchorTime - delayTime) / activeDuration).coerceIn(0.02, 0.92)
+        val apex = (style.v4CustomSPeak ?: arcTable.apexProgress().toDouble()).coerceIn(0.05, V7ApexBound.APEX_CLAMP_MAX)
+        val speedK = clamp(speedLevel)
+        val rawTarget = progress(
+            timeProgress = max(0.0, anchorTime - delayTime) / activeDuration,
+            speedLevel = speedK,
+        )
+        val speedNorm = normalized(speedK)
+        val target = golfCamV8AnchorTarget(rawTarget, apex, speedNorm)
+        val fastCrossApexWeight = smoothstep(0.005, 0.055, target - apex)
+        val liftHold = finiteDouble(style.motionLiftHold, fallback = TrajectoryMotionParameters.preset(TrajectoryPresetKind.GOLF_CAM_LIKE).liftHold)
+            .coerceIn(0.0, 1.0)
+        val minSpeed = golfCamV8ApexMinSpeed(liftHold)
+        val slowWeight = 1.0 - speedNorm
+        val highArcWeight = golfCamV8HighArcWeight(apex)
+        var holdWidth = golfCamV8ApexHoldWidth(liftHold)
+        var holdStrength = golfCamV8ApexHoldStrength(liftHold)
+        var endSpeed = golfCamV8EndSpeed(speedNorm, highArcWeight)
+        val pLeft = V5Rhythm.PRE_APEX_POWER_BASE + V5Rhythm.PRE_APEX_POWER_SLOW_GAIN * slowWeight
+        var pRight = V5Rhythm.DESCENT_POWER_BASE +
+            V5Rhythm.DESCENT_POWER_SPEED_GAIN * speedNorm +
+            V5Rhythm.DESCENT_POWER_LOW_ARC_GAIN * (1.0 - highArcWeight)
+
+        val metrics = golfCamV8GeometryMetrics(bezier, arcTable)
+        val heightNorm = (metrics.arcHeightRatio / max(V6Geometry.HEIGHT_REFERENCE, 1e-6)).coerceIn(0.0, 1.8)
+        val descentShare = metrics.descentArcShare.coerceIn(0.08, 0.82)
+        val (adjustedHoldWidth, adjustedHoldStrength, adjustedEndSpeed, adjustedDescentPower) =
+            golfCamV8ApplyGeometryAdjustments(activeDuration, holdWidth, holdStrength, endSpeed, pRight, metrics)
+        holdWidth = adjustedHoldWidth
+        holdStrength = adjustedHoldStrength
+        endSpeed = adjustedEndSpeed
+        pRight = adjustedDescentPower
+
+        var postApexHoldShare = (
+            V7ApexBound.POST_APEX_HOLD_BASE +
+                V7ApexBound.POST_APEX_HOLD_LIFT_GAIN * liftHold +
+                0.045 * (heightNorm - 0.7).coerceIn(0.0, 0.9) +
+                0.03 * (descentShare - 0.36).coerceIn(-0.2, 0.22)
+            ).coerceIn(0.06, 0.20)
+        var releasePower = (
+            V7ApexBound.RELEASE_POWER_BASE +
+                V7ApexBound.RELEASE_POWER_LIFT_GAIN * liftHold +
+                0.24 * (heightNorm - 0.85).coerceIn(-0.35, 0.55) -
+                V7ApexBound.RELEASE_POWER_SPEED_DAMPING * speedNorm
+            ).coerceIn(1.20, 1.95)
+        val tailEaseDamping = (
+            V7ApexBound.TAIL_EASE_BASE +
+                V7ApexBound.TAIL_EASE_LIFT_GAIN * liftHold +
+                0.12 * (heightNorm - 0.75).coerceIn(0.0, 0.75)
+            ).coerceIn(0.08, 0.34)
+        val speedValleyProgress = (
+            apex + max(0.0, target - apex) * fastCrossApexWeight * V7ApexBound.SPEED_VALLEY_DRIFT_RATIO
+            ).coerceIn(apex, 0.995)
+
+        holdWidth *= 1.0 - 0.72 * fastCrossApexWeight
+        holdStrength *= 1.0 - 0.78 * fastCrossApexWeight
+        postApexHoldShare *= 1.0 - 0.95 * fastCrossApexWeight
+        releasePower *= 1.0 - 0.34 * fastCrossApexWeight
+
+        val activeTailEaseDamping = tailEaseDamping * (1.0 - 0.85 * fastCrossApexWeight)
+        val crossEndSpeedBoost = 0.85 * fastCrossApexWeight
+        endSpeed = (
+            endSpeed * (1.0 - activeTailEaseDamping) +
+                crossEndSpeedBoost +
+                V8DepthDensity.END_SPEED_MID_BOOST * (0.35 + 0.65 * speedNorm)
+            ).coerceIn(
+            V6Geometry.MIN_END_SPEED,
+            if (fastCrossApexWeight > 0.0) 2.20 else min(V6Geometry.MAX_END_SPEED + 0.18, 1.36),
+        )
+        pRight = (
+            pRight + 0.18 + 0.22 * liftHold - 0.60 * fastCrossApexWeight -
+                V8DepthDensity.DESCENT_POWER_DAMPING * (0.35 + 0.65 * speedNorm)
+            ).coerceIn(1.05, 1.95)
+        holdWidth = (holdWidth + postApexHoldShare * descentShare * 0.2).coerceIn(0.06, 0.45)
+        holdStrength = (holdStrength + 0.04 * liftHold).coerceIn(0.0, 0.95)
+
+        val progressDensityStrength = (
+            V8DepthDensity.DENSITY_STRENGTH_BASE +
+                V8DepthDensity.DENSITY_STRENGTH_LIFT_GAIN * liftHold +
+                V8DepthDensity.DENSITY_STRENGTH_HEIGHT_GAIN * (heightNorm - 0.75).coerceIn(0.0, 0.85)
+            ).coerceIn(0.0, 0.36) * (1.0 - V8DepthDensity.DENSITY_STRENGTH_SPEED_DAMPING * speedNorm)
+        val tailReleaseStrength = (
+            V8DepthDensity.TAIL_RELEASE_STRENGTH_BASE +
+                V8DepthDensity.TAIL_RELEASE_STRENGTH_SPEED_GAIN * speedNorm +
+                V8DepthDensity.TAIL_RELEASE_STRENGTH_DESCENT_GAIN * (descentShare - 0.22).coerceIn(0.0, 0.50)
+            ).coerceIn(0.0, 0.42)
+        val tailReleaseStart = (V8DepthDensity.TAIL_RELEASE_START - 0.03 * fastCrossApexWeight).coerceIn(0.76, 0.92)
+        val startSpeedLimit = golfCamV8StartSpeedLimit(activeDuration, speedK)
+
+        val key = GolfCamV8HeadCacheKey(
+            totalDurationMs = (totalDuration * 1000.0).roundToLong(),
+            speedLevelScaled = (speedK * 10_000.0).roundToInt(),
+            apexProgressScaled = (apex * 10_000.0).roundToInt(),
+            anchorTimeMs = (anchorTime * 1000.0).roundToLong(),
+            liftHoldScaled = (liftHold * 10_000.0).roundToInt(),
+            arcHeightRatioScaled = (metrics.arcHeightRatio * 10_000.0).roundToInt(),
+            landingSteepnessScaled = (metrics.landingSteepness * 10_000.0).roundToInt(),
+            descentArcShareScaled = (metrics.descentArcShare * 10_000.0).roundToInt(),
+            progressDensityStrengthScaled = (progressDensityStrength * 10_000.0).roundToInt(),
+            tailReleaseStrengthScaled = (tailReleaseStrength * 10_000.0).roundToInt(),
+            tailReleaseStartScaled = (tailReleaseStart * 10_000.0).roundToInt(),
+            startSpeedLimitScaled = (startSpeedLimit * 10_000.0).roundToInt(),
+            motionAnchorTimeMs = style.motionAnchorTime?.let { (it * 1000.0).roundToLong() },
+        )
+        golfCamV8HeadCache?.let { (cachedKey, cachedMapping) ->
+            if (cachedKey == key) return cachedMapping
+        }
+
+        val startSpeed = golfCamV8SolveStartSpeed(
+            target = target,
+            anchorTau = anchorTau,
+            apex = apex,
+            minSpeed = minSpeed,
+            endSpeed = endSpeed,
+            pLeft = pLeft,
+            pRight = pRight,
+            holdWidth = holdWidth,
+            holdStrength = holdStrength,
+            speedValleyProgress = speedValleyProgress,
+            postApexHoldShare = postApexHoldShare,
+            releasePower = releasePower,
+            progressDensityStrength = progressDensityStrength,
+            progressDensityPower = V8DepthDensity.DENSITY_SATURATION_END,
+            tailReleaseStrength = tailReleaseStrength,
+            tailReleaseStart = tailReleaseStart,
+            startSpeedLimit = startSpeedLimit,
+        )
+        val mapping = golfCamV8BuildMapping(
+            apex = speedValleyProgress,
+            startSpeed = startSpeed,
+            minSpeed = minSpeed,
+            endSpeed = endSpeed,
+            pLeft = pLeft,
+            pRight = pRight,
+            holdWidth = holdWidth,
+            holdStrength = holdStrength,
+            speedValleyProgress = speedValleyProgress,
+            postApexHoldShare = postApexHoldShare,
+            releasePower = releasePower,
+            progressDensityStrength = progressDensityStrength,
+            progressDensityPower = V8DepthDensity.DENSITY_SATURATION_END,
+            tailReleaseStrength = tailReleaseStrength,
+            tailReleaseStart = tailReleaseStart,
+            sampleCount = 360,
+        )
+        golfCamV8HeadCache = key to mapping
+        return mapping
+    }
+
+    private fun golfCamV8AnchorTarget(rawAnchorTarget: Double, apex: Double, speedNorm: Double): Double {
+        val descentShare = (1.0 - apex).coerceIn(0.0, 1.0)
+        val ordinaryApexWeight = smoothstep(0.52, 0.70, apex) * (1.0 - smoothstep(0.78, 0.94, apex))
+        val lateApexWeight = smoothstep(0.72, 0.94, apex)
+        val tinyDescentWeight = ((0.10 - descentShare) / 0.10).coerceIn(0.0, 1.0)
+        val ceiling = (
+            rawAnchorTarget +
+                V7ApexBound.FAST_ANCHOR_ORDINARY_APEX_BOOST * ordinaryApexWeight +
+                V7ApexBound.FAST_ANCHOR_LATE_APEX_BOOST * lateApexWeight -
+                V7ApexBound.FAST_ANCHOR_TINY_DESCENT_DAMPING * tinyDescentWeight
+            ).coerceIn(0.65, V7ApexBound.FAST_ANCHOR_CAP_BASE)
+        val boostWeight = smoothstep(V7ApexBound.HIGH_SPEED_BOOST_THRESHOLD, 1.0, speedNorm)
+        val boosted = rawAnchorTarget + (ceiling - rawAnchorTarget) * boostWeight
+        return boosted.coerceIn(0.02, V7ApexBound.FAST_ANCHOR_CAP_BASE)
+    }
+
+    private fun golfCamV8ApexHoldWidth(liftHold: Double): Double {
+        return V5Rhythm.HOLD_WIDTH_BASE + V5Rhythm.HOLD_WIDTH_LIFT_GAIN * liftHold
+    }
+
+    private fun golfCamV8ApexHoldStrength(liftHold: Double): Double {
+        return (V5Rhythm.HOLD_STRENGTH_BASE + V5Rhythm.HOLD_STRENGTH_LIFT_GAIN * liftHold)
+            .coerceIn(0.0, V5Rhythm.HOLD_STRENGTH_MAX)
+    }
+
+    private fun golfCamV8ApexMinSpeed(liftHold: Double): Double {
+        return (V5Rhythm.APEX_MIN_SPEED_BASE - V5Rhythm.APEX_MIN_SPEED_LIFT_REDUCTION * liftHold)
+            .coerceIn(V5Rhythm.APEX_MIN_SPEED_FLOOR, V5Rhythm.APEX_MIN_SPEED_BASE)
+    }
+
+    private fun golfCamV8EndSpeed(speedNorm: Double, highArcWeight: Double): Double {
+        return V5Rhythm.END_SPEED_BASE +
+            V5Rhythm.END_SPEED_SPEED_GAIN * speedNorm +
+            V5Rhythm.END_SPEED_HIGH_ARC_GAIN * highArcWeight
+    }
+
+    private fun golfCamV8HighArcWeight(apex: Double): Double {
+        return ((V5Rhythm.HIGH_ARC_APEX_REFERENCE - apex) / V5Rhythm.HIGH_ARC_APEX_RANGE).coerceIn(0.0, 1.0)
+    }
+
+    private fun golfCamV8GeometryMetrics(bezier: BezierPath, arcTable: ArcLengthTable): GolfCamV8GeometryMetrics {
+        val p0 = bezier.point(0f)
+        val p3 = bezier.point(1f)
+        val apexPathFraction = arcTable.apexProgress().toDouble().coerceIn(0.0, 1.0)
+        val apex = bezier.pointAtArcProgress(apexPathFraction.toFloat(), arcTable)
+        val chordDx = (p3.x - p0.x).toDouble()
+        val chordDy = (p3.y - p0.y).toDouble()
+        val chordLength = max(sqrt(chordDx * chordDx + chordDy * chordDy), 1e-6)
+        val apexDx = (apex.x - p0.x).toDouble()
+        val apexDy = (apex.y - p0.y).toDouble()
+        val signedDistance = (apexDx * chordDy - apexDy * chordDx) / chordLength
+        val arcHeightRatio = (abs(signedDistance) / chordLength).coerceIn(0.0, 2.0)
+        val tangentDx = 3.0 * (bezier.p3.x - bezier.p2.x).toDouble()
+        val tangentDy = 3.0 * (bezier.p3.y - bezier.p2.y).toDouble()
+        val tangentLength = max(sqrt(tangentDx * tangentDx + tangentDy * tangentDy), 1e-6)
+        return GolfCamV8GeometryMetrics(
+            arcHeightRatio = arcHeightRatio,
+            landingSteepness = (abs(tangentDy) / tangentLength).coerceIn(0.0, 1.0),
+            descentArcShare = (1.0 - apexPathFraction).coerceIn(0.0, 1.0),
+        )
+    }
+
+    private data class GolfCamV8GeometryAdjustment(
+        val holdWidth: Double,
+        val holdStrength: Double,
+        val endSpeed: Double,
+        val descentPower: Double,
+    )
+
+    private fun golfCamV8ApplyGeometryAdjustments(
+        duration: Double,
+        holdWidth: Double,
+        holdStrength: Double,
+        endSpeed: Double,
+        descentPower: Double,
+        metrics: GolfCamV8GeometryMetrics,
+    ): GolfCamV8GeometryAdjustment {
+        val heightNorm = (metrics.arcHeightRatio / max(V6Geometry.HEIGHT_REFERENCE, 1e-6)).coerceIn(0.0, 1.8)
+        val steepDelta = metrics.landingSteepness - V6Geometry.STEEPNESS_REFERENCE
+        val heightDelta = heightNorm - 1.0
+        val durationPressure = ((6.0 - duration) / 2.0).coerceIn(-0.75, 0.75)
+        val holdWidthDelta = V6Geometry.HOLD_WIDTH_HEIGHT_GAIN * (heightNorm - 0.75).coerceIn(-0.45, 0.75)
+        val holdStrengthDelta = V6Geometry.HOLD_STRENGTH_HEIGHT_GAIN * (heightNorm - 0.85).coerceIn(-0.55, 0.65)
+        val endSpeedDelta = V6Geometry.END_SPEED_LANDING_GAIN * steepDelta -
+            V6Geometry.END_SPEED_HEIGHT_DAMPING * heightDelta +
+            V6Geometry.END_SPEED_DURATION_GAIN * durationPressure
+        val descentPowerDelta = V6Geometry.DESCENT_POWER_LANDING_GAIN * steepDelta -
+            V6Geometry.DESCENT_POWER_HEIGHT_DAMPING * heightDelta
+        return GolfCamV8GeometryAdjustment(
+            holdWidth = (holdWidth + holdWidthDelta).coerceIn(0.12, 0.42),
+            holdStrength = (holdStrength + holdStrengthDelta).coerceIn(0.0, min(0.95, V5Rhythm.HOLD_STRENGTH_MAX + 0.03)),
+            endSpeed = (endSpeed + endSpeedDelta).coerceIn(V6Geometry.MIN_END_SPEED, V6Geometry.MAX_END_SPEED),
+            descentPower = (descentPower + descentPowerDelta).coerceIn(V6Geometry.MIN_DESCENT_POWER, V6Geometry.MAX_DESCENT_POWER),
+        )
+    }
+
+    private fun golfCamV8SolveStartSpeed(
+        target: Double,
+        anchorTau: Double,
+        apex: Double,
+        minSpeed: Double,
+        endSpeed: Double,
+        pLeft: Double,
+        pRight: Double,
+        holdWidth: Double,
+        holdStrength: Double,
+        speedValleyProgress: Double,
+        postApexHoldShare: Double,
+        releasePower: Double,
+        progressDensityStrength: Double,
+        progressDensityPower: Double,
+        tailReleaseStrength: Double,
+        tailReleaseStart: Double,
+        startSpeedLimit: Double,
+    ): Double {
+        var low = minSpeed * 1.001
+        val limit = if (startSpeedLimit > 0.0) max(startSpeedLimit, low) else Double.POSITIVE_INFINITY
+        var high = min(2048.0, limit)
+        var expansionAttempts = 0
+        while (expansionAttempts < 16) {
+            val mapping = golfCamV8BuildMapping(
+                apex = apex,
+                startSpeed = high,
+                minSpeed = minSpeed,
+                endSpeed = endSpeed,
+                pLeft = pLeft,
+                pRight = pRight,
+                holdWidth = holdWidth,
+                holdStrength = holdStrength,
+                speedValleyProgress = speedValleyProgress,
+                postApexHoldShare = postApexHoldShare,
+                releasePower = releasePower,
+                progressDensityStrength = progressDensityStrength,
+                progressDensityPower = progressDensityPower,
+                tailReleaseStrength = tailReleaseStrength,
+                tailReleaseStart = tailReleaseStart,
+                sampleCount = 360,
+            )
+            if (sForTime(anchorTau, mapping.sSamples, mapping.tSamples) >= target || high >= limit) {
+                break
+            }
+            high = min(high * 2.0, limit)
+            expansionAttempts += 1
+        }
+        repeat(48) {
+            val mid = 0.5 * (low + high)
+            val mapping = golfCamV8BuildMapping(
+                apex = apex,
+                startSpeed = mid,
+                minSpeed = minSpeed,
+                endSpeed = endSpeed,
+                pLeft = pLeft,
+                pRight = pRight,
+                holdWidth = holdWidth,
+                holdStrength = holdStrength,
+                speedValleyProgress = speedValleyProgress,
+                postApexHoldShare = postApexHoldShare,
+                releasePower = releasePower,
+                progressDensityStrength = progressDensityStrength,
+                progressDensityPower = progressDensityPower,
+                tailReleaseStrength = tailReleaseStrength,
+                tailReleaseStart = tailReleaseStart,
+                sampleCount = 360,
+            )
+            val progress = sForTime(anchorTau, mapping.sSamples, mapping.tSamples)
+            if (progress < target) low = mid else high = mid
+        }
+        return 0.5 * (low + high)
+    }
+
+    private fun golfCamV8BuildMapping(
+        apex: Double,
+        startSpeed: Double,
+        minSpeed: Double,
+        endSpeed: Double,
+        pLeft: Double,
+        pRight: Double,
+        holdWidth: Double,
+        holdStrength: Double,
+        speedValleyProgress: Double,
+        postApexHoldShare: Double,
+        releasePower: Double,
+        progressDensityStrength: Double,
+        progressDensityPower: Double,
+        tailReleaseStrength: Double,
+        tailReleaseStart: Double,
+        sampleCount: Int,
+    ): GolfCamV8HeadMapping {
+        val count = max(120, sampleCount)
+        val ds = 1.0 / count.toDouble()
+        val sSamples = DoubleArray(count + 1) { it.toDouble() / count.toDouble() }
+        val speedValley = speedValleyProgress.coerceIn(0.02, 0.995)
+        val vSamples = DoubleArray(count + 1) { index ->
+            golfCamV8Speed(
+                progress = sSamples[index],
+                speedValley = speedValley,
+                startSpeed = startSpeed,
+                minSpeed = minSpeed,
+                endSpeed = endSpeed,
+                pLeft = pLeft,
+                pRight = pRight,
+                postApexHoldShare = postApexHoldShare,
+                releasePower = releasePower,
+            )
+        }
+        golfCamV8ApplyProgressDepthDensity(vSamples, progressDensityStrength, progressDensityPower, tailReleaseStrength, tailReleaseStart)
+        golfCamV8ApplyApexHold(vSamples, apex = speedValley, minSpeed = minSpeed, holdWidth = holdWidth, holdStrength = holdStrength)
+        golfCamV8EnforceApexMonotonic(vSamples, apex = speedValley)
+
+        val tSamples = DoubleArray(count + 1)
+        for (index in 1..count) {
+            val vMid = 0.5 * (vSamples[index] + vSamples[index - 1])
+            tSamples[index] = tSamples[index - 1] + ds / max(vMid, 1e-6)
+        }
+        val total = tSamples[count]
+        if (total > 0.0) {
+            for (index in 0..count) tSamples[index] /= total
+        }
+        return GolfCamV8HeadMapping(sSamples, tSamples)
+    }
+
+    private fun golfCamV8Speed(
+        progress: Double,
+        speedValley: Double,
+        startSpeed: Double,
+        minSpeed: Double,
+        endSpeed: Double,
+        pLeft: Double,
+        pRight: Double,
+        postApexHoldShare: Double,
+        releasePower: Double,
+    ): Double {
+        val s = progress.coerceIn(0.0, 1.0)
+        if (s <= speedValley) {
+            val x = (speedValley - s) / max(speedValley, 1e-6)
+            return minSpeed + (startSpeed - minSpeed) * x.pow(pLeft)
+        }
+        var x = (s - speedValley) / max(1.0 - speedValley, 1e-6)
+        val holdShare = postApexHoldShare.coerceIn(0.0, 0.35)
+        val release = releasePower.coerceIn(0.8, 2.4)
+        if (holdShare > 0.0) {
+            x = if (x <= holdShare) 0.0 else ((x - holdShare) / max(1.0 - holdShare, 1e-6)).pow(release)
+        }
+        return minSpeed + (endSpeed - minSpeed) * x.pow(pRight)
+    }
+
+    private fun golfCamV8ApplyProgressDepthDensity(
+        vSamples: DoubleArray,
+        densityStrength: Double,
+        densityPower: Double,
+        tailReleaseStrength: Double,
+        tailReleaseStart: Double,
+    ) {
+        if (vSamples.size <= 2 || densityStrength <= 0.0) return
+        val last = vSamples.size - 1
+        val strength = densityStrength.coerceIn(0.0, 0.60)
+        val saturationStart = V8DepthDensity.DENSITY_SATURATION_START
+        val saturationEnd = densityPower.coerceIn(saturationStart + 0.05, 0.995)
+        val releaseStrength = tailReleaseStrength.coerceIn(0.0, 0.60)
+        val releaseStart = tailReleaseStart.coerceIn(0.55, 0.92)
+        for (index in 0..last) {
+            val s = index.toDouble() / last.toDouble()
+            val depthWeight = smoothstep(saturationStart, saturationEnd, s)
+            val density = 1.0 + strength * depthWeight
+            val release = smoothstep(releaseStart, 1.0, s)
+            val releaseBoost = 1.0 + releaseStrength * release
+            vSamples[index] = vSamples[index] / density * releaseBoost
+        }
+    }
+
+    private fun golfCamV8ApplyApexHold(
+        vSamples: DoubleArray,
+        apex: Double,
+        minSpeed: Double,
+        holdWidth: Double,
+        holdStrength: Double,
+    ) {
+        if (vSamples.size <= 2 || holdWidth <= 1e-6 || holdStrength <= 0.0) return
+        val last = vSamples.size - 1
+        val width = max(holdWidth, 1e-6)
+        val strength = holdStrength.coerceIn(0.0, 0.95)
+        for (index in 0..last) {
+            val s = index.toDouble() / last.toDouble()
+            val d = abs(s - apex) / width
+            if (d >= 1.0) continue
+            val smooth = d * d * (3.0 - 2.0 * d)
+            val weight = (1.0 - smooth) * strength
+            vSamples[index] = vSamples[index] * (1.0 - weight) + minSpeed * weight
+        }
+    }
+
+    private fun golfCamV8EnforceApexMonotonic(vSamples: DoubleArray, apex: Double) {
+        if (vSamples.size <= 2) return
+        val last = vSamples.size - 1
+        val apexIndex = (apex * last.toDouble()).roundToInt().coerceIn(0, last)
+        if (apexIndex >= 1) {
+            for (index in 1..apexIndex) {
+                if (vSamples[index] > vSamples[index - 1]) vSamples[index] = vSamples[index - 1]
+            }
+        }
+        if (apexIndex + 1 <= last) {
+            for (index in (apexIndex + 1)..last) {
+                if (vSamples[index] < vSamples[index - 1]) vSamples[index] = vSamples[index - 1]
+            }
+        }
+    }
+
+    private fun sForTime(t: Double, sSamples: DoubleArray, tSamples: DoubleArray): Double {
+        val clamped = t.coerceIn(0.0, 1.0)
+        var i = 0
+        while (i < tSamples.size && tSamples[i] < clamped) i++
+        if (i <= 0) return sSamples.first()
+        if (i >= tSamples.size) return sSamples.last()
+        val ratio = (clamped - tSamples[i - 1]) / max(tSamples[i] - tSamples[i - 1], 1e-6)
+        return sSamples[i - 1] + (sSamples[i] - sSamples[i - 1]) * ratio
+    }
+
+    private fun smoothstep(edge0: Double, edge1: Double, value: Double): Double {
+        if (edge0 == edge1) return if (value < edge0) 0.0 else 1.0
+        val x = ((value - edge0) / (edge1 - edge0)).coerceIn(0.0, 1.0)
+        return x * x * (3.0 - 2.0 * x)
     }
 }
 

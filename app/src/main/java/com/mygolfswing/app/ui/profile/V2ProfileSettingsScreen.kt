@@ -41,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,6 +60,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.pm.PackageInfoCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.set
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.MultiFormatWriter
@@ -126,7 +129,6 @@ fun V2ProfileSettingsScreen(
                 title = "通知设置",
                 subtitle = "敬请期待",
                 enabled = false,
-                onClick = {},
             )
             AboutCard()
         }
@@ -159,7 +161,7 @@ private fun UserQrDialog(
     val scope = rememberCoroutineScope()
     val userId = profile.userId.orEmpty()
     val qrContent = remember(userId) { userQrContent(userId) }
-    var styleIndex by remember { mutableStateOf(0) }
+    var styleIndex by remember { mutableIntStateOf(0) }
     val qrStyle = remember(styleIndex) { UserQrStyle.presets[styleIndex % UserQrStyle.presets.size] }
     val qrBitmap = remember(qrContent, qrStyle) { generateQrBitmap(qrContent, foregroundColor = qrStyle.qrColor) }
     var saving by remember { mutableStateOf(false) }
@@ -285,8 +287,8 @@ private fun UserQrDialog(
                                 saveMessage = saveQrShareImage(context, profile, qrContent, bitmap, qrStyle).message
                             } catch (e: CancellationException) {
                                 throw e
-                            } catch (_: Throwable) {
-                                saveMessage = "保存图片失败，请稍后重试"
+                            } catch (e: Throwable) {
+                                saveMessage = profileQrGalleryThrowableError("保存图片失败，请稍后重试", e)
                             } finally {
                                 saving = false
                             }
@@ -332,10 +334,10 @@ private fun generateQrBitmap(
         EncodeHintType.MARGIN to 1,
     )
     val matrix = MultiFormatWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
-    Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888).also { bitmap ->
+    createBitmap(sizePx, sizePx).also { bitmap ->
         for (y in 0 until sizePx) {
             for (x in 0 until sizePx) {
-                bitmap.setPixel(x, y, if (matrix[x, y]) foregroundColor else AndroidColor.WHITE)
+                bitmap[x, y] = if (matrix[x, y]) foregroundColor else AndroidColor.WHITE
             }
         }
     }
@@ -348,38 +350,45 @@ private suspend fun saveQrShareImage(
     qrBitmap: Bitmap,
     qrStyle: UserQrStyle,
 ): GalleryImageSaveResult = withContext(Dispatchers.IO) {
-    fun fail(message: String, uri: Uri? = null): GalleryImageSaveResult {
-        uri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-        return GalleryImageSaveResult(saved = false, message = message)
-    }
-
-    val image = runCatching { generateQrShareBitmap(profile, qrContent, qrBitmap, qrStyle) }
-        .getOrElse { return@withContext fail("二维码图片生成失败，请稍后重试") }
-    val resolver = context.contentResolver
-    val fileName = "huibei_qrcode_${System.currentTimeMillis()}.png"
-    val values = ContentValues().apply {
-        put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Huibei")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
+    runCatching {
+        fun fail(message: String, uri: Uri? = null): GalleryImageSaveResult {
+            uri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            return GalleryImageSaveResult(saved = false, message = message)
         }
+
+        val image = runCatching { generateQrShareBitmap(profile, qrContent, qrBitmap, qrStyle) }
+            .getOrElse { return@runCatching fail("二维码图片生成失败，请稍后重试") }
+        val resolver = context.contentResolver
+        val fileName = "huibei_qrcode_${System.currentTimeMillis()}.png"
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Huibei")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: return@runCatching fail("系统相册暂时不可写，请检查存储空间后重试")
+        val wrote = runCatching {
+            resolver.openOutputStream(uri)?.use { output ->
+                image.compress(Bitmap.CompressFormat.PNG, 100, output)
+            } == true
+        }.getOrDefault(false)
+        if (!wrote) return@runCatching fail("无法写入系统相册，请稍后重试", uri)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            val published = runCatching { resolver.update(uri, values, null, null) }.isSuccess
+            if (!published) return@runCatching fail("相册保存未完成，请稍后重试", uri)
+        }
+        GalleryImageSaveResult(saved = true, message = "已保存到相册")
+    }.getOrElse {
+        GalleryImageSaveResult(
+            saved = false,
+            message = profileQrGalleryThrowableError("保存到相册失败，请稍后重试", it),
+        )
     }
-    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-        ?: return@withContext fail("系统相册暂时不可写，请检查存储空间后重试")
-    val wrote = runCatching {
-        resolver.openOutputStream(uri)?.use { output ->
-            image.compress(Bitmap.CompressFormat.PNG, 100, output)
-        } == true
-    }.getOrDefault(false)
-    if (!wrote) return@withContext fail("无法写入系统相册，请稍后重试", uri)
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        values.clear()
-        values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        val published = runCatching { resolver.update(uri, values, null, null) }.isSuccess
-        if (!published) return@withContext fail("相册保存未完成，请稍后重试", uri)
-    }
-    GalleryImageSaveResult(saved = true, message = "已保存到相册")
 }
 
 private data class GalleryImageSaveResult(
@@ -395,7 +404,7 @@ private fun generateQrShareBitmap(
 ): Bitmap {
     val width = 1125
     val height = 1500
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val bitmap = createBitmap(width, height)
     val canvas = Canvas(bitmap)
     canvas.drawColor(AndroidColor.WHITE)
 
@@ -464,7 +473,7 @@ private fun SettingsCard(
     title: String,
     subtitle: String,
     enabled: Boolean = true,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -477,7 +486,7 @@ private fun SettingsCard(
             )
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite.copy(alpha = if (enabled) 1f else 0.6f))
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled && onClick != null) { onClick?.invoke() }
             .padding(horizontal = DSSpacing.lg)
             .height(64.dp),
         verticalAlignment = Alignment.CenterVertically,

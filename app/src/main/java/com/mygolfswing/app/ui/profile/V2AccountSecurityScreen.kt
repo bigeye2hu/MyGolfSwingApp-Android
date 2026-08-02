@@ -234,8 +234,8 @@ fun V2AccountSecurityScreen(
                             onLogoutComplete()
                         } catch (e: CancellationException) {
                             throw e
-                        } catch (_: Throwable) {
-                            logoutError = "退出登录失败，请稍后重试"
+                        } catch (e: Throwable) {
+                            logoutError = profileLogoutThrowableError(e)
                         } finally {
                             loggingOut = false
                         }

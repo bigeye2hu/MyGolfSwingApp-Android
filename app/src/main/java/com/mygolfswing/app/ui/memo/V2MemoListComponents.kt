@@ -92,18 +92,19 @@ fun V2MemoListHeaderActionButton(
     icon: ImageVector,
     contentDescription: String,
     enabled: Boolean = true,
-    onClick: () -> Unit,
+    selected: Boolean = false,
+    onClick: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
             .size(44.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = DSColors.fairway.copy(alpha = if (enabled) 1f else 0.5f),
+            tint = DSColors.fairway.copy(alpha = if (!enabled) 0.5f else if (selected) 1f else 0.78f),
             modifier = Modifier.size(17.dp),
         )
     }

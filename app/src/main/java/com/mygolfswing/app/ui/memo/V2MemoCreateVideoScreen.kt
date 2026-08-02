@@ -413,7 +413,7 @@ fun V2MemoCreateVideoScreen(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
-                    saveError = memoVideoSaveError("保存失败，请稍后重试", e.message)
+                    saveError = memoVideoThrowableError("保存失败，请稍后重试", e)
                 } finally {
                     saving = false
                 }
@@ -454,7 +454,7 @@ fun V2MemoCreateVideoScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                saveError = memoVideoSaveError("保存失败，请稍后重试", e.message)
+                saveError = memoVideoThrowableError("保存失败，请稍后重试", e)
             } finally {
                 saving = false
             }
@@ -1536,7 +1536,16 @@ private fun defaultLinkedGoalIdForVideoMemo(goals: List<V2Goal>): UUID? {
         ?: active.singleOrNull()?.id
 }
 
-private fun memoVideoSaveError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun memoVideoSaveError(base: String, debugDetail: String?): String {
+    return memoVideoSaveError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun memoVideoSaveError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun memoVideoThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return memoVideoSaveError(base, error.message)
 }

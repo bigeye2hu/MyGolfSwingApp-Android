@@ -6,6 +6,7 @@ import com.mygolfswing.app.data.json.V2Json
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -83,14 +84,6 @@ class V2GoalRepository(
 
     // ============ 云同步 ============
 
-    /** 内置演示目标标题（未登录 mock；不应与云端真实数据混显） */
-    private val demoGoalTitles = setOf(
-        "用 7 号铁打 50 球",
-        "练习 40 分钟挥杆基础",
-        "推杆 5 米精度训练",
-        "每日复盘心法",
-    )
-
     /**
      * 拉取云端并与本地合并（对齐 iOS `V2GoalCloudSyncService.syncFromCloud`）。
      *
@@ -99,7 +92,7 @@ class V2GoalRepository(
      * - 本地有、云端无 → dirty 则上传；已同步（dirty=false）则删本地（云端物理删除）
      * - 拉取成功后移除仍留在本地的演示目标（避免与 iOS 真实目标混显）
      */
-    suspend fun syncFromCloud(): Result<Int> = runCatching {
+    suspend fun syncFromCloud(): Result<Int> = runGoalSyncCatching {
         val uid = session.current().userId ?: error("未登录")
         flushPendingDeletes(uid)
         val resp = net.cloudApi.dataSync(
@@ -180,7 +173,13 @@ class V2GoalRepository(
         for (local in localRows) {
             if (local.id in cloudById) continue
             val goal = runCatching { decode(local) }.getOrNull()
-            if (goal != null && goal.title in demoGoalTitles) {
+            if (shouldDeleteLocalDemoGoal(
+                    goalTitle = goal?.title,
+                    localGoalId = local.id,
+                    isDirty = local.dirty,
+                    cloudGoalIds = cloudById.keys,
+                )
+            ) {
                 toDelete.add(local.id)
                 continue
             }
@@ -207,7 +206,12 @@ class V2GoalRepository(
 
         // 登录态下移除演示 mock（避免与 iOS 同步的真实目标混显）
         dao.all(ownerUserId).filter { row ->
-            runCatching { decode(row).title }.getOrNull() in demoGoalTitles
+            shouldDeleteLocalDemoGoal(
+                goalTitle = runCatching { decode(row).title }.getOrNull(),
+                localGoalId = row.id,
+                isDirty = row.dirty,
+                cloudGoalIds = cloudById.keys,
+            )
         }.forEach { dao.delete(it.id, ownerUserId) }
 
         toUpload.distinctBy { it.id }.forEach { pushSingle(it) }
@@ -246,7 +250,7 @@ class V2GoalRepository(
         return false
     }
 
-    private suspend fun repairCloudGoals(uid: String): Boolean = runCatching {
+    private suspend fun repairCloudGoals(uid: String): Boolean = runGoalCloudBooleanCatching {
         val resp = net.cloudApi.dataSync(
             JsonObject(
                 mapOf(
@@ -261,7 +265,7 @@ class V2GoalRepository(
             debugWarn("repairV2Goals failed: ${resp.error}")
         }
         resp.success
-    }.getOrDefault(false)
+    }
 
     /** 同一 goalId 多行时保留 updatedAt 最新的一条（对齐 iOS latestGoalMap）。 */
     private fun dedupeGoalEntities(entities: List<GoalEntity>): List<GoalEntity> {
@@ -378,7 +382,7 @@ class V2GoalRepository(
     )
 
     /** 把本地所有 dirty 的目标推送到云端 */
-    suspend fun pushDirty(): Result<Int> = runCatching {
+    suspend fun pushDirty(): Result<Int> = runGoalSyncCatching {
         val uid = session.current().userId ?: error("未登录")
         val rows = withContext(Dispatchers.IO) { dao.dirty(uid) }
         var ok = 0
@@ -411,7 +415,7 @@ class V2GoalRepository(
         }
     }
 
-    private suspend fun saveGoalRowToCloud(uid: String, row: GoalEntity): Boolean = runCatching {
+    private suspend fun saveGoalRowToCloud(uid: String, row: GoalEntity): Boolean = runGoalCloudBooleanCatching {
         val resp = net.cloudApi.dataSync(
             JsonObject(
                 mapOf(
@@ -425,7 +429,7 @@ class V2GoalRepository(
             )
         )
         resp.success
-    }.getOrDefault(false)
+    }
 
     private suspend fun flushPendingDeletes(uid: String) {
         session.pendingDeletes(BUCKET_V2_GOAL, uid).forEach { id ->
@@ -435,7 +439,7 @@ class V2GoalRepository(
         }
     }
 
-    private suspend fun deleteCloudGoal(uid: String, goalId: String): Boolean = runCatching {
+    private suspend fun deleteCloudGoal(uid: String, goalId: String): Boolean = runGoalCloudBooleanCatching {
         val resp = net.cloudApi.dataSync(
             JsonObject(
                 mapOf(
@@ -446,7 +450,7 @@ class V2GoalRepository(
             ),
         )
         resp.success
-    }.getOrDefault(false)
+    }
 
     // ============ 编解码 ============
 
@@ -475,4 +479,41 @@ class V2GoalRepository(
         const val TAG = "V2GoalRepository"
         const val BUCKET_V2_GOAL = "v2Goal"
     }
+}
+
+private val DEMO_GOAL_TITLES = setOf(
+    "用 7 号铁打 50 球",
+    "练习 40 分钟挥杆基础",
+    "推杆 5 米精度训练",
+    "每日复盘心法",
+)
+
+internal fun shouldDeleteLocalDemoGoal(
+    goalTitle: String?,
+    localGoalId: String,
+    isDirty: Boolean,
+    cloudGoalIds: Set<String>,
+): Boolean =
+    !isDirty &&
+        localGoalId !in cloudGoalIds &&
+        goalTitle in DEMO_GOAL_TITLES
+
+internal suspend inline fun <T> runGoalSyncCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
+
+internal suspend inline fun runGoalCloudBooleanCatching(
+    crossinline block: suspend () -> Boolean,
+): Boolean = try {
+    block()
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    false
 }

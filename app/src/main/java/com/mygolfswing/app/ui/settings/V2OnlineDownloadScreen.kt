@@ -49,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.core.content.edit
 import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.memo.V2MemoBridge
@@ -89,6 +91,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -124,7 +127,7 @@ fun V2OnlineDownloadScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var phaseNote by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableDoubleStateOf(0.0) }
-    var elapsedSeconds by remember { mutableStateOf(0) }
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
     var createdMemoId by remember { mutableStateOf<UUID?>(null) }
     var showSuccessDialog by remember { mutableStateOf(false) }
     var showAsyncDownloadTip by remember { mutableStateOf(false) }
@@ -219,7 +222,7 @@ fun V2OnlineDownloadScreen(
     }
 
     LaunchedEffect(draftScopeKey, cleanedUrl, phase, startResult, createdMemoId) {
-        if (phase == DownloadPhase.IDLE && startResult == null && createdMemoId == null) {
+        if (shouldPersistDownloadDraft(phase, startResult, createdMemoId)) {
             persistDownloadDraftUrl(context, draftScopeKey, cleanedUrl)
         }
     }
@@ -272,9 +275,11 @@ fun V2OnlineDownloadScreen(
             val result = try {
                 ServiceLocator.videoDownloadRepo.start(cleaned)
             } catch (e: CancellationException) {
+                phase = downloadPhaseAfterCancellation(phase, startResult != null)
+                phaseNote = null
                 throw e
             } catch (e: Throwable) {
-                Result.failure(e)
+                downloadResultFailure(e)
             }
             try {
                 result.onSuccess { start ->
@@ -290,13 +295,13 @@ fun V2OnlineDownloadScreen(
                     ServiceLocator.creditsRepo.fetchBalance(force = true)
                     V2ProfileStore.refresh(force = true)
                 }.onFailure { e ->
-                    error = downloadErrorMessage("无法获取视频信息，请检查链接后重试", e.message)
+                    error = downloadThrowableError("无法获取视频信息，请检查链接后重试", e)
                     phase = DownloadPhase.IDLE
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                error = downloadErrorMessage("无法获取视频信息，请检查链接后重试", e.message)
+                error = downloadThrowableError("无法获取视频信息，请检查链接后重试", e)
                 phase = DownloadPhase.IDLE
             }
         }
@@ -311,9 +316,11 @@ fun V2OnlineDownloadScreen(
             val cancel = try {
                 ServiceLocator.videoDownloadRepo.cancel(jobId)
             } catch (e: CancellationException) {
+                phase = downloadPhaseAfterCancellation(phase, startResult != null)
+                phaseNote = null
                 throw e
             } catch (e: Throwable) {
-                Result.failure(e)
+                downloadResultFailure(e)
             }
             try {
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
@@ -331,7 +338,7 @@ fun V2OnlineDownloadScreen(
                     "已取消下载任务，已刷新当前积分余额"
                 }
             }.onFailure { e ->
-                error = downloadErrorMessage("取消失败，请稍后重试；如已扣积分，请稍后刷新余额", e.message)
+                error = downloadThrowableError("取消失败，请稍后重试；如已扣积分，请稍后刷新余额", e)
                 phase = DownloadPhase.READY
             }
         }
@@ -397,13 +404,15 @@ fun V2OnlineDownloadScreen(
                         }
                     }
                 }.onFailure { e ->
-                    error = downloadErrorMessage("下载确认失败，请稍后重试；如不再继续，可取消任务恢复积分", e.message)
+                    error = downloadThrowableError("下载确认失败，请稍后重试；如不再继续，可取消任务恢复积分", e)
                     phase = DownloadPhase.READY
                 }
             } catch (e: CancellationException) {
+                phase = downloadPhaseAfterCancellation(phase, startResult != null)
+                phaseNote = null
                 throw e
             } catch (e: Throwable) {
-                error = downloadErrorMessage("下载确认失败，请稍后重试；如不再继续，可取消任务恢复积分", e.message)
+                error = downloadThrowableError("下载确认失败，请稍后重试；如不再继续，可取消任务恢复积分", e)
                 phase = DownloadPhase.READY
             }
         }
@@ -434,6 +443,7 @@ fun V2OnlineDownloadScreen(
             val memoId = try {
                 createOnlineMemo(info)
             } catch (e: CancellationException) {
+                phaseNote = null
                 throw e
             } catch (e: Throwable) {
                 null
@@ -784,7 +794,7 @@ private fun DownloadHistoryLoginRequired(onLogin: () -> Unit) {
     }
 }
 
-private enum class DownloadPhase {
+internal enum class DownloadPhase {
     IDLE, FETCHING, READY, CONFIRMING, DOWNLOADING, CANCELLING, COMPLETED
 }
 
@@ -800,7 +810,7 @@ private const val PENDING_DOWNLOAD_PREFS = "v2_pending_video_download"
 private const val DOWNLOAD_DRAFT_PREFIX = "draft"
 private val ONLINE_MEMO_PLATFORMS = setOf("哔哩哔哩", "YouTube", "小红书")
 
-private data class PendingDownloadTask(
+internal data class PendingDownloadTask(
     val url: String,
     val start: V2DownloadStartResult,
     val info: DownloadVideoInfo,
@@ -825,40 +835,42 @@ private fun persistPendingDownloadTask(
         ),
     ).toString()
     context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(pendingDownloadKey(uid), payload)
-        .apply()
+        .edit {
+            putString(pendingDownloadKey(uid), payload)
+        }
 }
 
 private fun restorePendingDownloadTask(context: Context, userId: String): PendingDownloadTask? {
     val raw = context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
         .getString(pendingDownloadKey(userId), null)
         ?: return null
-    return runCatching {
-        val obj = ServiceLocator.net.json.parseToJsonElement(raw).jsonObject
-        val url = obj["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@runCatching null
-        val start = V2DownloadStartResult(
-            jobId = obj["jobId"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@runCatching null,
-            platform = obj["platform"]?.jsonPrimitive?.contentOrNull,
-            costCredits = obj["costCredits"]?.jsonPrimitive?.intOrNull ?: DOWNLOAD_COST_CREDITS,
-            status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "",
-            message = obj["message"]?.jsonPrimitive?.contentOrNull ?: "",
-            videoInfo = obj["videoInfo"]?.takeUnless { it is JsonNull },
-        )
-        PendingDownloadTask(
-            url = url,
-            start = start,
-            info = DownloadVideoInfo.from(start.videoInfo, url, start.platform),
-        )
-    }.getOrNull()
+    return parsePendingDownloadTask(raw)
 }
+
+internal fun parsePendingDownloadTask(raw: String): PendingDownloadTask? = runCatching {
+    val obj = Json.parseToJsonElement(raw).jsonObject
+    val url = obj["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@runCatching null
+    val start = V2DownloadStartResult(
+        jobId = obj["jobId"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@runCatching null,
+        platform = obj["platform"]?.jsonPrimitive?.contentOrNull,
+        costCredits = obj["costCredits"]?.jsonPrimitive?.intOrNull ?: DOWNLOAD_COST_CREDITS,
+        status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "",
+        message = obj["message"]?.jsonPrimitive?.contentOrNull ?: "",
+        videoInfo = obj["videoInfo"]?.takeUnless { it is JsonNull },
+    )
+    PendingDownloadTask(
+        url = url,
+        start = start,
+        info = DownloadVideoInfo.from(start.videoInfo, url, start.platform),
+    )
+}.getOrNull()
 
 private fun clearPendingDownloadTask(context: Context, userId: String?) {
     val uid = userId?.takeIf { it.isNotBlank() } ?: return
     context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .remove(pendingDownloadKey(uid))
-        .apply()
+        .edit {
+            remove(pendingDownloadKey(uid))
+        }
 }
 
 private fun pendingDownloadKey(userId: String): String = "pending_$userId"
@@ -866,15 +878,27 @@ private fun pendingDownloadKey(userId: String): String = "pending_$userId"
 private fun downloadDraftKey(userId: String?, directMode: Boolean): String =
     "$DOWNLOAD_DRAFT_PREFIX:${userId?.takeIf { it.isNotBlank() } ?: "anonymous"}:${if (directMode) "direct" else "normal"}"
 
+internal fun shouldPersistDownloadDraft(
+    phase: DownloadPhase,
+    startResult: V2DownloadStartResult?,
+    createdMemoId: UUID?,
+): Boolean =
+    phase == DownloadPhase.IDLE && startResult == null && createdMemoId == null
+
+internal fun downloadPhaseAfterCancellation(currentPhase: DownloadPhase, hasActiveTask: Boolean): DownloadPhase {
+    if (currentPhase !in timedDownloadPhases) return currentPhase
+    return if (hasActiveTask) DownloadPhase.READY else DownloadPhase.IDLE
+}
+
 private fun persistDownloadDraftUrl(context: Context, key: String, url: String) {
     val cleaned = V2OnlineVideoMetadataFetcher.cleanVideoUrl(url)
-    val editor = context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE).edit()
-    if (cleaned.isBlank()) {
-        editor.remove(key)
-    } else {
-        editor.putString(key, cleaned)
+    context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE).edit {
+        if (cleaned.isBlank()) {
+            remove(key)
+        } else {
+            putString(key, cleaned)
+        }
     }
-    editor.apply()
 }
 
 private fun restoreDownloadDraftUrl(context: Context, key: String): String? =
@@ -884,15 +908,15 @@ private fun restoreDownloadDraftUrl(context: Context, key: String): String? =
 
 private fun clearDownloadDraftUrl(context: Context, key: String) {
     context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .remove(key)
-        .apply()
+        .edit {
+            remove(key)
+        }
 }
 
 private fun jsonStringOrNull(value: String?): JsonElement =
     value?.takeIf { it.isNotBlank() }?.let { JsonPrimitive(it) } ?: JsonNull
 
-private data class DownloadVideoInfo(
+internal data class DownloadVideoInfo(
     val title: String,
     val author: String?,
     val thumbnailUrl: String?,
@@ -2102,20 +2126,20 @@ private fun ActionRow(
                 SecondaryAction("取消并返还冻结积分", onClick = onCancel)
             }
             DownloadPhase.COMPLETED -> PrimaryAction("补充刚创建的 Memo", enabled = createdMemoId != null, onClick = onOpenMemo)
-            else -> PrimaryAction("处理中...", enabled = false, onClick = {})
+            else -> PrimaryAction("处理中...", enabled = false)
         }
     }
 }
 
 @Composable
-private fun PrimaryAction(text: String, enabled: Boolean, onClick: () -> Unit) {
+private fun PrimaryAction(text: String, enabled: Boolean, onClick: (() -> Unit)? = null) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(50.dp)
             .clip(RoundedCornerShape(50))
             .background(if (enabled) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.28f))
-            .clickable(enabled = enabled, onClick = onClick),
+            .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
         contentAlignment = Alignment.Center,
     ) {
         Text(text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -2151,9 +2175,23 @@ private fun SmallActionButton(label: String, icon: androidx.compose.ui.graphics.
     }
 }
 
-private fun downloadErrorMessage(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun downloadErrorMessage(base: String, debugDetail: String?): String {
+    return downloadErrorMessage(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun downloadErrorMessage(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun downloadThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return downloadErrorMessage(base, error.message)
+}
+
+internal fun <T> downloadResultFailure(error: Throwable): Result<T> {
+    if (error is CancellationException) throw error
+    return Result.failure(error)
 }
 
 private const val ASYNC_DOWNLOAD_TIP_MIN_DURATION_SEC = 180.0

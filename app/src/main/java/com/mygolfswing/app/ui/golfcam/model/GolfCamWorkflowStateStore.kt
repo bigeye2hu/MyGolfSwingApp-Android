@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.model
 
 import android.net.Uri
+import androidx.core.content.edit
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.ui.golfcam.normalizedVideoRotation
 import com.mygolfswing.app.ui.golfcam.render.GolfCamCurveSpec
@@ -43,17 +44,17 @@ object GolfCamWorkflowStateStore {
     fun save(videoUri: Uri, state: GolfCamWorkflowState) {
         ServiceLocator.appContext
             .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-            .edit()
-            .putString(storageKey(videoUri), encode(state).toString())
-            .apply()
+            .edit {
+                putString(storageKey(videoUri), encode(state).toString())
+            }
     }
 
     fun clear(videoUri: Uri) {
         ServiceLocator.appContext
             .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-            .edit()
-            .remove(storageKey(videoUri))
-            .apply()
+            .edit {
+                remove(storageKey(videoUri))
+            }
     }
 
     fun restore(videoUri: Uri, target: GolfCamWorkflowState): Boolean {
@@ -65,7 +66,9 @@ object GolfCamWorkflowStateStore {
         val restored = runCatching {
             decode(Json.parseToJsonElement(raw).jsonObject)
         }.getOrNull() ?: run {
-            prefs.edit().remove(key).apply()
+            prefs.edit {
+                remove(key)
+            }
             return false
         }
         target.copyFrom(restored)

@@ -117,7 +117,7 @@ fun V2CreditsResetScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                errorMessage = creditsResetError("服务端余额同步失败，请稍后重试", e.message)
+                errorMessage = creditsResetThrowableError("服务端余额同步失败，请稍后重试", e)
             } finally {
                 loading = false
             }
@@ -320,9 +320,17 @@ private fun CreditsStatusBanner(text: String, isError: Boolean) {
     }
 }
 
-private fun creditsResetError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun creditsResetError(base: String, debugDetail: String?): String =
+    creditsResetError(base, debugDetail, ServiceLocator.isDebuggable)
+
+internal fun creditsResetError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun creditsResetThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return creditsResetError(base, error.message)
 }
 
 @Composable

@@ -61,10 +61,10 @@ private val MistyDawnAccent = Color(0xFF86EFAC)
 @Composable
 fun V2GoalHeroCard(
     goal: V2Goal,
-    style: V2GoalHeroStyle = V2GoalHeroStyle.ClassicFairway,
     linkedMemoCount: Int,
     linkedVideoCount: Int,
     modifier: Modifier = Modifier,
+    style: V2GoalHeroStyle = V2GoalHeroStyle.ClassicFairway,
     onEdit: () -> Unit = {},
     onComplete: () -> Unit = {},
     onTap: () -> Unit = {},

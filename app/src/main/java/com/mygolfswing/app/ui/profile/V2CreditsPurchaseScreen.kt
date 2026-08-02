@@ -6,7 +6,6 @@ import android.content.ContextWrapper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +45,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -58,6 +58,31 @@ import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+
+internal enum class V2PurchaseAvailabilityCard {
+    None,
+    MissingActivity,
+    NoProducts,
+    PartialProducts,
+}
+
+internal fun purchaseAvailabilityCard(
+    loading: Boolean,
+    hasActivity: Boolean,
+    totalProducts: Int,
+    purchasableProducts: Int,
+): V2PurchaseAvailabilityCard {
+    if (loading) return V2PurchaseAvailabilityCard.None
+    if (!hasActivity) return V2PurchaseAvailabilityCard.MissingActivity
+    val safeTotal = totalProducts.coerceAtLeast(0)
+    val safePurchasable = purchasableProducts.coerceIn(0, safeTotal)
+    if (safePurchasable == 0) return V2PurchaseAvailabilityCard.NoProducts
+    return if (safePurchasable < safeTotal) {
+        V2PurchaseAvailabilityCard.PartialProducts
+    } else {
+        V2PurchaseAvailabilityCard.None
+    }
+}
 
 @Composable
 fun V2CreditsPurchaseScreen(
@@ -213,22 +238,30 @@ private fun ProductsSection(
             }
         }
         val purchasableCount = products.count { it.productDetails != null }
-        if (!loading && (activity == null || purchasableCount == 0)) {
-            PurchaseUnavailableCard(
-                title = if (activity == null) "购买页暂时无法打开" else "商品暂不可购买",
-                body = if (activity == null) {
-                    "当前页面没有可用于 Google Play 结算的 Activity，请返回后重新进入本页。"
-                } else {
-                    "没有从 Google Play 加载到可购买的积分商品。请确认网络、Google Play 登录状态，以及 Play Console 商品是否已生效。"
-                },
+        when (
+            purchaseAvailabilityCard(
+                loading = loading,
+                hasActivity = activity != null,
+                totalProducts = products.size,
+                purchasableProducts = purchasableCount,
+            )
+        ) {
+            V2PurchaseAvailabilityCard.MissingActivity -> PurchaseUnavailableCard(
+                title = "购买页暂时无法打开",
+                body = "当前页面没有可用于 Google Play 结算的 Activity，请返回后重新进入本页。",
                 onReload = onReload,
             )
-        } else if (!loading && purchasableCount in 1 until products.size) {
-            PurchasePartialConfigCard(
+            V2PurchaseAvailabilityCard.NoProducts -> PurchaseUnavailableCard(
+                title = "商品暂不可购买",
+                body = "没有从 Google Play 加载到可购买的积分商品。请确认网络、Google Play 登录状态，以及 Play Console 商品是否已生效。",
+                onReload = onReload,
+            )
+            V2PurchaseAvailabilityCard.PartialProducts -> PurchasePartialConfigCard(
                 available = purchasableCount,
                 total = products.size,
                 onReload = onReload,
             )
+            V2PurchaseAvailabilityCard.None -> Unit
         }
         products.forEach { product ->
             ProductCard(
@@ -453,16 +486,17 @@ private fun PurchaseNotesCard() {
 
 @Composable
 private fun PurchasingOverlay() {
-    val overlayInteraction = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.70f))
-            .clickable(
-                interactionSource = overlayInteraction,
-                indication = null,
-                onClick = {},
-            ),
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent().changes.forEach { it.consume() }
+                    }
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Column(

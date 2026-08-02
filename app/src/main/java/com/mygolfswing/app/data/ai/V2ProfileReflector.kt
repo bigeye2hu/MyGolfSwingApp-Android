@@ -44,8 +44,8 @@ object V2ProfileReflector {
             val prompt = buildPrompt(sections)
             val response = try {
                 ServiceLocator.aiService.generateSummary(prompt)
-            } catch (e: Exception) {
-                return Result.Failed(e.message ?: "未知错误")
+            } catch (e: Throwable) {
+                return profileReflectionFailureResult(e)
             }
             val (added, summaryChanged) = parseAndUpdateProfile(response)
             return if (added > 0 || summaryChanged) {
@@ -55,8 +55,8 @@ object V2ProfileReflector {
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (e: Exception) {
-            return Result.Failed(e.message ?: "未知错误")
+        } catch (e: Throwable) {
+            return profileReflectionFailureResult(e)
         } finally {
             isReflecting = false
         }
@@ -278,4 +278,9 @@ object V2ProfileReflector {
         if (endIdx < 0) return null
         return cleaned.substring(startIdx, endIdx + 1)
     }
+}
+
+internal fun profileReflectionFailureResult(error: Throwable): V2ProfileReflector.Result {
+    if (error is CancellationException) throw error
+    return V2ProfileReflector.Result.Failed(error.message ?: "未知错误")
 }

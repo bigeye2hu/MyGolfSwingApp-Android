@@ -54,7 +54,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.memo.V2MemoBridge
@@ -117,7 +116,7 @@ fun V2MemoCreateTextScreen(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                saveError = memoTextSaveError("保存失败，请稍后重试", e.message)
+                saveError = memoTextThrowableError("保存失败，请稍后重试", e)
             } finally {
                 saving = false
             }
@@ -639,9 +638,4 @@ private fun TextMemoBottomSaveBar(
             }
         }
     }
-}
-
-private fun memoTextSaveError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-    return if (detail == null) base else "$base（$detail）"
 }

@@ -89,6 +89,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2Memo
@@ -257,6 +258,7 @@ fun V2SwingClipDetailScreen(
                         PlayerView(ctx).apply {
                             this.player = player
                             useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         }
                     },
                     update = { it.player = player },
@@ -1198,9 +1200,10 @@ private suspend fun saveClipToGallery(context: android.content.Context, clip: V2
             ?: return@withContext fail("视频文件已不在本机，无法保存到相册")
         if (!src.exists() || !src.isFile) return@withContext fail("视频文件已不在本机，无法保存到相册")
         val resolver = context.contentResolver
+        val gallerySpec = swingGalleryVideoSpec(src, "just_swing_${clip.id}")
         val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, "just_swing_${clip.id}.mp4")
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.DISPLAY_NAME, gallerySpec.displayName)
+            put(MediaStore.Video.Media.MIME_TYPE, gallerySpec.mimeType)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/JustSwing")
                 put(MediaStore.Video.Media.IS_PENDING, 1)
@@ -1224,6 +1227,28 @@ private suspend fun saveClipToGallery(context: android.content.Context, clip: V2
     }.getOrElse {
         GallerySaveResult(saved = false, message = "保存到相册失败，请稍后重试")
     }
+}
+
+internal data class SwingGalleryVideoSpec(
+    val displayName: String,
+    val mimeType: String,
+)
+
+internal fun swingGalleryVideoSpec(source: File, displayBase: String): SwingGalleryVideoSpec {
+    val extension = when (source.extension.lowercase(Locale.US)) {
+        "mov", "qt" -> "mov"
+        "m4v" -> "m4v"
+        else -> "mp4"
+    }
+    val mimeType = when (extension) {
+        "mov" -> "video/quicktime"
+        "m4v" -> "video/x-m4v"
+        else -> "video/mp4"
+    }
+    return SwingGalleryVideoSpec(
+        displayName = "${displayBase}.${extension}",
+        mimeType = mimeType,
+    )
 }
 
 private data class SwingVideoMetadata(
@@ -1256,11 +1281,10 @@ private suspend fun loadSwingVideoMetadata(context: Context, uri: Uri): SwingVid
     runCatching {
         retriever.setDataSource(context, uri)
         val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        val fps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
-        } else {
-            null
-        }?.takeIf { it > 0f } ?: 30f
+        val fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+            ?.toFloatOrNull()
+            ?.takeIf { it > 0f }
+            ?: 30f
         val fileSize = if (uri.scheme == "file") {
             uri.path?.let(::File)?.takeIf { it.exists() }?.length() ?: 0L
         } else {

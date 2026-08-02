@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -114,6 +115,7 @@ import com.mygolfswing.app.ui.profile.V2ProfileLoginTarget
 import com.mygolfswing.app.ui.profile.V2ProfileScreen
 import com.mygolfswing.app.ui.profile.V2ProfileSettingsScreen
 import com.mygolfswing.app.ui.swing.V2JustSwingCalendarScreen
+import com.mygolfswing.app.ui.swing.V2SwingAnalysisTrimScreen
 import com.mygolfswing.app.ui.swing.V2SwingClipDetailScreen
 import com.mygolfswing.app.ui.swing.V2SwingDayDetailScreen
 import com.mygolfswing.app.ui.theme.MyGolfSwingAppAndroidTheme
@@ -198,6 +200,9 @@ fun V2RootScreen(
     var showAnalysisSource by remember { mutableStateOf(false) }
     var analysisImporting by remember { mutableStateOf(false) }
     var analysisImportError by remember { mutableStateOf<String?>(null) }
+    var pendingAnalysisImport by remember { mutableStateOf<V2VideoFileStore.ImportResult?>(null) }
+    var analysisTrimSaving by remember { mutableStateOf(false) }
+    var analysisTrimError by remember { mutableStateOf<String?>(null) }
     var pendingSharedVideoUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var postLoginReturnDestination by remember { mutableStateOf<Destination?>(null) }
     var postLoginReturnTab by remember { mutableStateOf<V2Tab?>(null) }
@@ -210,8 +215,8 @@ fun V2RootScreen(
     var plazaPlayerLoginActionRequest by remember { mutableStateOf<V2PlazaPlayerLoginTarget?>(null) }
     var postLoginOpenProfileQr by remember { mutableStateOf(false) }
     var postLoginOpenAnalysisSource by remember { mutableStateOf(false) }
-    var profileQrRequestKey by remember { mutableStateOf(0) }
-    var aiHistoryRequestKey by remember { mutableStateOf(0) }
+    var profileQrRequestKey by remember { mutableIntStateOf(0) }
+    var aiHistoryRequestKey by remember { mutableIntStateOf(0) }
     val profile by V2ProfileStore.profile.collectAsState()
     val currentSession by ServiceLocator.session.state.collectAsState(initial = V2Session())
 
@@ -227,28 +232,16 @@ fun V2RootScreen(
         scope.launch {
             analysisImporting = true
             analysisImportError = null
+            analysisTrimError = null
             var imported: V2VideoFileStore.ImportResult? = null
             try {
                 imported = V2VideoFileStore.importVideo(context, uri)
-                val clipId = imported?.let {
-                    V2SwingSessionStore.addClipFromVideoImportAndWait(
-                        videoPath = it.absolutePath,
-                        thumbnailPath = it.thumbnailPath,
-                        durationSec = it.durationSec,
-                        sourceLabel = "首页回看分析导入",
-                    )
-                }
-                if (clipId == null) {
-                    imported?.let(::cleanupImportedAnalysisClip)
-                    analysisImportError = if (imported == null) {
-                        "无法读取视频，请检查权限或换一个视频"
-                    } else {
-                        "无法保存为挥杆素材，请登录后重试"
-                    }
+                if (imported == null) {
+                    analysisImportError = "无法读取视频，请检查权限或换一个视频"
                     showAnalysisSource = true
                 } else {
                     showAnalysisSource = false
-                    nav.navigateTo(Destination.SwingClipDetail(clipId))
+                    pendingAnalysisImport = imported
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -260,6 +253,15 @@ fun V2RootScreen(
                 analysisImporting = false
             }
         }
+    }
+
+    fun cancelPendingAnalysisTrim(showSourceAgain: Boolean = true) {
+        if (analysisTrimSaving) return
+        pendingAnalysisImport?.let(::cleanupImportedAnalysisClip)
+        pendingAnalysisImport = null
+        analysisTrimError = null
+        analysisImportError = null
+        showAnalysisSource = showSourceAgain
     }
 
     fun openSharedVideoUrl(rawUrl: String) {
@@ -371,7 +373,7 @@ fun V2RootScreen(
         ServiceLocator.appScope.launch {
             ServiceLocator.session.current().userId?.let { V2CategoryStore.loadForUser(it) }
             ServiceLocator.creditsRepo.fetchBalance(force = true)
-            runCatching { V2GolfProfileStore.refreshFromCloud() }
+            runRootBackgroundSyncCatching { V2GolfProfileStore.refreshFromCloud() }
         }
         pendingSharedVideoUrl?.let { url ->
             openSharedVideoUrl(url)
@@ -469,7 +471,7 @@ fun V2RootScreen(
                 ServiceLocator.creditsRepo.fetchBalance(force = true)
                 V2MemoStore.pullFromCloud()
                 V2SwingSessionStore.cleanupExpiredTemporaryClips()
-                runCatching { V2GolfProfileStore.refreshFromCloud() }
+                runRootBackgroundSyncCatching { V2GolfProfileStore.refreshFromCloud() }
             }
         } else {
             nav.resetTo(Destination.Login)
@@ -557,6 +559,7 @@ fun V2RootScreen(
             onLogoutComplete = {
                 showQuickAdd = false
                 showAnalysisSource = false
+                cancelPendingAnalysisTrim(showSourceAgain = false)
                 selectedTab = V2Tab.HOME
                 nav.resetTo(Destination.Login)
             },
@@ -915,6 +918,59 @@ fun V2RootScreen(
         )
     }
 
+    pendingAnalysisImport?.let { imported ->
+        V2SwingAnalysisTrimScreen(
+            imported = imported,
+            saving = analysisTrimSaving,
+            error = analysisTrimError,
+            onCancel = { cancelPendingAnalysisTrim(showSourceAgain = true) },
+            onUse = { startMs, endMs ->
+                if (analysisTrimSaving) return@V2SwingAnalysisTrimScreen
+                scope.launch {
+                    analysisTrimSaving = true
+                    analysisTrimError = null
+                    var prepared: V2VideoFileStore.ImportResult? = null
+                    try {
+                        prepared = V2VideoFileStore.trimImportedVideo(context, imported, startMs, endMs)
+                        val finalImport = prepared ?: run {
+                            analysisTrimError = "视频裁剪失败，请重新选择或直接使用原视频。"
+                            return@launch
+                        }
+                        val clipId = V2SwingSessionStore.addClipFromVideoImportAndWait(
+                            videoPath = finalImport.absolutePath,
+                            thumbnailPath = finalImport.thumbnailPath,
+                            durationSec = finalImport.durationSec,
+                            sourceLabel = "首页回看分析导入",
+                        )
+                        if (clipId == null) {
+                            if (finalImport.absolutePath != imported.absolutePath) {
+                                cleanupImportedAnalysisClip(finalImport)
+                            }
+                            analysisTrimError = "无法保存为挥杆素材，请登录后重试"
+                            return@launch
+                        }
+                        if (finalImport.absolutePath != imported.absolutePath) {
+                            cleanupImportedAnalysisClip(imported)
+                        }
+                        pendingAnalysisImport = null
+                        analysisTrimError = null
+                        showAnalysisSource = false
+                        nav.navigateTo(Destination.SwingClipDetail(clipId))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Throwable) {
+                        prepared
+                            ?.takeIf { it.absolutePath != imported.absolutePath }
+                            ?.let(::cleanupImportedAnalysisClip)
+                        analysisTrimError = "视频裁剪失败，请重新选择或直接使用原视频。"
+                    } finally {
+                        analysisTrimSaving = false
+                    }
+                }
+            },
+        )
+    }
+
 }
 
 private fun cleanupImportedAnalysisClip(result: V2VideoFileStore.ImportResult) {
@@ -960,10 +1016,10 @@ private fun TabsScaffold(
     onOpenTerms: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onLogoutComplete: () -> Unit,
+    modifier: Modifier = Modifier,
     onOpenTrajectory: () -> Unit = {},
     onOpenAnalysis: () -> Unit = {},
     onOpenOnlineDownload: () -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -1106,7 +1162,7 @@ private fun AnalysisSourceDialog(
                 )
                 AnalysisSourceOption(
                     title = if (importing) "正在读取相册视频" else "从相册选择",
-                    subtitle = if (importing) "大视频可能需要几秒钟，请稍候" else "导入 MP4 或 MOV 后进入逐帧回看",
+                    subtitle = if (importing) "大视频可能需要几秒钟，请稍候" else "导入 MP4 或 MOV，选择后可先裁剪关键片段",
                     icon = Icons.Filled.VideoLibrary,
                     prominent = false,
                     enabled = !importing,
@@ -1128,7 +1184,7 @@ private fun AnalysisSourceDialog(
                     )
                 }
                 Text(
-                    text = "支持 MP4、MOV 格式，建议选择清晰的正面或侧面挥杆视频",
+                    text = "支持 MP4、MOV 格式，最大 2GB；建议选择清晰的正面或侧面挥杆视频",
                     style = DSTypography.caption,
                     color = DSColors.shadowGray,
                     modifier = Modifier.padding(top = 2.dp),
@@ -1210,6 +1266,14 @@ private fun AnalysisSourceOption(
             modifier = Modifier.size(18.dp),
         )
     }
+}
+
+internal suspend fun <T> runRootBackgroundSyncCatching(block: suspend () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
 }
 
 @Preview(showBackground = true)

@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.ai.V2ProfileReflector
+import com.mygolfswing.app.data.ai.profileReflectionFailureResult
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.model.V2GolfProfileData
 import com.mygolfswing.app.data.model.V2ProfileDates
@@ -167,7 +168,7 @@ fun V2AIArchiveScreen(
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
-                                    V2ProfileReflector.Result.Failed(e.message ?: "未知错误")
+                                    profileReflectionFailureResult(e)
                                 } finally {
                                     isSyncing = false
                                 }
@@ -318,8 +319,11 @@ private fun lastSyncHintText(profile: V2GolfProfileData): String? {
     return "上次同步：$relative · 暂无新对话"
 }
 
-private fun aiArchiveSyncError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun aiArchiveSyncError(base: String, debugDetail: String?): String =
+    aiArchiveSyncError(base, debugDetail, ServiceLocator.isDebuggable)
+
+internal fun aiArchiveSyncError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
 }
 

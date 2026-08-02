@@ -670,6 +670,128 @@ class GolfCamTrackStyleAlignmentTest {
     }
 
     @Test
+    fun golfCamLikeTrajectoryAddsV8DepthDensityAndCapsHighSpeedLaunchJump() {
+        val bezier = BezierPath(
+            p0 = NormalizedPoint(0.22f, 0.72f),
+            p1 = NormalizedPoint(0.34f, 0.18f),
+            p2 = NormalizedPoint(0.70f, 0.16f),
+            p3 = NormalizedPoint(0.84f, 0.58f),
+        )
+        val arcTable = ArcLengthTable(bezier)
+        val totalDurationSec = 6.0
+        val style = TrackStyle(
+            speedLevel = GolfCamSpeedConfig.MAX_LEVEL,
+            v4CustomSPeak = 0.70,
+            motionLiftHold = 0.76,
+            activeTrajectoryAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE,
+        )
+
+        fun progressAt(elapsedSec: Double): Double {
+            return GolfCamSpeedConfig.trajectoryHeadProgress(
+                elapsedSec = elapsedSec,
+                totalDurationSec = totalDurationSec,
+                speedLevel = style.speedLevel,
+                bezier = bezier,
+                arcTable = arcTable,
+                style = style,
+            )
+        }
+
+        val legacyHalfSecond = GolfCamSpeedConfig.progress(0.5 / totalDurationSec, style.speedLevel)
+        val v8HalfSecond = progressAt(0.5)
+        val legacyFirstFrame = GolfCamSpeedConfig.progress((1.0 / 60.0) / totalDurationSec, style.speedLevel)
+        val v8FirstFrame = progressAt(1.0 / 60.0)
+        val v8FinalHalfSecond = progressAt(totalDurationSec) - progressAt(totalDurationSec - 0.5)
+
+        assertTrue("v8HalfSecond=$v8HalfSecond", v8HalfSecond > 0.55)
+        assertTrue("v8HalfSecond=$v8HalfSecond legacyHalfSecond=$legacyHalfSecond", v8HalfSecond < legacyHalfSecond)
+        assertTrue("v8HalfSecond=$v8HalfSecond apex=${style.v4CustomSPeak}", v8HalfSecond < (style.v4CustomSPeak ?: 1.0))
+        assertTrue("v8FirstFrame=$v8FirstFrame legacyFirstFrame=$legacyFirstFrame", v8FirstFrame < legacyFirstFrame)
+        assertTrue("v8FirstFrame=$v8FirstFrame", v8FirstFrame < 0.12)
+        assertTrue("v8FinalHalfSecond=$v8FinalHalfSecond", v8FinalHalfSecond < 0.08)
+    }
+
+    @Test
+    fun golfCamLikeTrajectoryUsesIosV8DynamicStartSpeedLimit() {
+        val sixSecondBase = 8.0 + 6.0 * 6.0
+
+        assertEquals(
+            sixSecondBase,
+            GolfCamSpeedConfig.golfCamV8StartSpeedLimit(
+                activeDurationSec = 6.0,
+                speedLevel = GolfCamSpeedConfig.MAX_LEVEL,
+            ),
+            1e-9,
+        )
+        assertEquals(
+            sixSecondBase * 0.775,
+            GolfCamSpeedConfig.golfCamV8StartSpeedLimit(
+                activeDurationSec = 6.0,
+                speedLevel = GolfCamSpeedConfig.DEFAULT_LEVEL,
+            ),
+            1e-9,
+        )
+        assertEquals(
+            sixSecondBase * 0.55,
+            GolfCamSpeedConfig.golfCamV8StartSpeedLimit(
+                activeDurationSec = 6.0,
+                speedLevel = GolfCamSpeedConfig.MIN_LEVEL,
+            ),
+            1e-9,
+        )
+    }
+
+    @Test
+    fun golfCamLikeTrajectoryCacheKeyTracksIosV8DynamicDensityParameters() {
+        val source = repoFile("app/src/main/java/com/mygolfswing/app/ui/golfcam/model/GolfCamModels.kt").readText()
+
+        assertTrue(source.contains("progressDensityStrengthScaled"))
+        assertTrue(source.contains("tailReleaseStrengthScaled"))
+        assertTrue(source.contains("tailReleaseStartScaled"))
+        assertTrue(source.contains("startSpeedLimitScaled"))
+        assertTrue(source.contains("startSpeedLimit = golfCamV8StartSpeedLimit(activeDuration, speedK)"))
+    }
+
+    @Test
+    fun trajectoryOverlaySamplerUsesV8ProgressForPreviewAndExportPath() {
+        val bezier = BezierPath(
+            p0 = NormalizedPoint(0.22f, 0.72f),
+            p1 = NormalizedPoint(0.34f, 0.18f),
+            p2 = NormalizedPoint(0.70f, 0.16f),
+            p3 = NormalizedPoint(0.84f, 0.58f),
+        )
+        val arcTable = ArcLengthTable(bezier)
+        val timing = TrajectoryTiming(impactTimeMs = 0L, landingTimeMs = 6_000L, fps = 60.0)
+        val style = TrackStyle(
+            speedLevel = GolfCamSpeedConfig.MAX_LEVEL,
+            v4CustomSPeak = 0.70,
+            motionLiftHold = 0.76,
+            activeTrajectoryAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE,
+        )
+        val expectedV8Progress = GolfCamSpeedConfig.trajectoryHeadProgress(
+            elapsedSec = 0.5,
+            totalDurationSec = timing.totalDurationSec,
+            speedLevel = style.speedLevel,
+            bezier = bezier,
+            arcTable = arcTable,
+            style = style,
+        )
+
+        val snapshot = TrajectoryOverlayFrameSampler.sample(
+            bezier = bezier,
+            arcTable = arcTable,
+            timing = timing,
+            style = style,
+            elapsedSec = 0.5,
+            legacyProgressAtTime = { 0.99 },
+        ) ?: error("missing trajectory snapshot")
+
+        assertEquals(expectedV8Progress.toFloat(), snapshot.headProgress, 1e-6f)
+        assertTrue("headProgress=${snapshot.headProgress}", snapshot.headProgress < 0.70f)
+        assertTrue("headProgress=${snapshot.headProgress}", snapshot.headProgress < 0.99f)
+    }
+
+    @Test
     fun distanceConfigMatchesIosCloudAndUiRange() {
         assertEquals(10.0, GolfCamDistanceConfig.clamp(-10.0), 0.0)
         assertEquals(10.0, GolfCamDistanceConfig.clamp(1.0), 0.0)
@@ -3616,16 +3738,26 @@ class GolfCamTrackStyleAlignmentTest {
 
         samples.zip(sampleTimes).forEach { (sample, elapsed) ->
             assertEquals(
-                GolfCamSpeedConfig.progress(elapsed / timing.totalDurationSec, style.speedLevel).toFloat(),
+                GolfCamSpeedConfig.trajectoryHeadProgress(
+                    elapsedSec = elapsed,
+                    totalDurationSec = timing.totalDurationSec,
+                    speedLevel = style.speedLevel,
+                    bezier = bezier,
+                    arcTable = arcTable,
+                    style = style,
+                ).toFloat(),
                 sample.headProgress,
                 1e-6f,
             )
             assertEquals(
-                GolfCamSpeedConfig.displayDistance(
+                GolfCamSpeedConfig.trajectoryDisplayDistance(
                     totalDistance = style.totalDistance,
                     elapsedSec = elapsed,
                     totalDurationSec = timing.totalDurationSec,
                     speedLevel = style.speedLevel,
+                    bezier = bezier,
+                    arcTable = arcTable,
+                    style = style,
                     frameRate = timing.fps,
                 ),
                 sample.distance,
@@ -3722,7 +3854,18 @@ class GolfCamTrackStyleAlignmentTest {
             legacyProgressAtTime = { 0.25 },
         ) ?: error("missing legacy sample")
 
-        assertEquals(GolfCamSpeedConfig.progress(1.0 / 3.0, GolfCamSpeedConfig.DEFAULT_LEVEL).toFloat(), golfCamLike.headProgress, 1e-6f)
+        assertEquals(
+            GolfCamSpeedConfig.trajectoryHeadProgress(
+                elapsedSec = 1.0,
+                totalDurationSec = timing.totalDurationSec,
+                speedLevel = GolfCamSpeedConfig.DEFAULT_LEVEL,
+                bezier = bezier,
+                arcTable = arcTable,
+                style = TrackStyle(activeTrajectoryAlgorithm = TrajectoryAlgorithmKind.GOLF_CAM_LIKE),
+            ).toFloat(),
+            golfCamLike.headProgress,
+            1e-6f,
+        )
         assertEquals(0.25f, legacy.headProgress, 1e-6f)
         assertEquals(
             null,
@@ -6231,4 +6374,7 @@ class GolfCamTrackStyleAlignmentTest {
             ),
         )
     }
+
+    private fun repoFile(path: String): File =
+        listOf(File(path), File("../$path")).first { it.exists() }
 }

@@ -92,7 +92,7 @@ fun V2NicknameEditorDialog(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
-                            error = accountSecurityError("更新失败，请稍后重试", e.message)
+                            error = accountSecurityThrowableError("更新失败，请稍后重试", e)
                         } finally {
                             loading = false
                         }
@@ -187,7 +187,7 @@ fun V2PhoneBindDialog(
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
-                                    error = accountSecurityError("验证码发送失败，请稍后重试", e.message)
+                                    error = accountSecurityThrowableError("验证码发送失败，请稍后重试", e)
                                 } finally {
                                     sending = false
                                 }
@@ -224,7 +224,7 @@ fun V2PhoneBindDialog(
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
-                            error = accountSecurityError("绑定失败，请检查验证码后重试", e.message)
+                            error = accountSecurityThrowableError("绑定失败，请检查验证码后重试", e)
                         } finally {
                             loading = false
                         }
@@ -266,7 +266,16 @@ private fun String.maskPhone(): String {
     return "${take(3)}****${takeLast(4)}"
 }
 
-private fun accountSecurityError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun accountSecurityError(base: String, debugDetail: String?): String {
+    return accountSecurityError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun accountSecurityError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun accountSecurityThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return accountSecurityError(base, error.message)
 }

@@ -334,10 +334,6 @@ object V2GoalStore {
         scope.launch { changed.forEach { repo.upsert(it) } }
     }
 
-    /**
-     * 测试 / 演示数据（仅在本地为空时往 DB 写一份）。
-     * 上层 [com.mygolfswing.app.ui.tabs.V2RootScreen] 在启动时判空再调。
-     */
     /** 登录后从云端拉取并合并（对齐 iOS `V2GoalStore.setup` 内的 cloud sync） */
     fun syncFromCloud() {
         scope.launch {
@@ -355,8 +351,15 @@ object V2GoalStore {
         }
     }
 
-    fun resetWithMockData() {
+    private fun resetWithMockData() {
         scope.launch {
+            if (!shouldUseGoalMockSeed(
+                    hasExistingGoals = _goals.value.isNotEmpty(),
+                    isDebuggable = ServiceLocator.isDebuggable,
+                )
+            ) {
+                return@launch
+            }
             val now = LocalDateTime.now()
             val mocks = buildList {
                 add(
@@ -431,3 +434,6 @@ object V2GoalStore {
         }
     }
 }
+
+internal fun shouldUseGoalMockSeed(hasExistingGoals: Boolean, isDebuggable: Boolean): Boolean =
+    !hasExistingGoals && isDebuggable

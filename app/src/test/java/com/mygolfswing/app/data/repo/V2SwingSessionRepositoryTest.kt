@@ -3,8 +3,12 @@ package com.mygolfswing.app.data.repo
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
+import kotlin.io.path.createTempDirectory
 
 class V2SwingSessionRepositoryTest {
 
@@ -19,6 +23,21 @@ class V2SwingSessionRepositoryTest {
         assertNull(localSwingMediaFile("https://example.com/swing.mp4"))
         assertNull(localSwingMediaFile(" HTTPS://example.com/swing.mp4 "))
         assertNull(localSwingMediaFile(null))
+    }
+
+    @Test
+    fun swingMediaFileSafeDeleteOnlyAllowsExistingRegularFiles() {
+        val root = createTempDirectory("v2-swing-delete-safe").toFile()
+        val file = File(root, "clip.mp4").apply { writeBytes(byteArrayOf(1)) }
+        val directory = File(root, "clip-dir.mp4").apply { mkdirs() }
+        val missing = File(root, "missing.mp4")
+
+        assertTrue(swingMediaFileIsSafeToDelete(file))
+        assertFalse(swingMediaFileIsSafeToDelete(directory))
+        assertFalse(swingMediaFileIsSafeToDelete(missing))
+        assertFalse(swingMediaFileIsSafeToDelete(null))
+
+        root.deleteRecursively()
     }
 
     @Test

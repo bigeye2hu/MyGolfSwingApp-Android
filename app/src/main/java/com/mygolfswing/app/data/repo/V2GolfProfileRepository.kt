@@ -7,6 +7,7 @@ import com.mygolfswing.app.data.model.V2ProfileItem
 import com.mygolfswing.app.data.model.V2ProfileSource
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -51,7 +52,13 @@ class V2GolfProfileRepository(
         }
     }
 
-    suspend fun pullFromCloud(): Result<V2GolfProfileData?> = runCatching {
+    suspend fun pullFromCloud(): Result<V2GolfProfileData?> = try {
+        Result.success(pullFromCloudOrThrow())
+    } catch (e: Throwable) {
+        golfProfileCloudFailureResult(e)
+    }
+
+    private suspend fun pullFromCloudOrThrow(): V2GolfProfileData? {
         val uid = session.current().userId ?: error("未登录")
         val resp = net.cloudApi.dataSync(
             JsonObject(
@@ -65,20 +72,20 @@ class V2GolfProfileRepository(
 
         val data = when (val el = resp.data) {
             is JsonObject -> el
-            else -> return@runCatching getLocal()
+            else -> return getLocal()
         }
 
         val raw = data["profileDataRaw"]?.jsonPrimitive?.contentOrNull
         if (raw.isNullOrBlank()) {
             uploadLocalIfNonEmpty(uid, reason = "云端无记录")
-            return@runCatching getLocal()
+            return getLocal()
         }
 
         val cloudData = decodeProfileJson(raw)
         val cloudUpdatedAt = parseTimestampMs(data["updatedAt"]) ?: 0L
         val localRow = withContext(Dispatchers.IO) { dao.get(uid) }
 
-        if (localRow == null) {
+        return if (localRow == null) {
             withContext(Dispatchers.IO) {
                 dao.upsert(
                     GolfProfileEntity(
@@ -125,14 +132,14 @@ class V2GolfProfileRepository(
     suspend fun saveAndSync(data: V2GolfProfileData) {
         val updatedAt = System.currentTimeMillis()
         saveLocal(data, updatedAt)
-        runCatching { pushToCloud(data, updatedAt) }
+        runGolfProfileSideEffectCatching { pushToCloud(data, updatedAt) }
     }
 
     private suspend fun uploadLocalIfNonEmpty(userId: String, reason: String) {
         val local = withContext(Dispatchers.IO) { dao.get(userId) } ?: return
         val data = decodeProfileJson(local.profileJson)
         if (data.isEmpty) return
-        runCatching { pushToCloud(data, local.updatedAt) }
+        runGolfProfileSideEffectCatching { pushToCloud(data, local.updatedAt) }
     }
 
     private fun encodeProfileJson(data: V2GolfProfileData): String =
@@ -177,4 +184,17 @@ class V2GolfProfileRepository(
         str.toLongOrNull()?.let { return it }
         return runCatching { java.time.Instant.parse(str).toEpochMilli() }.getOrNull()
     }
+}
+
+internal fun <T> golfProfileCloudFailureResult(error: Throwable): Result<T> {
+    if (error is CancellationException) throw error
+    return Result.failure(error)
+}
+
+internal suspend fun runGolfProfileSideEffectCatching(block: suspend () -> Unit): Result<Unit> = try {
+    block()
+    Result.success(Unit)
+} catch (e: Throwable) {
+    if (e is CancellationException) throw e
+    Result.failure(e)
 }

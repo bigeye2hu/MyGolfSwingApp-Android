@@ -1,6 +1,9 @@
 package com.mygolfswing.app.data.video
 
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class V2OnlineVideoMetadataFetcherTest {
@@ -46,5 +49,24 @@ class V2OnlineVideoMetadataFetcherTest {
         assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://www.youtube.com/watch?si=sharecode&v=abcdefghijk"))
         assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://www.youtube.com/shorts/abcdefghijk?feature=share"))
         assertEquals(expected, V2OnlineVideoMetadataFetcher.youtubeThumbnailUrl("https://youtu.be/abcdefghijk?si=sharecode"))
+    }
+
+    @Test
+    fun runOnlineVideoMetadataCatchingKeepsOrdinaryFailuresHandled() {
+        val error = IllegalStateException("metadata fetch failed")
+        val result = runOnlineVideoMetadataCatching<Unit> { throw error }
+
+        assertTrue(result.isFailure)
+        assertEquals(error, result.exceptionOrNull())
+    }
+
+    @Test
+    fun runOnlineVideoMetadataCatchingPreservesCoroutineCancellation() {
+        try {
+            runOnlineVideoMetadataCatching<Unit> { throw CancellationException("metadata screen disposed") }
+            fail("CancellationException should be rethrown")
+        } catch (e: CancellationException) {
+            assertEquals("metadata screen disposed", e.message)
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.mygolfswing.app.data.store
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import androidx.core.content.edit
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2PlazaCategoryChip
 import com.mygolfswing.app.data.model.V2PlazaCoach
@@ -19,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -214,7 +216,7 @@ object V2PlazaStore {
             runPlazaStoreCatching {
                 if (nowSaved) repo.unsave(saveKey) else repo.save(saveKey)
             }.onFailure { e ->
-                _lastError.value = plazaStoreError("收藏同步失败，请稍后重试", e.message)
+                _lastError.value = plazaThrowableError("收藏同步失败，请稍后重试", e)
                 _savedIds.value = if (nowSaved) _savedIds.value + saveKey else _savedIds.value - saveKey
                 if (nowSaved) addSavedVideoCache(video.copy(isSaved = true)) else removeSavedVideoCache(saveKey)
                 applySaveState(videoId = videoId, saved = nowSaved)
@@ -243,7 +245,7 @@ object V2PlazaStore {
             runPlazaStoreCatching {
                 if (nowLiked) repo.like(likeKey).getOrThrow() else repo.unlike(likeKey).getOrThrow()
             }.onFailure { e ->
-                _lastError.value = plazaStoreError("点赞同步失败，请稍后重试", e.message)
+                _lastError.value = plazaThrowableError("点赞同步失败，请稍后重试", e)
                 _likedIds.value = if (wasLiked) _likedIds.value + likeKey else _likedIds.value - likeKey
                 persistLikedVideos()
             }
@@ -403,9 +405,13 @@ object V2PlazaStore {
                     nextOffset = list.size
                     _hasMore.value = list.size >= PAGE_SIZE
                 }.onFailure { e ->
-                    _lastError.value = plazaStoreError("广场内容加载失败，请下拉重试", e.message)
+                    _lastError.value = plazaThrowableError("广场内容加载失败，请下拉重试", e)
                     _hasMore.value = false
-                    if (_videos.value.isEmpty() && allowMockFallback) {
+                    if (shouldUsePlazaMockFallback(
+                            hasExistingVideos = _videos.value.isNotEmpty(),
+                            isDebuggable = allowMockFallback,
+                        )
+                    ) {
                         resetWithMockData()
                         _isUsingMock.value = true
                     }
@@ -413,9 +419,13 @@ object V2PlazaStore {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                _lastError.value = plazaStoreError("广场内容加载失败，请下拉重试", e.message)
+                _lastError.value = plazaThrowableError("广场内容加载失败，请下拉重试", e)
                 _hasMore.value = false
-                if (_videos.value.isEmpty() && allowMockFallback) {
+                if (shouldUsePlazaMockFallback(
+                        hasExistingVideos = _videos.value.isNotEmpty(),
+                        isDebuggable = allowMockFallback,
+                    )
+                ) {
                     resetWithMockData()
                     _isUsingMock.value = true
                 }
@@ -456,21 +466,16 @@ object V2PlazaStore {
                     _heroVideo.value = hero
                     _videos.value = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
                 }.onFailure { e ->
-                    _lastError.value = plazaStoreError("更多内容加载失败，请稍后重试", e.message)
+                    _lastError.value = plazaThrowableError("更多内容加载失败，请稍后重试", e)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                _lastError.value = plazaStoreError("更多内容加载失败，请稍后重试", e.message)
+                _lastError.value = plazaThrowableError("更多内容加载失败，请稍后重试", e)
             } finally {
                 _isLoadingMore.value = false
             }
         }
-    }
-
-    private fun plazaStoreError(base: String, debugDetail: String?): String {
-        val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
-        return if (detail == null) base else "$base（$detail）"
     }
 
     private suspend inline fun <T> runPlazaStoreCatching(
@@ -483,7 +488,7 @@ object V2PlazaStore {
         Result.failure(e)
     }
 
-    fun resetWithMockData() {
+    private fun resetWithMockData() {
         val sampleVideo = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
         val sample = listOf(
             V2PlazaVideo(
@@ -639,9 +644,9 @@ object V2PlazaStore {
     private fun persistSavedVideos() {
         val userId = savedVideoUserId.takeIf { it.isNotBlank() } ?: return
         savedVideoPrefs()
-            .edit()
-            .putString(savedVideoKey(userId), encodeSavedVideos(_savedVideoCache.value.take(100)))
-            .apply()
+            .edit {
+                putString(savedVideoKey(userId), encodeSavedVideos(_savedVideoCache.value.take(100)))
+            }
     }
 
     private fun savedVideoPrefs() =
@@ -665,9 +670,9 @@ object V2PlazaStore {
     private fun persistLikedVideos() {
         val userId = likedVideoUserId.takeIf { it.isNotBlank() } ?: return
         likedVideoPrefs()
-            .edit()
-            .putStringSet(likedVideoKey(userId), _likedIds.value)
-            .apply()
+            .edit {
+                putStringSet(likedVideoKey(userId), _likedIds.value)
+            }
     }
 
     private fun likedVideoPrefs() =
@@ -702,8 +707,8 @@ object V2PlazaStore {
         ),
     )
 
-    private fun parseSavedVideos(raw: String): List<V2PlazaVideo> = runCatching {
-        ServiceLocator.net.json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
+    internal fun parseSavedVideos(raw: String): List<V2PlazaVideo> = runCatching {
+        Json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
             runCatching { decodeSavedVideo(element.jsonObject) }.getOrNull()
         }
     }.getOrDefault(emptyList())
@@ -779,9 +784,9 @@ object V2PlazaStore {
     private fun persistWatchHistory() {
         val userId = watchHistoryUserId.takeIf { it.isNotBlank() } ?: return
         watchHistoryPrefs()
-            .edit()
-            .putString(watchHistoryKey(userId), encodeWatchHistory(_watchHistory.value.take(WATCH_HISTORY_LIMIT)))
-            .apply()
+            .edit {
+                putString(watchHistoryKey(userId), encodeWatchHistory(_watchHistory.value.take(WATCH_HISTORY_LIMIT)))
+            }
     }
 
     private fun watchHistoryPrefs() =
@@ -819,8 +824,8 @@ object V2PlazaStore {
             },
         ).toString()
 
-    private fun parseWatchHistory(raw: String): List<V2PlazaWatchHistoryItem> = runCatching {
-        ServiceLocator.net.json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
+    internal fun parseWatchHistory(raw: String): List<V2PlazaWatchHistoryItem> = runCatching {
+        Json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
             runCatching {
                 val o = element.jsonObject
                 V2PlazaWatchHistoryItem(

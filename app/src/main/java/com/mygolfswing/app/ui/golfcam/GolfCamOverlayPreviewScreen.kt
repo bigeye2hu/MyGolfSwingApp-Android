@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.graphics.withSave
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -102,6 +103,7 @@ import com.mygolfswing.app.ui.golfcam.render.TrajectoryOverlayRenderSpec
 import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -258,10 +260,12 @@ internal fun shouldOpenExportPreview(exportedFile: File?): Boolean {
 }
 
 internal fun exportSaveFailureMessage(error: Throwable): String {
+    if (error is CancellationException) throw error
     return "保存失败：${exportSaveErrorDetail(error)}"
 }
 
 internal fun exportFailureMessage(error: Throwable): String {
+    if (error is CancellationException) throw error
     return "导出失败：${exportRenderErrorDetail(error)}"
 }
 
@@ -297,8 +301,12 @@ private fun exportSaveErrorDetail(error: Throwable): String {
     return exportUserError(stable, raw)
 }
 
-private fun exportUserError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun exportUserError(base: String, debugDetail: String?): String {
+    return exportUserError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun exportUserError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
 }
 
@@ -870,6 +878,8 @@ fun GolfCamOverlayPreviewScreen(
                                 exportedVideoFile = exportedFile
                                 exportSaveMessage = null
                                 exportErrorMessage = null
+                            } catch (error: CancellationException) {
+                                throw error
                             } catch (error: Throwable) {
                                 exportProgress = 0f
                                 exportErrorMessage = exportFailureMessage(error)
@@ -932,6 +942,8 @@ fun GolfCamOverlayPreviewScreen(
                                 }
                                 if (disposition.clearSaveMessage) exportSaveMessage = null
                                 if (disposition.closeOverview) onDismiss()
+                            } catch (error: CancellationException) {
+                                throw error
                             } catch (error: Throwable) {
                                 exportSaveMessage = exportSaveFailureMessage(error)
                             } finally {
@@ -1954,6 +1966,11 @@ private suspend fun saveExportedVideoToGallery(
             }
         }
         saveSucceeded = true
+    } catch (error: CancellationException) {
+        if (shouldCleanupFailedGalleryInsert(insertedUriPresent = insertedUri != null, saveSucceeded = saveSucceeded)) {
+            cleanupFailedGalleryInsert(context, insertedUri)
+        }
+        throw error
     } catch (error: Throwable) {
         if (shouldCleanupFailedGalleryInsert(insertedUriPresent = insertedUri != null, saveSucceeded = saveSucceeded)) {
             cleanupFailedGalleryInsert(context, insertedUri)
@@ -1983,28 +2000,28 @@ private fun drawVideoFrameOnCanvas(
         exportHeight = height,
     )
 
-    canvas.save()
-    when (rotation) {
-        90 -> {
-            canvas.translate(width.toFloat(), 0f)
-            canvas.rotate(90f)
-            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, height, width), null)
-        }
-        180 -> {
-            canvas.translate(width.toFloat(), height.toFloat())
-            canvas.rotate(180f)
-            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, width, height), null)
-        }
-        270 -> {
-            canvas.translate(0f, height.toFloat())
-            canvas.rotate(270f)
-            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, height, width), null)
-        }
-        else -> {
-            canvas.drawBitmap(frameBitmap, src, Rect(0, 0, width, height), null)
+    canvas.withSave {
+        when (rotation) {
+            90 -> {
+                translate(width.toFloat(), 0f)
+                rotate(90f)
+                drawBitmap(frameBitmap, src, Rect(0, 0, height, width), null)
+            }
+            180 -> {
+                translate(width.toFloat(), height.toFloat())
+                rotate(180f)
+                drawBitmap(frameBitmap, src, Rect(0, 0, width, height), null)
+            }
+            270 -> {
+                translate(0f, height.toFloat())
+                rotate(270f)
+                drawBitmap(frameBitmap, src, Rect(0, 0, height, width), null)
+            }
+            else -> {
+                drawBitmap(frameBitmap, src, Rect(0, 0, width, height), null)
+            }
         }
     }
-    canvas.restore()
 }
 
 private fun findAudioTrackInfo(context: Context, videoUri: Uri): AudioTrackInfo? {

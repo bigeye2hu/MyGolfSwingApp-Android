@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2MemoKind
+import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -59,7 +60,7 @@ fun V2VideoMemoListScreen(
             .sortedByDescending { it.createdAt }
     }
     val filtered = remember(videos, filterId) {
-        videos.filter { matchesVideoFilter(it, filterId) }
+        videoMemoListVisibleMemos(videos, filterId)
     }
     val stats = remember(videos) {
         val now = LocalDateTime.now()
@@ -97,7 +98,6 @@ fun V2VideoMemoListScreen(
                     icon = Icons.Filled.Search,
                     contentDescription = "搜索",
                     enabled = false,
-                    onClick = {},
                 )
             },
         )
@@ -109,9 +109,7 @@ fun V2VideoMemoListScreen(
             VideoMemoListEmptyState(
                 filterId = filterId,
                 hasAnyVideo = videos.isNotEmpty(),
-                onClearFilter = {
-                    filterId = "all"
-                },
+                onClearFilter = { filterId = "all" },
             )
         } else {
             LazyColumn(Modifier.weight(1f)) {
@@ -146,6 +144,12 @@ fun V2VideoMemoListScreen(
     }
 }
 
+internal fun videoMemoListVisibleMemos(
+    memos: List<V2Memo>,
+    filterId: String,
+): List<V2Memo> = memos
+    .filter { matchesVideoFilter(it, filterId) }
+
 @Composable
 private fun VideoMemoListEmptyState(
     filterId: String,
@@ -168,7 +172,10 @@ private fun VideoMemoListEmptyState(
         )
         Spacer(Modifier.height(if (isAll) 8.dp else 12.dp))
         Text(
-            text = if (isAll) "暂无视频笔记" else "当前筛选下没有视频笔记",
+            text = when {
+                isAll -> "暂无视频笔记"
+                else -> "当前筛选下没有视频笔记"
+            },
             color = DSColors.inkGreen,
             fontSize = if (isAll) 14.sp else 13.sp,
             fontWeight = FontWeight.Medium,

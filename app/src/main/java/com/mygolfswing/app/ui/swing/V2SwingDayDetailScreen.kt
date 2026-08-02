@@ -44,6 +44,7 @@ import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.mygolfswing.app.data.memo.V2MemoBridge
@@ -112,6 +113,7 @@ fun V2SwingDayDetailScreen(
                 PlayerView(ctx).apply {
                     this.player = player
                     useController = true
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShowNextButton(false)
                     setShowPreviousButton(false)
                 }

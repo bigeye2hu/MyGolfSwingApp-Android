@@ -250,7 +250,7 @@ fun V2JustSwingMainScreen(
             } catch (e: Throwable) {
                 deleteFileCountingFreedBytes(file)
                 result?.let(::cleanupImportedSwingClip)
-                error = swingCameraError("录制保存失败，请稍后重试", e.message)
+                error = swingCameraThrowableError("录制保存失败，请稍后重试", e)
             } finally {
                 saving = false
                 if (pendingClose) onBack()
@@ -753,16 +753,25 @@ private fun bindSwingCamera(
             }.onSuccess {
                 onReady(capture)
             }.onFailure {
-                onError(swingCameraError("无法绑定相机，请检查相机权限或稍后重试", it.message))
+                onError(swingCameraThrowableError("无法绑定相机，请检查相机权限或稍后重试", it))
             }
         },
         ContextCompat.getMainExecutor(context),
     )
 }
 
-private fun swingCameraError(base: String, debugDetail: String?): String {
-    val detail = debugDetail.takeIf { ServiceLocator.isDebuggable && !it.isNullOrBlank() }
+internal fun swingCameraError(base: String, debugDetail: String?): String {
+    return swingCameraError(base, debugDetail, ServiceLocator.isDebuggable)
+}
+
+internal fun swingCameraError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+internal fun swingCameraThrowableError(base: String, error: Throwable): String {
+    if (error is CancellationException) throw error
+    return swingCameraError(base, error.message)
 }
 
 private fun cleanupImportedSwingClip(result: V2VideoFileStore.ImportResult) {

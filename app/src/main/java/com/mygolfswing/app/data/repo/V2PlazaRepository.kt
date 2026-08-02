@@ -476,15 +476,16 @@ class V2PlazaRepository(
                 ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
-    private suspend inline fun <T> runPlazaCatching(
-        crossinline block: suspend () -> T,
-    ): Result<T> = try {
-        Result.success(block())
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Throwable) {
-        Result.failure(e)
-    }
+}
+
+internal suspend inline fun <T> runPlazaCatching(
+    crossinline block: suspend () -> T,
+): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
 }
 
 data class V2PlazaComment(

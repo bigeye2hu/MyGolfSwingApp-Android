@@ -3,6 +3,7 @@ package com.mygolfswing.app.data.repo
 import android.os.Build
 import com.mygolfswing.app.data.net.V2NetClient
 import com.mygolfswing.app.data.session.V2SessionStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -23,10 +24,21 @@ class V2FeedbackRepository(
         type: String,
         content: String,
         contact: String?,
-    ): Result<Unit> = runCatching {
-        val cloudResult = runCatching { submitToCloud(type, content, contact) }
-        if (cloudResult.isSuccess) return@runCatching
-        submitToLegacy(type, content, contact, cloudResult.exceptionOrNull())
+    ): Result<Unit> = try {
+        val cloudResult = try {
+            submitToCloud(type, content, contact)
+            null
+        } catch (e: Throwable) {
+            feedbackSubmitFailure<Unit>(e).exceptionOrNull()
+        }
+        if (cloudResult == null) {
+            Result.success(Unit)
+        } else {
+            submitToLegacy(type, content, contact, cloudResult)
+            Result.success(Unit)
+        }
+    } catch (e: Throwable) {
+        feedbackSubmitFailure(e)
     }
 
     private suspend fun submitToCloud(
@@ -97,34 +109,56 @@ class V2FeedbackRepository(
             val responseText = response.body?.string().orEmpty()
             val parsed = responseText.takeIf { it.isNotBlank() }
                 ?.let { runCatching { net.json.parseToJsonElement(it) }.getOrNull() }
-            if (parsed.explicitServerSuccess() || response.isSuccessful && parsed.explicitServerError() == null) {
-                return
+            val failure = legacyFeedbackFailureMessage(
+                isHttpSuccessful = response.isSuccessful,
+                httpMessage = response.message,
+                parsed = parsed,
+                cloudError = cloudError,
+            )
+            if (failure != null) {
+                error(failure)
             }
-            val legacyMessage = parsed.explicitServerError()
-                ?: response.message.takeIf { it.isNotBlank() }
-                ?: "备用反馈通道提交失败"
-            val cloudMessage = cloudError?.message?.takeIf { it.isNotBlank() }
-            error(if (cloudMessage == null) legacyMessage else "$cloudMessage；备用通道：$legacyMessage")
         }
-    }
-
-    private fun JsonElement?.explicitServerSuccess(): Boolean {
-        val obj = this as? JsonObject ?: return false
-        return obj["success"]?.jsonPrimitive?.booleanOrNull == true
-    }
-
-    private fun JsonElement?.explicitServerError(): String? {
-        val obj = this as? JsonObject ?: return null
-        if (obj["success"]?.jsonPrimitive?.booleanOrNull == false) {
-            return obj["error"]?.jsonPrimitive?.contentOrNull
-                ?: obj["message"]?.jsonPrimitive?.contentOrNull
-                ?: "备用反馈通道返回失败"
-        }
-        return obj["error"]?.jsonPrimitive?.contentOrNull
-            ?: obj["message"]?.jsonPrimitive?.contentOrNull
     }
 
     private companion object {
         const val LEGACY_FEEDBACK_URL = "https://download.mygolfai.com.cn/api/feedback"
     }
+}
+
+internal fun <T> feedbackSubmitFailure(error: Throwable): Result<T> {
+    if (error is CancellationException) throw error
+    return Result.failure(error)
+}
+
+internal fun legacyFeedbackFailureMessage(
+    isHttpSuccessful: Boolean,
+    httpMessage: String,
+    parsed: JsonElement?,
+    cloudError: Throwable?,
+): String? {
+    if (parsed.explicitFeedbackServerSuccess() || isHttpSuccessful && parsed.explicitFeedbackServerError() == null) {
+        return null
+    }
+    val legacyMessage = parsed.explicitFeedbackServerError()
+        ?: httpMessage.takeIf { it.isNotBlank() }
+        ?: "备用反馈通道提交失败"
+    val cloudMessage = cloudError?.message?.takeIf { it.isNotBlank() }
+    return if (cloudMessage == null) legacyMessage else "$cloudMessage；备用通道：$legacyMessage"
+}
+
+private fun JsonElement?.explicitFeedbackServerSuccess(): Boolean {
+    val obj = this as? JsonObject ?: return false
+    return obj["success"]?.jsonPrimitive?.booleanOrNull == true
+}
+
+private fun JsonElement?.explicitFeedbackServerError(): String? {
+    val obj = this as? JsonObject ?: return null
+    if (obj["success"]?.jsonPrimitive?.booleanOrNull == false) {
+        return obj["error"]?.jsonPrimitive?.contentOrNull
+            ?: obj["message"]?.jsonPrimitive?.contentOrNull
+            ?: "备用反馈通道返回失败"
+    }
+    return obj["error"]?.jsonPrimitive?.contentOrNull
+        ?: obj["message"]?.jsonPrimitive?.contentOrNull
 }

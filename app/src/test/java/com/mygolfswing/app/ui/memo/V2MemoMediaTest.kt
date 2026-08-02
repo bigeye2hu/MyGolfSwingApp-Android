@@ -1,7 +1,10 @@
 package com.mygolfswing.app.ui.memo
 
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -62,5 +65,53 @@ class V2MemoMediaTest {
         assertTrue(video.exists())
         assertFalse(thumb.exists())
         root.deleteRecursively()
+    }
+
+    @Test
+    fun videoMemoGalleryVideoSpecKeepsSupportedContainerMimeTypes() {
+        assertEquals(
+            VideoMemoGalleryVideoSpec(extension = "mov", mimeType = "video/quicktime"),
+            videoMemoGalleryVideoSpec(File("/tmp/source.MOV")),
+        )
+        assertEquals(
+            VideoMemoGalleryVideoSpec(extension = "mov", mimeType = "video/quicktime"),
+            videoMemoGalleryVideoSpec(File("/tmp/source.qt")),
+        )
+        assertEquals(
+            VideoMemoGalleryVideoSpec(extension = "m4v", mimeType = "video/x-m4v"),
+            videoMemoGalleryVideoSpec(File("/tmp/source.m4v")),
+        )
+        assertEquals(
+            VideoMemoGalleryVideoSpec(extension = "webm", mimeType = "video/webm"),
+            videoMemoGalleryVideoSpec(File("/tmp/source.webm")),
+        )
+        assertEquals(
+            VideoMemoGalleryVideoSpec(extension = "mp4", mimeType = "video/mp4"),
+            videoMemoGalleryVideoSpec(File("/tmp/source.avi")),
+        )
+    }
+
+    @Test
+    fun videoMemoGalleryFailureMessageKeepsOrdinaryFailuresHandled() {
+        assertEquals(
+            "保存到相册失败，请稍后重试",
+            videoMemoGalleryFailureMessage(
+                base = "保存到相册失败，请稍后重试",
+                error = IllegalStateException("MediaStore write failed"),
+            ),
+        )
+    }
+
+    @Test
+    fun videoMemoGalleryFailureMessagePreservesCoroutineCancellation() {
+        try {
+            videoMemoGalleryFailureMessage(
+                base = "保存到相册失败，请稍后重试",
+                error = CancellationException("video memo gallery disposed"),
+            )
+            fail("CancellationException should be rethrown")
+        } catch (e: CancellationException) {
+            assertEquals("video memo gallery disposed", e.message)
+        }
     }
 }

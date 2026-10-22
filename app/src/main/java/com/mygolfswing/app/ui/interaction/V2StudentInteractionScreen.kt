@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -149,6 +150,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -169,6 +171,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -245,6 +248,9 @@ import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSLayout
 import com.mygolfswing.app.ui.common.V2PageArtwork
 import com.mygolfswing.app.ui.common.V2PageArtworkBackground
+import com.mygolfswing.app.ui.common.V2BackHandler
+import com.mygolfswing.app.ui.memo.V2MemoDetailScreen
+import com.mygolfswing.app.ui.memo.V2VideoMemoPlayerScreen
 import com.mygolfswing.app.ui.common.V2PageArtworkTone
 import com.mygolfswing.app.ui.common.V2NavTopBarCentered
 import com.mygolfswing.app.ui.common.V2RoomBackground
@@ -254,7 +260,20 @@ import com.mygolfswing.app.ui.common.copyPlainTextToClipboard
 import com.mygolfswing.app.ui.common.v2FullScreenInsets
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
+import com.mygolfswing.app.ui.coach.CoachCourseHeader
+import com.mygolfswing.app.ui.coach.CoachCourseHeaderImage
+import com.mygolfswing.app.ui.coach.CoachBody
+import com.mygolfswing.app.ui.coach.CoachGreen
+import com.mygolfswing.app.ui.coach.CoachInk
+import com.mygolfswing.app.ui.coach.CoachLine
+import com.mygolfswing.app.ui.coach.CoachMeta
+import com.mygolfswing.app.ui.coach.CoachPaper
+import com.mygolfswing.app.ui.coach.CoachSendIdle
+import com.mygolfswing.app.ui.coach.CoachSendIdleText
+import com.mygolfswing.app.ui.coach.CoachPracticeListSheet
 import com.mygolfswing.app.ui.coach.CoachStudentOrderDialog
+import com.mygolfswing.app.ui.coach.CoachStudentSwitcherDrawer
+import com.mygolfswing.app.ui.golfcam.saveExportedVideoToGallery
 import com.mygolfswing.app.ui.swing.V2SwingAnalysisTrimScreen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -2630,6 +2649,80 @@ internal fun WorkspaceReadOnlyBanner(
 }
 
 @Composable
+private fun CoachCompactSpaceTopBar(
+    title: String,
+    detail: String?,
+    avatar: String?,
+    active: Boolean,
+    busy: Boolean,
+    pinned: Boolean,
+    onBack: () -> Unit,
+    onSwitchSpace: () -> Unit,
+    onEditProfile: (() -> Unit)?,
+    onTogglePinned: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("workspace-top-bar"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.88f))
+                .clickable(onClick = onBack).testTag("workspace-top-back"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = CoachGreen, modifier = Modifier.size(18.dp))
+        }
+        V2UserAvatar(avatar, Modifier.size(36.dp), fallbackText = title, fallbackFontSize = 14.sp)
+        Column(Modifier.weight(1f)) {
+            Text(title, color = CoachGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            detail?.let {
+                Text(it, color = DSColors.shadowGray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Text(
+            "切换学员",
+            color = CoachGreen,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = 0.9f))
+                .clickable(enabled = !busy, onClick = onSwitchSpace)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .testTag("workspace-top-switcher"),
+        )
+        if (active) {
+            Box {
+                Box(
+                    Modifier.size(32.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.9f))
+                        .clickable(enabled = !busy) { menuExpanded = true }.testTag("workspace-top-more"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.MoreHoriz, "更多", tint = CoachGreen, modifier = Modifier.size(18.dp))
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    onEditProfile?.let { editProfile ->
+                        DropdownMenuItem(
+                            text = { Text("编辑教学档案") },
+                            onClick = { menuExpanded = false; editProfile() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (pinned) "取消重点学员" else "设为重点学员") },
+                            onClick = { menuExpanded = false; onTogglePinned() },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("解除连接", color = DSColors.flagRed) },
+                        onClick = { menuExpanded = false; onDisconnect() },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun WorkspaceTopBar(
     title: String,
     spaceType: String,
@@ -2641,7 +2734,26 @@ internal fun WorkspaceTopBar(
     onEditProfile: (() -> Unit)?,
     onTogglePinned: () -> Unit,
     onDisconnect: () -> Unit,
+    coachCompact: Boolean = false,
+    avatar: String? = null,
+    detail: String? = null,
 ) {
+    if (coachCompact) {
+        CoachCompactSpaceTopBar(
+            title = title,
+            detail = detail,
+            avatar = avatar,
+            active = active,
+            busy = busy,
+            pinned = pinned,
+            onBack = onBack,
+            onSwitchSpace = onSwitchSpace,
+            onEditProfile = onEditProfile,
+            onTogglePinned = onTogglePinned,
+            onDisconnect = onDisconnect,
+        )
+        return
+    }
     var menuExpanded by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth()
@@ -2777,10 +2889,9 @@ internal fun WorkspaceStudentOverviewCard(
     }
     val focus = connection.resolvedTrainingFocus?.trim().orEmpty()
         .ifBlank { connection.trainingStage?.trim().orEmpty() }
-        .ifBlank { "待确认" }
     val goal = connection.trainingGoalTags.firstNotNullOfOrNull { wireValue ->
         V2CoachTrainingGoal.entries.firstOrNull { it.wireValue == wireValue }?.title
-    } ?: connection.primaryGoal?.trim().orEmpty().ifBlank { "待设置" }
+    } ?: connection.primaryGoal?.trim().orEmpty()
     val shape = RoundedCornerShape(22.dp)
 
     Column(
@@ -2827,14 +2938,16 @@ internal fun WorkspaceStudentOverviewCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    Text(
-                        if (active) "已连接" else "历史空间",
-                        color = if (active) DSColors.fairway else DSColors.shadowGray,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clip(CircleShape).background(DSColors.cardWhite.copy(alpha = 0.78f))
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                    )
+                    if (!active) {
+                        Text(
+                            "历史空间",
+                            color = DSColors.shadowGray,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(CircleShape).background(DSColors.cardWhite.copy(alpha = 0.78f))
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
                 }
                 Text(
                     relationshipText,
@@ -2857,20 +2970,24 @@ internal fun WorkspaceStudentOverviewCard(
             }
         }
 
-        if (connection.relationshipType != "friend") {
+        if (connection.relationshipType != "friend" && (focus.isNotBlank() || goal.isNotBlank())) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                WorkspaceOverviewPill(
-                    title = "当前重点",
-                    value = focus,
-                    icon = Icons.Filled.GpsFixed,
-                    modifier = Modifier.weight(1f),
-                )
-                WorkspaceOverviewPill(
-                    title = "当前目标",
-                    value = goal,
-                    icon = Icons.Filled.Flag,
-                    modifier = Modifier.weight(1f),
-                )
+                if (focus.isNotBlank()) {
+                    WorkspaceOverviewPill(
+                        title = "当前重点",
+                        value = focus,
+                        icon = Icons.Filled.GpsFixed,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (goal.isNotBlank()) {
+                    WorkspaceOverviewPill(
+                        title = "当前目标",
+                        value = goal,
+                        icon = Icons.Filled.Flag,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
@@ -2956,7 +3073,7 @@ fun V2WorkspaceScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var postSuccessMessage by remember(connection.connectionId) { mutableStateOf<String?>(null) }
     var postSuccessToken by remember(connection.connectionId) { mutableIntStateOf(0) }
-    var selectedItem by remember(initialItem?.itemId) { mutableStateOf(initialItem) }
+    var selectedItem by remember(connection.connectionId, initialItem?.itemId) { mutableStateOf(initialItem) }
     var pendingVideo by remember(connection.connectionId, draftOwnerUserId) {
         mutableStateOf(
             restoredDraft.primaryAttachment?.let { attachment ->
@@ -3022,6 +3139,20 @@ fun V2WorkspaceScreen(
     var newestFirst by rememberSaveable(contentSortPreferenceKey) {
         mutableStateOf(contentDisplayPreferences.getString(contentSortPreferenceKey, "newest") != "oldest")
     }
+    var teachingFilter by rememberSaveable(connection.connectionId) { mutableStateOf("all") }
+    var openUnreadForItemId by remember(connection.connectionId) { mutableStateOf<String?>(null) }
+    val feedListState = rememberLazyListState()
+    val feedScrollMemory = remember { mutableMapOf<String, Pair<Int, Int>>() }
+    var feedScrollConnectionId by remember { mutableStateOf(connection.connectionId) }
+    if (feedScrollConnectionId != connection.connectionId) {
+        feedScrollMemory[feedScrollConnectionId] =
+            feedListState.firstVisibleItemIndex to feedListState.firstVisibleItemScrollOffset
+        feedScrollConnectionId = connection.connectionId
+    }
+    LaunchedEffect(connection.connectionId) {
+        val saved = feedScrollMemory[connection.connectionId] ?: return@LaunchedEffect
+        feedListState.scrollToItem(saved.first, saved.second)
+    }
     var selectedContentMode by rememberSaveable(connection.connectionId) {
         mutableStateOf(initialItem?.contentMode ?: V2WorkspaceContentMode.PRACTICE)
     }
@@ -3034,6 +3165,9 @@ fun V2WorkspaceScreen(
     var disconnecting by remember(connection.connectionId) { mutableStateOf(false) }
     var pinning by remember(connection.connectionId) { mutableStateOf(false) }
     var headerPinned by remember(connection.connectionId, connection.pinned) { mutableStateOf(connection.pinned) }
+    var feedPlayback by remember(connection.connectionId) { mutableStateOf<WorkspaceAnalysisPlayback?>(null) }
+    var feedFramePlayback by remember(connection.connectionId) { mutableStateOf(false) }
+    var preparingFeedPlaybackId by remember(connection.connectionId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(
         draftOwnerUserId,
@@ -3137,6 +3271,8 @@ fun V2WorkspaceScreen(
         tags: List<String> = emptyList(),
     ) {
         if (sending) return
+        val description = if (coachPerspective) note.trim() else draft.trim()
+        if (description.isEmpty()) return
         sending = true
         error = null
         scope.launch {
@@ -3151,7 +3287,7 @@ fun V2WorkspaceScreen(
                     connectionId = connection.connectionId,
                     peerName = person?.nickname.orEmpty(),
                     title = pendingVideoTitle?.takeIf(String::isNotBlank) ?: "练习视频",
-                    text = if (coachPerspective) note.trim().take(200) else draft,
+                    text = description.take(STUDENT_SPACE_SEND_NOTE_LIMIT),
                     tags = if (coachPerspective) tags else emptyList(),
                     videoPath = prepared.file.absolutePath,
                     coverPath = prepared.cover?.absolutePath,
@@ -3246,7 +3382,10 @@ fun V2WorkspaceScreen(
                 )
                 queuedFile = null
                 cover = null
-                draft = memo.text.orEmpty().take(300)
+                draft = (memo.text?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: memo.displayTitle?.trim()?.takeIf { it.isNotEmpty() && it !in teachingAutoTitles }
+                    ?: memo.title?.trim()?.takeIf { it.isNotEmpty() && it !in teachingAutoTitles }
+                    ?: "").take(STUDENT_SPACE_SEND_NOTE_LIMIT)
                 requestCoachReview = !coachPerspective && connection.relationshipType != "friend"
                 showNewConversationComposer = false
                 showStudentSendConfirm = !coachPerspective
@@ -3357,7 +3496,7 @@ fun V2WorkspaceScreen(
     }
 
     fun shareCoachLibraryAsset(asset: V2CoachLibraryAsset, note: String = "") {
-        if (sending) return
+        if (sending || note.isBlank()) return
         sending = true
         error = null
         scope.launch {
@@ -3495,6 +3634,44 @@ fun V2WorkspaceScreen(
         }
     }
 
+    fun playFeedItem(item: V2CoachWorkspaceItem) {
+        if (!item.hasVideoContent) {
+            selectedItem = item
+            return
+        }
+        val direct = workspaceStreamPlaybackUrl(item.primaryAsset?.videoUrl ?: item.videoUrl)
+        val title = workspaceThreadSourceTitle(item, connection.relationshipType == "friend")
+        fun present(uri: String) {
+            preparingFeedPlaybackId = null
+            feedFramePlayback = false
+            feedPlayback = WorkspaceAnalysisPlayback(
+                uri = uri,
+                title = title,
+                subtitle = person?.nickname,
+            )
+        }
+        if (direct != null) {
+            present(direct)
+            return
+        }
+        if (preparingFeedPlaybackId != null) return
+        preparingFeedPlaybackId = item.itemId
+        scope.launch {
+            val refreshed = ServiceLocator.coachWorkspaceRepo
+                .workspaceThread(connection.connectionId, item.itemId)
+                .getOrNull()
+            val resolved = workspaceStreamPlaybackUrl(
+                refreshed?.item?.primaryAsset?.videoUrl ?: refreshed?.item?.videoUrl,
+            )
+            if (resolved != null) {
+                present(resolved)
+            } else {
+                preparingFeedPlaybackId = null
+                error = "暂时拿不到这段视频，请稍后重试"
+            }
+        }
+    }
+
     fun reload() {
         scope.launch {
             loading = true
@@ -3580,6 +3757,23 @@ fun V2WorkspaceScreen(
         items = feed,
         newestFirst = newestFirst,
     )
+    val teachingSpace = connection.relationshipType != "friend"
+    val timelineItems = if (!teachingSpace) {
+        shownFeed
+    } else {
+        shownFeed.filter { item ->
+            when (teachingFilter) {
+                "review" -> teachingSpaceAsksForReview(item)
+                "fresh" -> teachingSpaceHasFreshReply(item, coachPerspective)
+                else -> true
+            }
+        }
+    }
+    val timelineGroups = if (teachingSpace) {
+        teachingSpaceDayGroups(timelineItems, newestFirst)
+    } else {
+        emptyList()
+    }
     val shouldShowNewConversationComposer = !coachPerspective &&
         (showNewConversationComposer || draft.isNotBlank() || pendingVideo != null)
     val threadDraftItemIds = remember(
@@ -3713,11 +3907,45 @@ fun V2WorkspaceScreen(
         return
     }
 
-    Box(Modifier.fillMaxSize().background(DSColors.warmWhite)) {
-        V2RoomBackground(Modifier.fillMaxSize())
+    feedPlayback?.let { playback ->
+        if (feedFramePlayback) {
+            WorkspaceFramePlayerScreen(
+                mediaUri = playback.uri,
+                title = playback.title,
+                onBack = {
+                    feedFramePlayback = false
+                    feedPlayback = null
+                },
+                onSwitchToReview = { feedFramePlayback = false },
+            )
+        } else {
+            V2WorkspaceProfessionalAnalysisScreen(
+                mediaUri = playback.uri,
+                title = playback.title,
+                subtitle = playback.subtitle,
+                startsPlaying = true,
+                mode = V2ProfessionalAnalysisMode.STANDALONE_REVIEW,
+                onSwitchPlayer = { feedFramePlayback = true },
+                onCancel = {
+                    feedFramePlayback = false
+                    feedPlayback = null
+                },
+                onRecordingReady = { _ -> },
+            )
+        }
+        return
+    }
+
+    V2BackHandler(onBack = onBack)
+
+    val coachTeachingSpace = coachPerspective && connection.relationshipType != "friend"
+        Box(Modifier.fillMaxSize().background(if (teachingSpace) CoachPaper else DSColors.warmWhite)) {
+        if (!teachingSpace) {
+            V2RoomBackground(Modifier.fillMaxSize())
+        }
         Column(
             Modifier.fillMaxSize().then(
-                if (coachPerspective) Modifier.v2StatusBarPadding() else Modifier,
+                if (coachPerspective && !teachingSpace) Modifier.v2StatusBarPadding() else Modifier,
             ),
         ) {
             val topBar = @Composable {
@@ -3731,6 +3959,9 @@ fun V2WorkspaceScreen(
                 pinned = headerPinned,
                 onBack = onBack,
                 onSwitchSpace = { showSpaceSwitcher = true },
+                coachCompact = coachTeachingSpace,
+                avatar = person?.avatar,
+                detail = connection.resolvedTrainingFocus?.trim()?.takeIf { it.isNotEmpty() },
                 onEditProfile = if (coachPerspective && onEditConnection != null) {
                     { onEditConnection(connection) }
                 } else null,
@@ -3760,6 +3991,48 @@ fun V2WorkspaceScreen(
             )
             }
 
+            if (teachingSpace) {
+                TeachingSpaceHeader(
+                    connection = connection,
+                    name = person?.nickname?.trim().orEmpty().ifBlank {
+                        if (coachPerspective) "学员" else "教练"
+                    },
+                    avatar = person?.avatar,
+                    coachPerspective = coachPerspective,
+                    active = connection.status == "active",
+                    busy = sending || disconnecting || pinning,
+                    pinnedStudent = headerPinned,
+                    canSwitch = availableConnections.count { it.relationshipType != "friend" && it.status == "active" } > 1,
+                    onBack = onBack,
+                    onSwitch = { showSpaceSwitcher = true },
+                    onEditProfile = if (coachPerspective && connection.status == "active" && onEditConnection != null) {
+                        { onEditConnection(connection.copy(pinned = headerPinned)) }
+                    } else null,
+                    onTogglePinnedStudent = {
+                        pinning = true
+                        error = null
+                        scope.launch {
+                            ServiceLocator.coachWorkspaceRepo.updateCoachPinned(
+                                connection.copy(pinned = headerPinned),
+                                !headerPinned,
+                            ).onSuccess { updated ->
+                                headerPinned = updated.pinned
+                                onConnectionUpdated(updated)
+                            }.onFailure { throwable ->
+                                error = coachThrowableError("暂时无法更新重点学员状态，请稍后重试", throwable)
+                            }
+                            pinning = false
+                        }
+                    },
+                    onDisconnect = {
+                        if (ownerDeliveryCount > 0) {
+                            error = "仍有 $ownerDeliveryCount 条内容正在发送，请完成后再解除连接"
+                        } else {
+                            showDisconnectConfirmation = true
+                        }
+                    },
+                )
+            } else {
             V2PageArtworkBackground(
                 artwork = V2PageArtwork.GOLFER,
                 tone = V2PageArtworkTone.FADE_TO_WARM_BOTTOM,
@@ -3780,6 +4053,7 @@ fun V2WorkspaceScreen(
                             .padding(bottom = DSLayout.pageHorizontal),
                     )
                 }
+            }
             }
 
             WorkspaceStatusStack(
@@ -3883,12 +4157,17 @@ fun V2WorkspaceScreen(
             }
         }
 
+        if (teachingSpace && coachPerspective) {
+            TeachingSpaceFilterBar(selected = teachingFilter, onSelect = { teachingFilter = it })
+        }
+
         PullToRefreshBox(
             isRefreshing = loading,
             onRefresh = ::reload,
             modifier = Modifier.weight(1f).testTag("workspace-pull-refresh"),
         ) {
             LazyColumn(
+                state = feedListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 16.dp,
@@ -3896,7 +4175,7 @@ fun V2WorkspaceScreen(
                     end = 16.dp,
                     bottom = 16.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(if (compactFeed) 8.dp else 14.dp),
+                verticalArrangement = Arrangement.spacedBy(if (teachingSpace) 0.dp else if (compactFeed) 8.dp else 14.dp),
             ) {
                 when {
                     loading -> item {
@@ -3915,6 +4194,44 @@ fun V2WorkspaceScreen(
                             )
                         }
                     }
+                    teachingSpace && error != null && shownFeed.isEmpty() -> item {
+                        TeachingSpaceLoadFailure(onRetry = ::reload)
+                    }
+                    teachingSpace && timelineItems.isEmpty() -> item {
+                        if (shownFeed.isEmpty()) {
+                            TeachingSpaceEmptyNote()
+                        } else {
+                            Text(
+                                "这个筛选下还没有内容",
+                                color = DSColors.shadowGray,
+                                fontSize = 13.sp,
+                                modifier = Modifier.fillMaxWidth().padding(top = 36.dp),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                    teachingSpace -> teachingSpaceFeed(
+                        groups = timelineGroups,
+                        coachPerspective = coachPerspective,
+                        peerName = person?.nickname.orEmpty(),
+                        newestFirst = newestFirst,
+                        onToggleSort = {
+                            newestFirst = !newestFirst
+                            contentDisplayPreferences.edit {
+                                putString(contentSortPreferenceKey, if (newestFirst) "newest" else "oldest")
+                            }
+                        },
+                        preparingItemId = preparingFeedPlaybackId,
+                        onOpen = {
+                            openUnreadForItemId = null
+                            selectedItem = it
+                        },
+                        onOpenFresh = {
+                            openUnreadForItemId = it.itemId
+                            selectedItem = it
+                        },
+                        onPlay = { playFeedItem(it) },
+                    )
                     shownFeed.isEmpty() -> item {
                         when {
                             connection.status != "active" -> WorkspaceCurrentEmptyStateCard(
@@ -3959,13 +4276,24 @@ fun V2WorkspaceScreen(
                                 coachPerspective = coachPerspective,
                                 friendSpace = connection.relationshipType == "friend",
                                 hasReplyDraft = item.itemId in threadDraftItemIds,
-                            ) { selectedItem = item }
+                                onClick = { selectedItem = item },
+                                onPlay = { playFeedItem(item) },
+                            )
                             if (index == shownFeed.lastIndex) {
                                 val nextCursor = feedNextCursor
                                 LaunchedEffect(item.itemId, nextCursor) {
                                     if (nextCursor != null) loadMoreFeed()
                                 }
                             }
+                        }
+                    }
+                }
+                if (teachingSpace && !loading && timelineItems.isNotEmpty()) {
+                    item(key = "teaching-load-more") {
+                        val nextCursor = feedNextCursor
+                        val tailId = timelineItems.lastOrNull()?.itemId
+                        LaunchedEffect(tailId, nextCursor) {
+                            if (nextCursor != null) loadMoreFeed()
                         }
                     }
                 }
@@ -3985,7 +4313,7 @@ fun V2WorkspaceScreen(
             !shouldShowNewConversationComposer
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().background(DSColors.warmWhite)
+                modifier = Modifier.fillMaxWidth().background(if (teachingSpace) CoachPaper else DSColors.warmWhite)
                     .then(if (coachPerspective) Modifier.v2NavigationBarPadding() else Modifier)
                     .padding(horizontal = DSLayout.pageHorizontal)
                     .padding(top = DSLayout.headerContentTop, bottom = DSLayout.headerContentTop),
@@ -4004,7 +4332,7 @@ fun V2WorkspaceScreen(
                     modifier = Modifier.weight(1f).height(DSLayout.primaryButtonHeight)
                         .testTag("workspace-post-button")
                         .clip(RoundedCornerShape(24.dp))
-                        .background(DSColors.deepGreen).clickable(enabled = !sending) {
+                        .background(if (teachingSpace || coachPerspective) CoachGreen else DSColors.deepGreen).clickable(enabled = !sending) {
                             if (coachPerspective) {
                                 showCoachContentSourceMenu = true
                             } else {
@@ -4050,12 +4378,27 @@ fun V2WorkspaceScreen(
                 }
             } else null,
             onDismiss = { selectedItem = null },
+            practiceItems = shownFeed,
+            onSelectPractice = { selectedItem = it },
+            focusUnreadReply = openUnreadForItemId == item.itemId,
         ) {
             threadDraftRevision++
             reload()
         }
     }
-    if (showSpaceSwitcher) {
+    if (showSpaceSwitcher && coachPerspective && connection.relationshipType != "friend") {
+        CoachStudentSwitcherDrawer(
+            connections = availableConnections,
+            currentConnectionId = connection.connectionId,
+            workspaceItems = (switcherItems + feed).distinctBy(V2CoachWorkspaceItem::itemId),
+            onDismiss = { showSpaceSwitcher = false },
+            onSelect = { candidate ->
+                showSpaceSwitcher = false
+                selectedItem = null
+                onSwitchConnection(candidate)
+            },
+        )
+    } else if (showSpaceSwitcher) {
         val switcherConnections = sortWorkspaceSwitcherConnections(
             availableConnections,
             currentConnectionId = connection.connectionId,
@@ -4124,12 +4467,17 @@ fun V2WorkspaceScreen(
     }
     val coachTeachingAsset = coachEditLibraryAsset?.takeIf { coachPerspective && trimmingVideo == null }
     if (coachTeachingVideo != null || coachTeachingAsset != null) {
+        val inheritedTags = coachTeachingAsset?.tags.orEmpty().map(String::trim).filter(String::isNotEmpty)
         CoachTeachingContentEditor(
             coverModel = coachTeachingVideo?.cover ?: coachTeachingAsset?.coverUrl,
             mediaSource = coachTeachingVideo?.file?.toUri()?.toString() ?: coachTeachingAsset?.videoUrl,
             durationSeconds = coachTeachingVideo?.durationSeconds ?: coachTeachingAsset?.durationSeconds,
             sending = sending,
             sendLabel = if (connection.relationshipType == "friend") "发送给好友" else "发送给学员",
+            notePrompt = if (connection.relationshipType == "friend") "这条内容想让对方重点看什么？" else "这条内容想让学员重点看什么？",
+            initialNote = coachTeachingAsset?.title?.trim().orEmpty(),
+            initialCategories = inheritedTags.filter { it in coachTeachingCategories }.toSet(),
+            initialTags = inheritedTags.filter { it !in coachTeachingCategories },
             onCancel = {
                 if (sending) return@CoachTeachingContentEditor
                 coachEditLibraryAsset = null
@@ -4138,13 +4486,15 @@ fun V2WorkspaceScreen(
                 pendingVideoTitle = null
             },
             onSend = { note, categories, tags ->
+                val description = note.trim()
+                if (description.isEmpty()) return@CoachTeachingContentEditor
                 val labels = (categories + tags).map(String::trim).filter(String::isNotEmpty).distinct().take(5)
                 val video = coachTeachingVideo
                 val asset = coachTeachingAsset
                 if (video != null) {
-                    sendVideo(video, note = note, tags = labels)
+                    sendVideo(video, note = description, tags = labels)
                 } else if (asset != null) {
-                    shareCoachLibraryAsset(asset, coachTeachingShareText(note, labels))
+                    shareCoachLibraryAsset(asset, description)
                 }
             },
         )
@@ -4303,12 +4653,6 @@ fun V2WorkspaceScreen(
 
 private val coachTeachingCategories = listOf("挥杆分析", "动作示范", "站位", "节奏", "下杆")
 
-internal fun coachTeachingShareText(note: String, labels: List<String>): String = buildList {
-    val trimmed = note.trim()
-    if (trimmed.isNotEmpty()) add(trimmed)
-    if (labels.isNotEmpty()) add(labels.joinToString("、"))
-}.joinToString("\n").take(1_000)
-
 @Composable
 internal fun CoachContentSourceSheet(
     onLibrary: () -> Unit,
@@ -4396,12 +4740,16 @@ internal fun CoachTeachingContentEditor(
     durationSeconds: Double?,
     sending: Boolean,
     sendLabel: String,
+    notePrompt: String,
+    initialNote: String = "",
+    initialCategories: Set<String> = emptySet(),
+    initialTags: List<String> = emptyList(),
     onCancel: () -> Unit,
     onSend: (note: String, categories: List<String>, tags: List<String>) -> Unit,
 ) {
-    var note by remember { mutableStateOf("") }
-    var categories by remember { mutableStateOf(setOf<String>()) }
-    var tags by remember { mutableStateOf(listOf<String>()) }
+    var note by remember(initialNote) { mutableStateOf(initialNote.take(STUDENT_SPACE_SEND_NOTE_LIMIT)) }
+    var categories by remember(initialCategories) { mutableStateOf(initialCategories) }
+    var tags by remember(initialTags) { mutableStateOf(initialTags) }
     var tagDraft by remember { mutableStateOf("") }
     var playing by remember(mediaSource) { mutableStateOf(false) }
     Dialog(
@@ -4451,13 +4799,14 @@ internal fun CoachTeachingContentEditor(
                         }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("备注说明", color = DSColors.deepGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                            Text("${note.length}/200", color = DSColors.shadowGray, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("内容说明", color = DSColors.deepGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("必填", color = DSColors.shadowGray, fontSize = 12.sp)
+                            Text("${note.length}/$STUDENT_SPACE_SEND_NOTE_LIMIT", color = DSColors.shadowGray, fontSize = 12.sp)
                         }
                         BasicTextField(
                             value = note,
-                            onValueChange = { note = it.take(200) },
+                            onValueChange = { note = it.take(STUDENT_SPACE_SEND_NOTE_LIMIT) },
                             enabled = !sending,
                             textStyle = androidx.compose.ui.text.TextStyle(color = DSColors.inkGreen, fontSize = 14.sp, lineHeight = 20.sp),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp).clip(RoundedCornerShape(14.dp))
@@ -4466,14 +4815,20 @@ internal fun CoachTeachingContentEditor(
                                 .testTag("coach-teaching-note"),
                             decorationBox = { inner ->
                                 Box {
-                                    if (note.isBlank()) Text("给学员留一句说明", color = DSColors.shadowGray, fontSize = 14.sp)
+                                    if (note.isBlank()) Text(notePrompt, color = DSColors.shadowGray, fontSize = 14.sp)
                                     inner()
                                 }
                             },
                         )
+                        Text(
+                            "写一句话就行，大约 10～40 字，也可以写得更具体。",
+                            color = DSColors.shadowGray,
+                            fontSize = 12.sp,
+                        )
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("分类", color = DSColors.deepGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("选填。分享已有素材时会带上原来的分类。", color = DSColors.shadowGray, fontSize = 12.sp)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             coachTeachingCategories.forEach { category ->
                                 val selected = category in categories
@@ -4551,8 +4906,8 @@ internal fun CoachTeachingContentEditor(
                 ) {
                     Row(
                         Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp))
-                            .background(if (sending) DSColors.borderLine else DSColors.deepGreen)
-                            .clickable(enabled = !sending) { onSend(note, categories.toList(), tags) }
+                            .background(if (sending || note.isBlank()) DSColors.borderLine else DSColors.deepGreen)
+                            .clickable(enabled = !sending && note.isNotBlank()) { onSend(note, categories.toList(), tags) }
                             .testTag("coach-teaching-send"),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
@@ -6520,6 +6875,7 @@ internal fun SpaceFeedCard(
     friendSpace: Boolean,
     hasReplyDraft: Boolean = false,
     onClick: () -> Unit,
+    onPlay: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(20.dp)
     val hasNewInteraction = if (friendSpace || !coachPerspective) {
@@ -6550,6 +6906,8 @@ internal fun SpaceFeedCard(
             .clickable(onClick = onClick)
             .testTag("workspace-feed-card-${item.itemId}"),
     ) {
+        val showCoachSentBadge = !coachPerspective && !friendSpace &&
+            (item.senderRole == "coach" || item.resolvedKind == "coach_post" || item.resolvedKind == "coach_feedback")
         val mediaWidth = if (compact) 132.dp else maxOf(138.dp, maxWidth * 0.49f)
         Row(
             modifier = Modifier.fillMaxWidth().height(if (compact) 98.dp else 150.dp)
@@ -6560,7 +6918,9 @@ internal fun SpaceFeedCard(
             WorkspaceFeedMediaPreview(
                 item = item,
                 compact = compact,
-                modifier = Modifier.width(mediaWidth).height(if (compact) 78.dp else 126.dp),
+                showCoachSentBadge = showCoachSentBadge,
+                modifier = Modifier.width(mediaWidth).height(if (compact) 78.dp else 126.dp)
+                    .clickable(onClick = onPlay ?: onClick),
             )
             WorkspaceFeedCardDetails(
                 item = item,
@@ -6568,6 +6928,7 @@ internal fun SpaceFeedCard(
                 friendSpace = friendSpace,
                 hasReplyDraft = hasReplyDraft,
                 hasNewInteraction = hasNewInteraction,
+                showCoachSentBadge = showCoachSentBadge,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -6578,6 +6939,7 @@ internal fun SpaceFeedCard(
 private fun WorkspaceFeedMediaPreview(
     item: V2CoachWorkspaceItem,
     compact: Boolean,
+    showCoachSentBadge: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(if (compact) 12.dp else 15.dp)
@@ -6610,6 +6972,18 @@ private fun WorkspaceFeedMediaPreview(
                 Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.22f))),
             ),
         )
+        if (showCoachSentBadge) {
+            Text(
+                "教练发来",
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopStart).padding(6.dp)
+                    .height(18.dp).clip(RoundedCornerShape(9.dp))
+                    .background(DSColors.fairway).padding(horizontal = 6.dp)
+                    .testTag("workspace-feed-coach-sent-${item.itemId}"),
+            )
+        }
         if (item.hasVideoContent) {
             Box(
                 modifier = Modifier.size(if (compact) 36.dp else 44.dp).clip(CircleShape)
@@ -6645,10 +7019,11 @@ private fun WorkspaceFeedCardDetails(
     friendSpace: Boolean,
     hasReplyDraft: Boolean,
     hasNewInteraction: Boolean,
+    showCoachSentBadge: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val title = workspaceFeedContentTitle(item, friendSpace)
-    val metadata = workspaceFeedMetadata(item)
+    val metadata = workspaceFeedMetadata(item, coachSent = showCoachSentBadge)
     val preview = V2CoachWorkspaceItem.visibleCopy(item.text).orEmpty()
     val badge = when {
         hasReplyDraft -> Triple("继续未发送", Icons.Filled.Refresh, Color(0xFFB98516))
@@ -6725,10 +7100,15 @@ internal fun workspaceFeedContentTitle(item: V2CoachWorkspaceItem, friendSpace: 
     return if (item.hasVideoContent) "复练视频" else "学员消息"
 }
 
-internal fun workspaceFeedMetadata(item: V2CoachWorkspaceItem): String {
+internal fun workspaceFeedMetadata(item: V2CoachWorkspaceItem, coachSent: Boolean = false): String {
+    val kind = when {
+        coachSent -> "教练发来"
+        item.resolvedKind == "student_practice" -> "挥杆练习"
+        else -> "参考内容"
+    }
     val parts = mutableListOf(
         workspaceFeedDate(item.createdAt),
-        if (item.resolvedKind == "student_practice") "挥杆练习" else "参考内容",
+        kind,
     )
     parts += item.primaryAsset?.tags.orEmpty().map(String::trim).filter(String::isNotEmpty).take(2)
     return parts.joinToString(" · ")
@@ -6769,12 +7149,16 @@ internal fun WorkspaceThreadTopBar(
     onSelectDiscussion: () -> Unit,
     onDeleteRoot: () -> Unit,
     onOpenTeachingProfile: (() -> Unit)? = null,
+    barColor: Color = DSColors.warmWhite,
+    showsPeerAvatar: Boolean = true,
+    onOpenPracticeList: (() -> Unit)? = null,
+    barHeight: androidx.compose.ui.unit.Dp = DSLayout.topBarHeight,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val hasMenuAction = replyCount > 0 || canDeleteRoot
+    val hasMenuAction = canDeleteRoot || onOpenTeachingProfile != null
     Box(
-        modifier = Modifier.fillMaxWidth().v2StatusBarPadding().height(DSLayout.topBarHeight)
-            .background(DSColors.warmWhite).testTag("workspace-thread-top-bar"),
+        modifier = Modifier.fillMaxWidth().v2StatusBarPadding().height(barHeight)
+            .background(barColor).testTag("workspace-thread-top-bar"),
     ) {
         Box(
             modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(36.dp)
@@ -6784,43 +7168,65 @@ internal fun WorkspaceThreadTopBar(
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = "返回",
-                tint = DSColors.inkGreen,
+                tint = CoachInk,
                 modifier = Modifier.size(24.dp),
             )
         }
         Row(
-            modifier = Modifier.align(Alignment.Center).widthIn(max = 236.dp),
+            modifier = Modifier.align(Alignment.Center).widthIn(max = if (onOpenPracticeList != null) 148.dp else 236.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            V2UserAvatar(
-                peerAvatar,
-                Modifier.size(32.dp).border(1.dp, DSColors.trophyGold, CircleShape),
-                fallbackFontSize = 12.sp,
-                placeholderIconSize = 19.dp,
-                fallbackText = peerName,
-                fallbackColor = DSColors.sandBeige,
-            )
+            if (showsPeerAvatar) {
+                V2UserAvatar(
+                    peerAvatar,
+                    Modifier.size(32.dp).border(1.dp, DSColors.trophyGold, CircleShape),
+                    fallbackFontSize = 12.sp,
+                    placeholderIconSize = 19.dp,
+                    fallbackText = peerName,
+                    fallbackColor = DSColors.sandBeige,
+                )
+            }
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     title,
-                    color = DSColors.inkGreen,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    subtitle,
-                    color = DSColors.shadowGray,
-                    fontSize = 8.sp,
+                    color = ContentText,
+                    fontSize = 18.sp,
+                    lineHeight = 26.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (subtitle.isNotBlank()) {
+                    Text(
+                        subtitle,
+                        color = CoachMeta,
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
-        Box(modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (onOpenPracticeList != null) {
+                Box(
+                    Modifier.size(48.dp).clickable(onClick = onOpenPracticeList),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.FormatListBulleted,
+                        contentDescription = "练习列表",
+                        tint = ContentText,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+            }
             Box(
                 modifier = Modifier.size(40.dp).clip(CircleShape)
                     .clickable(enabled = hasMenuAction) { menuExpanded = true }
@@ -6830,25 +7236,11 @@ internal fun WorkspaceThreadTopBar(
                 Icon(
                     Icons.Filled.MoreVert,
                     contentDescription = "更多空间操作",
-                    tint = if (hasMenuAction) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
+                    tint = if (hasMenuAction) CoachInk else CoachMeta.copy(alpha = 0.45f),
                     modifier = Modifier.size(23.dp),
                 )
             }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                    if (replyCount > 0) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (selectedTab == WorkspaceThreadTab.DISCUSSION) "查看原内容" else "查看最新交流",
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            if (selectedTab == WorkspaceThreadTab.DISCUSSION) onSelectContent()
-                            else onSelectDiscussion()
-                        },
-                        )
-                    }
                     onOpenTeachingProfile?.let { openProfile ->
                         DropdownMenuItem(
                             text = { Text("教学档案") },
@@ -6878,13 +7270,15 @@ internal fun WorkspaceThreadTabBar(
     selectedTab: WorkspaceThreadTab,
     resourceCount: Int,
     onSelect: (WorkspaceThreadTab) -> Unit,
+    discussionCount: Int = 0,
 ) {
+    val tabs = listOf(WorkspaceThreadTab.DISCUSSION, WorkspaceThreadTab.CONTENT)
     Row(
-        modifier = Modifier.fillMaxWidth().height(47.dp).background(DSColors.warmWhite)
+        modifier = Modifier.fillMaxWidth().height(47.dp).background(Color.Transparent)
             .padding(start = 12.dp, top = 8.dp, end = 12.dp).testTag("workspace-thread-tabs"),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        WorkspaceThreadTab.entries.forEach { tab ->
+        tabs.forEach { tab ->
             val isSelected = selectedTab == tab
             Column(
                 modifier = Modifier.weight(1f).fillMaxSize().clickable { onSelect(tab) }
@@ -6900,10 +7294,15 @@ internal fun WorkspaceThreadTabBar(
                         fontSize = 15.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     )
-                    if (tab == WorkspaceThreadTab.RESOURCES) {
+                    val count = when (tab) {
+                        WorkspaceThreadTab.DISCUSSION -> discussionCount
+                        WorkspaceThreadTab.CONTENT -> resourceCount
+                        WorkspaceThreadTab.RESOURCES -> 0
+                    }
+                    if (count > 0) {
                         Text(
-                            resourceCount.toString(),
-                            color = if (isSelected) DSColors.fairway else DSColors.shadowGray,
+                            count.toString(),
+                            color = if (isSelected) CoachGreen else DSColors.shadowGray,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -6932,10 +7331,10 @@ internal fun workspaceThreadSubtitle(
     if (connectionStatus != "active") {
         return if (friendSpace) "历史好友空间 · 只读" else "历史教学空间 · 只读"
     }
-    val mode = if (source.resolvedKind == "student_practice") "在练" else "在看"
-    if (friendSpace) return "私密好友空间 · $mode"
-    val activity = coachStudentRelativeTime(source.latestActivityAt ?: source.createdAt).ifBlank { "刚刚" }
-    return "$mode · 最近活跃于 $activity"
+    val title = V2CoachWorkspaceItem.visibleCopy(source.title)
+    val date = workspaceFeedDate(source.createdAt ?: source.latestActivityAt)
+    val summary = listOfNotNull(title, date).joinToString(" · ")
+    return if (friendSpace) "私密好友空间 · $summary" else summary.ifBlank { date }
 }
 
 @Composable
@@ -6950,6 +7349,9 @@ private fun ThreadDialog(
     readOnly: Boolean,
     onOpenTeachingProfile: (() -> Unit)?,
     onDismiss: () -> Unit,
+    practiceItems: List<V2CoachWorkspaceItem> = emptyList(),
+    onSelectPractice: (V2CoachWorkspaceItem) -> Unit = {},
+    focusUnreadReply: Boolean = false,
     onChanged: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -7001,7 +7403,10 @@ private fun ThreadDialog(
     var trimmingVideo by remember(source.itemId) { mutableStateOf<V2PreparedWorkspaceVideo?>(null) }
     var trimSaving by remember(source.itemId) { mutableStateOf(false) }
     var trimError by remember(source.itemId) { mutableStateOf<String?>(null) }
-    var playingVideoUrl by remember { mutableStateOf<String?>(null) }
+    var analysisPlayback by remember { mutableStateOf<WorkspaceAnalysisPlayback?>(null) }
+    var framePlayback by remember { mutableStateOf(false) }
+    var preparingPlaybackId by remember { mutableStateOf<String?>(null) }
+    var playbackNotice by remember { mutableStateOf<String?>(null) }
     var coverPickingVideo by remember(source.itemId) { mutableStateOf<V2PreparedWorkspaceVideo?>(null) }
     var coverSaving by remember(source.itemId) { mutableStateOf(false) }
     var coverError by remember(source.itemId) { mutableStateOf<String?>(null) }
@@ -7013,15 +7418,8 @@ private fun ThreadDialog(
     val deliveryPeerName = peerName.ifBlank {
         if (friendSpace) "好友" else if (coachPerspective) "学员" else "教练"
     }
-    var selectedTab by remember(source.itemId) {
-        mutableStateOf(
-            if (coachPerspective && source.requiresCoachReview == true && source.reviewState != "responded") {
-                WorkspaceThreadTab.DISCUSSION
-            } else {
-                WorkspaceThreadTab.CONTENT
-            },
-        )
-    }
+    var selectedTab by remember(source.itemId) { mutableStateOf(WorkspaceThreadTab.DISCUSSION) }
+    var showPracticeList by remember(source.itemId) { mutableStateOf(false) }
     var replyToItemId by rememberSaveable(source.itemId, draftOwnerUserId) { mutableStateOf(restoredDraft.replyToItemId) }
     var replyAtSecondsText by rememberSaveable(source.itemId, draftOwnerUserId) { mutableStateOf(restoredDraft.replyAtSecondsText) }
     val voiceRecorder = remember(context, source.itemId) { V2WorkspaceVoiceRecorder(context.applicationContext) }
@@ -7085,6 +7483,26 @@ private fun ThreadDialog(
     var observedVisibleReplyCount by remember(source.itemId) { mutableIntStateOf(-1) }
     var unseenIncomingReplyCount by remember(source.itemId) { mutableIntStateOf(0) }
     var scrollToReplyItemId by remember(source.itemId) { mutableStateOf<String?>(null) }
+    var focusedUnread by remember(source.itemId) { mutableStateOf(false) }
+    var teachingPanel by remember(source.itemId) { mutableStateOf(TeachingDetailPanel.DISCUSSION) }
+    var summaryExpanded by remember(source.itemId) { mutableStateOf(false) }
+    var composerFocused by remember(source.itemId) { mutableStateOf(false) }
+    var viewingMemoId by remember(source.itemId) { mutableStateOf<UUID?>(null) }
+    var openDiscussionAtTop by remember(source.itemId) { mutableIntStateOf(0) }
+    LaunchedEffect(thread?.replies?.size, focusUnreadReply) {
+        if (!focusUnreadReply || focusedUnread) return@LaunchedEffect
+        val loaded = thread ?: return@LaunchedEffect
+        val replies = loaded.replies.filterNot(V2CoachWorkspaceItem::isRemovedContent)
+        val index = workspaceFirstUnreadReplyIndex(loaded.item, replies, coachPerspective, friendSpace)
+        val incomingRole = if (coachPerspective) "student" else "coach"
+        val id = index?.let { replies.getOrNull(it)?.itemId }
+            ?: replies.lastOrNull { reply -> reply.senderRole == incomingRole }?.itemId
+        if (id != null) {
+            scrollToReplyItemId = id
+            if (!friendSpace) teachingPanel = TeachingDetailPanel.DISCUSSION
+            focusedUnread = true
+        }
+    }
 
     fun isNearThreadBottom(): Boolean = workspaceIsNearThreadBottom(
         value = threadScrollState.value,
@@ -7104,6 +7522,51 @@ private fun ThreadDialog(
         ) return
         ServiceLocator.coachWorkspaceRepo.markViewed(source.itemId)
             .onSuccess { onChanged() }
+    }
+
+    fun presentAnalysisPlayback(uri: String, lookupId: String) {
+        val items = thread?.let { listOf(it.item) + it.replies }.orEmpty()
+        val item = items.firstOrNull { candidate ->
+            candidate.itemId == lookupId ||
+                candidate.primaryAsset?.assetId == lookupId ||
+                candidate.attachments.any { it.assetId == lookupId }
+        }
+        val asset = item?.attachments?.firstOrNull { it.assetId == lookupId }
+            ?: item?.primaryAsset?.takeIf { it.assetId == lookupId }
+        val title = asset?.title?.takeIf { it.isNotBlank() }
+            ?: item?.title?.takeIf { it.isNotBlank() }
+            ?: "视频"
+        playbackNotice = null
+        framePlayback = false
+        analysisPlayback = WorkspaceAnalysisPlayback(
+            uri = uri,
+            title = title,
+            subtitle = peerName.takeIf { it.isNotBlank() },
+        )
+    }
+
+    fun requestWorkspacePlayback(lookupId: String, url: String?) {
+        val direct = workspaceStreamPlaybackUrl(url) ?: workspacePlaybackUrlInThread(thread, lookupId)
+        if (direct != null) {
+            presentAnalysisPlayback(direct, lookupId)
+            return
+        }
+        if (preparingPlaybackId != null) return
+        preparingPlaybackId = lookupId
+        playbackNotice = null
+        scope.launch {
+            val refreshed = ServiceLocator.coachWorkspaceRepo
+                .workspaceThread(connectionId, source.itemId)
+                .getOrNull()
+            if (refreshed != null) thread = mergeWorkspaceThreads(refreshed, thread)
+            val resolved = workspacePlaybackUrlInThread(thread, lookupId)
+            preparingPlaybackId = null
+            if (resolved != null) {
+                presentAnalysisPlayback(resolved, lookupId)
+            } else {
+                playbackNotice = "暂时拿不到这段视频，请稍后重试"
+            }
+        }
     }
 
     fun retryThreadSync() {
@@ -8177,25 +8640,59 @@ private fun ThreadDialog(
 
     LaunchedEffect(Unit) { V2MemoStore.startObserving() }
 
-    if (trimmingVideo == null && analysisSource == null && coverPickingVideo == null) {
-        CompositionLocalProvider(LocalPlayWorkspaceVideo provides { url -> playingVideoUrl = url }) {
+    if (trimmingVideo == null && analysisSource == null && coverPickingVideo == null && analysisPlayback == null) {
+        CompositionLocalProvider(
+            LocalPlayWorkspaceVideo provides { lookupId, url -> requestWorkspacePlayback(lookupId, url) },
+            LocalPreparingWorkspacePlaybackId provides preparingPlaybackId,
+        ) {
         Dialog(
             onDismissRequest = ::close,
             properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
         ) {
+            val dialogView = LocalView.current
+            SideEffect {
+                (dialogView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING,
+                )
+            }
             val current = thread
             val displayedSource = current?.item ?: source
             val resources = current?.discussionResourceEntries().orEmpty()
             val visibleReplyCount = current?.replies?.count { !it.isRemovedContent } ?: source.replyCount
-            V2RoomPage(Modifier.fillMaxSize()) {
-                Column(Modifier.fillMaxSize()) {
+            val teachingDetail = !friendSpace
+            val panelFocusManager = LocalFocusManager.current
+            val panelKeyboard = LocalSoftwareKeyboardController.current
+            V2BackHandler(enabled = teachingDetail && (teachingPanel == TeachingDetailPanel.MATERIALS || composerFocused)) {
+                if (composerFocused) {
+                    panelFocusManager.clearFocus(force = true)
+                    panelKeyboard?.hide()
+                    composerFocused = false
+                } else {
+                    teachingPanel = TeachingDetailPanel.DISCUSSION
+                }
+            }
+            LaunchedEffect(openDiscussionAtTop) {
+                if (openDiscussionAtTop > 0 && teachingPanel == TeachingDetailPanel.DISCUSSION) {
+                    threadScrollState.scrollTo(0)
+                }
+            }
+            Box(Modifier.fillMaxSize().background(CoachPaper)) {
+                Column(Modifier.fillMaxSize().imePadding()) {
                     WorkspaceThreadTopBar(
-                        title = workspaceThreadTitle(peerName, coachPerspective, friendSpace),
-                        subtitle = workspaceThreadSubtitle(
-                            friendSpace = friendSpace,
-                            connectionStatus = connectionStatus,
-                            source = displayedSource,
-                        ),
+                        title = if (teachingDetail) {
+                            peerName.trim().ifEmpty { "教学交流" }
+                        } else {
+                            workspaceThreadTitle(peerName, coachPerspective, friendSpace)
+                        },
+                        subtitle = if (teachingDetail) {
+                            if (connectionStatus != "active") "只读" else ""
+                        } else {
+                            workspaceThreadSubtitle(
+                                friendSpace = friendSpace,
+                                connectionStatus = connectionStatus,
+                                source = displayedSource,
+                            )
+                        },
                         peerName = peerName,
                         peerAvatar = peerAvatar,
                         selectedTab = selectedTab,
@@ -8206,14 +8703,104 @@ private fun ThreadDialog(
                         onSelectDiscussion = { selectedTab = WorkspaceThreadTab.DISCUSSION },
                         onDeleteRoot = { pendingDeleteItem = displayedSource },
                         onOpenTeachingProfile = onOpenTeachingProfile,
+                        barColor = CoachPaper,
+                        showsPeerAvatar = !teachingDetail,
+                        onOpenPracticeList = if (teachingDetail) {
+                            { showPracticeList = true }
+                        } else {
+                            null
+                        },
+                        barHeight = if (teachingDetail) 56.dp else DSLayout.topBarHeight,
                     )
-                    WorkspaceThreadTabBar(
-                        selectedTab = selectedTab,
-                        resourceCount = resources.size,
-                        onSelect = { selectedTab = it },
-                    )
+                    playbackNotice?.let { notice ->
+                        Text(
+                            notice,
+                            color = Color(0xFFB23B35),
+                            fontSize = 12.sp,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
                     Box(Modifier.weight(1f).fillMaxWidth()) {
-                        Column(
+                        if (teachingDetail && !displayedSource.isRemovedContent) {
+                            val visibleReplies = current?.replies
+                                ?.filterNot(V2CoachWorkspaceItem::isRemovedContent).orEmpty()
+                            val authorName = when {
+                                displayedSource.senderRole == "coach" && coachPerspective -> "我"
+                                displayedSource.senderRole == "coach" -> "教练"
+                                coachPerspective -> peerName.ifBlank { "学员" }
+                                else -> "我"
+                            }
+                            val linkedMemo = displayedSource.sourceRecordId?.let { raw ->
+                                runCatching { UUID.fromString(raw) }.getOrNull()
+                            }?.let { id -> citationRecords.firstOrNull { it.id == id } }
+                            Column(Modifier.fillMaxSize()) {
+                                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                                val preferredVideo = if (composerFocused) 180.dp else 240.dp
+                                val videoHeight = preferredVideo.coerceAtMost((maxHeight - 160.dp).coerceAtLeast(0.dp))
+                                Column(Modifier.fillMaxSize()) {
+                                if (videoHeight > 0.dp) {
+                                    TeachingThreadVideoHeader(
+                                        item = displayedSource,
+                                        height = videoHeight,
+                                        onPlayAsset = ::recordPlayback,
+                                    )
+                                }
+                                Column(
+                                    Modifier.weight(1f).fillMaxWidth().verticalScroll(threadScrollState),
+                                ) {
+                                    TeachingThreadSummary(
+                                        item = displayedSource,
+                                        authorName = authorName,
+                                        statusLabel = teachingSpaceRowStatus(displayedSource, coachPerspective),
+                                        showMemo = linkedMemo != null,
+                                        expanded = summaryExpanded,
+                                        onOpenFullText = { summaryExpanded = true },
+                                        onOpenMemo = { linkedMemo?.let { viewingMemoId = it.id } },
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 10.dp, bottom = 8.dp),
+                                    )
+                                    TeachingDetailPanelBody(
+                                        panel = teachingPanel,
+                                        onSelect = { teachingPanel = it },
+                                        authorName = authorName,
+                                        originalText = teachingThreadSummaryText(displayedSource),
+                                        replies = visibleReplies,
+                                        loading = current == null,
+                                        syncError = threadSyncError,
+                                        loadingOlder = loadingOlderReplies,
+                                        hasOlder = current?.nextCursor != null,
+                                        onLoadOlder = ::loadOlderReplies,
+                                        onRetrySync = ::retryThreadSync,
+                                        friendSpace = friendSpace,
+                                        coachPerspective = coachPerspective,
+                                        conversationReadOnly = readOnly || displayedSource.isRemovedContent,
+                                        displayedSource = displayedSource,
+                                        allMessages = listOf(displayedSource).filterNot(V2CoachWorkspaceItem::isRemovedContent) + visibleReplies,
+                                        savingAssetIds = savingAssetIds,
+                                        scrollToReplyItemId = scrollToReplyItemId,
+                                        onConsumeScrollTarget = { scrollToReplyItemId = null },
+                                        onQuote = { replyToItemId = it; replyAtSecondsText = "" },
+                                        onDelete = { pendingDeleteItem = it },
+                                        onSaveAsset = if (coachPerspective) ::saveAsset else null,
+                                        onPlayAsset = ::recordPlayback,
+                                        resources = current?.discussionResourceEntries().orEmpty(),
+                                        canAddResource = coachPerspective && !readOnly && displayedSource.deletedAt == null,
+                                        onAddResource = ::openReplyLibrary,
+                                        onOpenResourceDiscussion = { messageId ->
+                                            teachingPanel = TeachingDetailPanel.DISCUSSION
+                                            scrollToReplyItemId = messageId
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                            .padding(horizontal = 12.dp)
+                                            .padding(bottom = 12.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .border(1.dp, ContentSectionLine, RoundedCornerShape(12.dp))
+                                            .background(ContentDiscussionWell),
+                                    )
+                                }
+                                }
+                                }
+                            }
+                        } else Column(
                             Modifier.fillMaxSize().verticalScroll(threadScrollState)
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -8231,13 +8818,14 @@ private fun ThreadDialog(
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
                                     textAlign = TextAlign.Center,
                                 )
-                            } else when (selectedTab) {
-                                WorkspaceThreadTab.CONTENT -> WorkspaceThreadContentCard(
-                                    item = displayedSource,
-                                    friendSpace = friendSpace,
-                                    onPlayAsset = ::recordPlayback,
-                                )
-                                WorkspaceThreadTab.DISCUSSION -> {
+                            } else {
+                                    Text(
+                                        "交流",
+                                        color = CoachInk,
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    )
                                     if (current?.nextCursor != null) {
                                         WorkspaceLoadOlderRepliesButton(
                                             loading = loadingOlderReplies,
@@ -8250,7 +8838,7 @@ private fun ThreadDialog(
                                             onRetry = ::retryThreadSync,
                                         )
                                     } else if (visibleReplies.isEmpty()) {
-                                        WorkspaceDiscussionEmptyState()
+                                        WorkspaceDiscussionEmptyState(videoContext = !friendSpace)
                                     } else {
                                         val unreadBoundary = workspaceFirstUnreadReplyIndex(
                                             source = source,
@@ -8307,7 +8895,7 @@ private fun ThreadDialog(
                                                 } else null,
                                                 onOpenReference = referenced?.let { target ->
                                                     if (target.parentItemId == null) {
-                                                        { selectedTab = WorkspaceThreadTab.CONTENT }
+                                                        { scope.launch { threadScrollState.animateScrollTo(0) } }
                                                     } else {
                                                         {
                                                             selectedTab = WorkspaceThreadTab.DISCUSSION
@@ -8334,16 +8922,70 @@ private fun ThreadDialog(
                                             fontSize = 12.sp,
                                         )
                                     }
-                                }
-                                WorkspaceThreadTab.RESOURCES -> ThreadResourceList(
-                                    resources = resources,
-                                    loading = current == null && !hasCompletedInitialThreadSync,
-                                    onPlayAsset = ::recordPlayback,
-                                    onBackToDiscussion = { messageId ->
-                                        selectedTab = WorkspaceThreadTab.DISCUSSION
-                                        scrollToReplyItemId = messageId
-                                    },
-                                )
+                                    val related = current?.discussionResourceEntries().orEmpty()
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(top = 8.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Color.White)
+                                            .border(1.dp, CoachLine, RoundedCornerShape(14.dp))
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.LibraryBooks,
+                                            contentDescription = null,
+                                            tint = CoachGreen,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                        Text(
+                                            "相关资料",
+                                            color = CoachInk,
+                                            fontSize = 17.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (coachPerspective && !conversationReadOnly) {
+                                            Row(
+                                                Modifier.clip(RoundedCornerShape(10.dp))
+                                                    .background(Color(0xFFE7F2EC))
+                                                    .border(1.dp, CoachGreen, RoundedCornerShape(10.dp))
+                                                    .clickable { openReplyLibrary() }
+                                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Add,
+                                                    contentDescription = null,
+                                                    tint = CoachGreen,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Text(
+                                                    "添加资料",
+                                                    color = CoachGreen,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                )
+                                            }
+                                        }
+                                    }
+                                    if (related.isNotEmpty()) {
+                                        Row(
+                                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            related.forEach { resource ->
+                                                TeachingThreadMaterialCard(
+                                                    resource = resource,
+                                                    onOpenDiscussion = { messageId ->
+                                                        scrollToReplyItemId = messageId
+                                                    },
+                                                    onPlayAsset = ::recordPlayback,
+                                                )
+                                            }
+                                        }
+                                    }
                             }
                             if (selectedTab != WorkspaceThreadTab.DISCUSSION || conversationReadOnly) {
                                 error?.let { Text(it, color = Color(0xFFB23B35), fontSize = 12.sp) }
@@ -8364,6 +9006,22 @@ private fun ThreadDialog(
                         }
                     }
                     val conversationReadOnly = readOnly || thread?.item?.deletedAt != null
+                    if (teachingDetail && !displayedSource.isRemovedContent && showReplyTools) {
+                        TeachingAttachmentTray(
+                            onQuoteMaterial = {
+                                showReplyTools = false
+                                if (coachPerspective) openReplyLibrary()
+                                else {
+                                    replyToItemId = source.itemId
+                                    replyAtSecondsText = ""
+                                }
+                            },
+                            onPickMedia = {
+                                showReplyTools = false
+                                launchReplyVideoPicker()
+                            },
+                        )
+                    }
                     if (selectedTab == WorkspaceThreadTab.DISCUSSION && !conversationReadOnly) {
                         val composerMessages = thread?.let { value -> listOf(value.item) + value.replies }.orEmpty()
                         val composerReplyTarget = composerMessages.firstOrNull { it.itemId == replyToItemId }
@@ -8423,11 +9081,7 @@ private fun ThreadDialog(
                                 draft = it.take(2_000)
                                 error = null
                             },
-                            placeholder = when {
-                                friendSpace -> "回复好友…"
-                                coachPerspective -> "回复学员…"
-                                else -> "回复教练…"
-                            },
+                            placeholder = if (friendSpace) "回复好友…" else "说点什么…",
                             replyTarget = composerReplyTarget,
                             replyAtSecondsText = replyAtSecondsText,
                             onReplyAtSecondsChange = {
@@ -8443,11 +9097,30 @@ private fun ThreadDialog(
                             requestingVoicePermission = requestingVoicePermission,
                             cancellingVoice = cancellingVoice,
                             onToggleInputMode = { prefersVoiceInput = !prefersVoiceInput },
+                            onInputFocusChanged = { focused ->
+                                composerFocused = focused
+                                if (focused && teachingDetail) {
+                                    teachingPanel = TeachingDetailPanel.DISCUSSION
+                                    showReplyTools = false
+                                }
+                            },
                             onVoicePressStart = ::beginVoicePress,
                             onVoicePressCancelChange = { cancellingVoice = it },
                             onVoicePressEnd = ::finishVoiceRecording,
                             attachmentCount = attachmentCount,
-                            onToggleTools = { showReplyTools = true },
+                            onToggleTools = {
+                                if (teachingDetail && !displayedSource.isRemovedContent) {
+                                    val opening = !showReplyTools
+                                    showReplyTools = opening
+                                    if (opening) {
+                                        panelFocusManager.clearFocus(force = true)
+                                        panelKeyboard?.hide()
+                                        composerFocused = false
+                                    }
+                                } else {
+                                    showReplyTools = true
+                                }
+                            },
                             deliveryPeerName = deliveryPeerName,
                             noticeMessage = composerNotice,
                             restoredDraftNotice = showRestoredDraftNotice,
@@ -8484,6 +9157,8 @@ private fun ThreadDialog(
                             sending = sending,
                             studentPrivacyNote = !coachPerspective && !friendSpace,
                             onSend = { pendingVideo?.let(::sendVideoReply) ?: sendTextReply() },
+                            contentDiscussion = teachingDetail && !displayedSource.isRemovedContent,
+                            attachmentTrayOpen = showReplyTools,
                         )
                     } else {
                         Row(
@@ -8503,15 +9178,17 @@ private fun ThreadDialog(
                         }
                     }
                 }
+                viewingMemoId?.let { memoId ->
+                    citationRecords.firstOrNull { it.id == memoId }?.let { memo ->
+                        TeachingLinkedMemoOverlay(memo = memo, onBack = { viewingMemoId = null })
+                    }
+                }
             }
-        }
-        playingVideoUrl?.let { url ->
-            WorkspaceVideoPlayerDialog(url = url, onDismiss = { playingVideoUrl = null })
         }
         }
     }
 
-    if (showReplyTools) {
+    if (showReplyTools && (friendSpace || source.isRemovedContent)) {
         WorkspaceReplyToolsSheet(
             coachPerspective = coachPerspective,
             sourceIsPractice = source.resolvedKind == "student_practice",
@@ -8530,7 +9207,7 @@ private fun ThreadDialog(
                 else {
                     replyToItemId = source.itemId
                     replyAtSecondsText = ""
-                    selectedTab = WorkspaceThreadTab.CONTENT
+                    scope.launch { threadScrollState.animateScrollTo(threadScrollState.maxValue) }
                 }
             },
             onReferenceSource = {
@@ -8727,6 +9404,57 @@ private fun ThreadDialog(
                 }
             },
         )
+    }
+
+    if (showPracticeList) {
+        CoachPracticeListSheet(
+            studentName = peerName,
+            items = practiceItems,
+            currentItemId = source.itemId,
+            onDismiss = { showPracticeList = false },
+            onSelect = { item ->
+                showPracticeList = false
+                onSelectPractice(item)
+            },
+        )
+    }
+
+    analysisPlayback?.let { playback ->
+        if (framePlayback) {
+            WorkspaceFramePlayerScreen(
+                mediaUri = playback.uri,
+                title = playback.title,
+                onBack = {
+                    framePlayback = false
+                    analysisPlayback = null
+                },
+                onSwitchToReview = { framePlayback = false },
+            )
+        } else {
+        V2WorkspaceProfessionalAnalysisScreen(
+            mediaUri = playback.uri,
+            title = playback.title,
+            subtitle = playback.subtitle,
+            startsPlaying = true,
+            mode = V2ProfessionalAnalysisMode.STANDALONE_REVIEW,
+            onSwitchPlayer = { framePlayback = true },
+            onCancel = {
+                framePlayback = false
+                analysisPlayback = null
+            },
+            onRecordingReady = { recording ->
+                scope.launch {
+                    val saved = runCatching { saveExportedVideoToGallery(context, recording) }.isSuccess
+                    recording.delete()
+                    android.widget.Toast.makeText(
+                        context,
+                        if (saved) "录屏已保存到相册" else "录屏暂时无法保存",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+        )
+        }
     }
 
     analysisSource?.let { imported ->
@@ -9037,48 +9765,43 @@ private fun WorkspaceComposerRelatedMediaCard(
 }
 
 @SuppressLint("UnsafeOptInUsageError")
-internal val LocalPlayWorkspaceVideo = staticCompositionLocalOf<(String) -> Unit> { {} }
+internal val LocalPlayWorkspaceVideo = staticCompositionLocalOf<(String, String?) -> Unit> { { _, _ -> } }
 
-@Composable
-internal fun WorkspaceVideoPlayerDialog(
-    url: String,
-    onDismiss: () -> Unit,
-) {
-    val context = LocalContext.current
-    val player = remember(url) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(url))
-            playWhenReady = true
-            prepare()
-        }
+internal val LocalPreparingWorkspacePlaybackId = staticCompositionLocalOf<String?> { null }
+
+internal fun workspaceStreamPlaybackUrl(raw: String?): String? {
+    val value = raw?.trim().orEmpty()
+    if (value.isEmpty()) return null
+    val lower = value.lowercase()
+    return when {
+        lower.startsWith("https://") || lower.startsWith("http://") ||
+            lower.startsWith("file:") || lower.startsWith("content:") ||
+            value.startsWith("/") -> value
+        else -> null
     }
-    DisposableEffect(player) { onDispose { player.release() } }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        V2RoomPage(Modifier.fillMaxSize().testTag("workspace-video-player")) {
-            Column(Modifier.fillMaxSize()) {
-                V2NavTopBarCentered(title = "播放", onBack = onDismiss)
-                Box(
-                    Modifier.weight(1f).fillMaxWidth().background(Color.Black),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AndroidView(
-                        factory = { viewContext ->
-                            PlayerView(viewContext).apply {
-                                this.player = player
-                                useController = true
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            }
-                        },
-                        update = { it.player = player },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
+}
+
+private data class WorkspaceAnalysisPlayback(
+    val uri: String,
+    val title: String,
+    val subtitle: String?,
+)
+
+internal fun workspacePlaybackUrlInThread(thread: V2CoachThread?, lookupId: String): String? {
+    if (thread == null || lookupId.isBlank()) return null
+    val items = listOf(thread.item) + thread.replies
+    items.forEach { item ->
+        if (item.itemId == lookupId) {
+            val asset = item.primaryAsset?.takeUnless { it.isVoice }
+            return workspaceStreamPlaybackUrl(asset?.videoUrl ?: item.videoUrl)
         }
+        (listOfNotNull(item.primaryAsset) + item.attachments)
+            .firstOrNull { it.assetId == lookupId }
+            ?.videoUrl
+            ?.let(::workspaceStreamPlaybackUrl)
+            ?.let { return it }
     }
+    return null
 }
 
 @Composable
@@ -9373,6 +10096,7 @@ internal fun WorkspaceInlineReplyComposer(
     requestingVoicePermission: Boolean = false,
     cancellingVoice: Boolean = false,
     onToggleInputMode: () -> Unit,
+    onInputFocusChanged: (Boolean) -> Unit = {},
     onVoicePressStart: () -> Unit,
     onVoicePressCancelChange: (Boolean) -> Unit,
     onVoicePressEnd: (Boolean) -> Unit,
@@ -9398,18 +10122,21 @@ internal fun WorkspaceInlineReplyComposer(
     sending: Boolean,
     studentPrivacyNote: Boolean,
     onSend: () -> Unit,
+    contentDiscussion: Boolean = false,
+    attachmentTrayOpen: Boolean = false,
 ) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val voiceCancelThresholdPx = with(LocalDensity.current) { 52.dp.toPx() }
     Column(
-        Modifier.fillMaxWidth().background(DSColors.cardWhite)
-            .border(0.5.dp, DSColors.borderLine, RoundedCornerShape(topStart = 1.dp, topEnd = 1.dp))
-            .shadow(12.dp, ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.06f))
-            .navigationBarsPadding().padding(horizontal = 14.dp, vertical = 9.dp)
+        Modifier.fillMaxWidth().background(if (contentDiscussion) CoachPaper else Color.White)
             .testTag("workspace-thread-inline-composer"),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(if (contentDiscussion) ContentDivider else CoachLine))
+        Column(
+            Modifier.navigationBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
         noticeMessage?.let { message ->
             Row(
                 Modifier.fillMaxWidth().testTag("workspace-composer-transient-notice"),
@@ -9497,13 +10224,147 @@ internal fun WorkspaceInlineReplyComposer(
                 peerName = deliveryPeerName,
                 onStop = onStopDelivery,
             )
+        } else if (contentDiscussion) {
+            val editing = text.isNotBlank() || attachmentCount > 0
+            val voiceMode = prefersVoiceInput && !editing && !attachmentTrayOpen
+            Row(
+                Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.size(48.dp).clickable(enabled = !sending) {
+                        when {
+                            voiceMode -> onToggleInputMode()
+                            editing -> onToggleTools()
+                            attachmentTrayOpen -> {
+                                onToggleTools()
+                                if (!prefersVoiceInput) onToggleInputMode()
+                            }
+                            else -> onToggleInputMode()
+                        }
+                    }.then(if (editing) Modifier.testTag("workspace-thread-add-content") else Modifier),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (voiceMode) {
+                        Icon(Icons.Filled.Keyboard, "切换到文字输入", tint = CoachGreen, modifier = Modifier.size(22.dp))
+                    } else if (editing && attachmentTrayOpen) {
+                        Icon(Icons.Filled.Close, "关闭", tint = CoachGreen, modifier = Modifier.size(22.dp))
+                    } else if (editing) {
+                        Icon(Icons.Filled.Add, "添加内容", tint = CoachGreen, modifier = Modifier.size(22.dp))
+                    } else {
+                        TeachingWaveIcon(playing = false, modifier = Modifier.size(22.dp))
+                    }
+                }
+                if (voiceMode) {
+                    Box(
+                        Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
+                            .background(ContentInput)
+                            .border(1.dp, ContentDivider, RoundedCornerShape(12.dp))
+                            .then(
+                                if (sending) Modifier else Modifier.pointerInput(voiceCancelThresholdPx) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        down.consume()
+                                        onVoicePressStart()
+                                        var shouldCancel = false
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                            val nextShouldCancel = change.position.y - down.position.y < -voiceCancelThresholdPx
+                                            if (nextShouldCancel != shouldCancel) {
+                                                shouldCancel = nextShouldCancel
+                                                onVoicePressCancelChange(shouldCancel)
+                                            }
+                                            change.consume()
+                                            if (!change.pressed) {
+                                                onVoicePressEnd(shouldCancel)
+                                                break
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                            .testTag("workspace-thread-voice-input"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            workspaceVoiceInputTitle(
+                                requestingPermission = requestingVoicePermission,
+                                recording = recordingVoice,
+                                cancelling = cancellingVoice,
+                            ),
+                            color = if (cancellingVoice) DSColors.flagRed else ContentText,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                        )
+                    }
+                } else {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = onTextChange,
+                        enabled = !sending,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = ContentText,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                        ),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        maxLines = 4,
+                        modifier = Modifier.weight(1f).heightIn(min = 40.dp).clip(RoundedCornerShape(12.dp))
+                            .background(ContentInput)
+                            .border(1.dp, ContentDivider, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .onFocusChanged { onInputFocusChanged(it.isFocused) }
+                            .testTag("workspace-thread-composer-input"),
+                        decorationBox = { innerTextField ->
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                                if (text.isBlank()) {
+                                    Text(placeholder, color = ContentSecondary, fontSize = 15.sp, lineHeight = 22.sp)
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
+                }
+                if (editing) {
+                    Box(
+                        Modifier.padding(start = 8.dp).height(40.dp).clip(RoundedCornerShape(12.dp))
+                            .background(if (canSend) CoachGreen else ContentDisabled)
+                            .clickable(enabled = canSend && !sending, onClick = onSend)
+                            .padding(horizontal = 14.dp)
+                            .testTag("workspace-thread-send-reply"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            if (sending) "发送中" else "发送",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                } else {
+                    Box(
+                        Modifier.size(48.dp).clickable(enabled = !sending, onClick = onToggleTools)
+                            .testTag("workspace-thread-add-content"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (attachmentTrayOpen) Icons.Filled.Close else Icons.Filled.Add,
+                            if (attachmentTrayOpen) "关闭" else "添加内容",
+                            tint = CoachGreen,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
+            }
         } else Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
             Box(
-                Modifier.size(40.dp).clip(CircleShape).background(DSColors.mistGreen.copy(alpha = 0.72f))
+                Modifier.size(48.dp)
                     .clickable(enabled = !sending) {
                         focusManager.clearFocus(force = true)
                         keyboardController?.hide()
@@ -9514,16 +10375,16 @@ internal fun WorkspaceInlineReplyComposer(
                 Icon(
                     if (prefersVoiceInput) Icons.Filled.Keyboard else Icons.Filled.Mic,
                     if (prefersVoiceInput) "切换到文字输入" else "切换到语音输入",
-                    tint = DSColors.fairway,
-                    modifier = Modifier.size(18.dp),
+                    tint = CoachGreen,
+                    modifier = Modifier.size(22.dp),
                 )
             }
 
             if (prefersVoiceInput) {
                 Box(
-                    Modifier.weight(1f).heightIn(min = 42.dp).clip(RoundedCornerShape(17.dp))
-                        .background(DSColors.warmWhite)
-                        .border(0.8.dp, DSColors.borderLine, RoundedCornerShape(17.dp))
+                    Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Color.White)
+                        .border(1.dp, CoachLine, RoundedCornerShape(14.dp))
                         .then(
                             if (sending) Modifier else Modifier.pointerInput(voiceCancelThresholdPx) {
                                 awaitEachGesture {
@@ -9567,18 +10428,19 @@ internal fun WorkspaceInlineReplyComposer(
                     value = text,
                     onValueChange = onTextChange,
                     enabled = !sending,
-                    textStyle = androidx.compose.ui.text.TextStyle(color = DSColors.inkGreen, fontSize = 14.sp, lineHeight = 20.sp),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = CoachInk, fontSize = 15.sp, lineHeight = 20.sp),
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     maxLines = 5,
-                    modifier = Modifier.weight(1f).heightIn(min = 42.dp).clip(RoundedCornerShape(17.dp))
-                        .background(DSColors.warmWhite)
-                        .border(0.8.dp, DSColors.borderLine, RoundedCornerShape(17.dp))
-                        .padding(horizontal = 13.dp, vertical = 10.dp)
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp))
+                        .background(Color.White)
+                        .border(1.dp, CoachLine, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 13.dp)
+                        .onFocusChanged { onInputFocusChanged(it.isFocused) }
                         .testTag("workspace-thread-composer-input"),
                     decorationBox = { innerTextField ->
                         Box(Modifier.fillMaxWidth()) {
                             if (text.isBlank()) {
-                                Text(placeholder, color = DSColors.shadowGray, fontSize = 14.sp)
+                                Text(placeholder, color = CoachMeta, fontSize = 15.sp)
                             }
                             innerTextField()
                         }
@@ -9587,7 +10449,7 @@ internal fun WorkspaceInlineReplyComposer(
             }
 
             Box(
-                Modifier.size(40.dp).clip(CircleShape).background(DSColors.mistGreen.copy(alpha = 0.72f))
+                Modifier.size(48.dp)
                     .clickable(enabled = !sending) {
                         focusManager.clearFocus(force = true)
                         keyboardController?.hide()
@@ -9595,7 +10457,7 @@ internal fun WorkspaceInlineReplyComposer(
                     }.testTag("workspace-thread-add-content"),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Add, "添加更多内容", tint = DSColors.fairway, modifier = Modifier.size(19.dp))
+                Icon(Icons.Filled.Add, "添加更多内容", tint = CoachGreen, modifier = Modifier.size(22.dp))
                 if (attachmentCount > 0) {
                     Box(
                         Modifier.align(Alignment.TopEnd).offset(x = 3.dp, y = (-3).dp).size(17.dp)
@@ -9609,17 +10471,18 @@ internal fun WorkspaceInlineReplyComposer(
             }
 
             Box(
-                Modifier.size(width = 54.dp, height = 42.dp).clip(RoundedCornerShape(16.dp))
-                    .background(if (canSend) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.28f))
+                Modifier.height(48.dp).widthIn(min = 64.dp).clip(RoundedCornerShape(14.dp))
+                    .background(if (canSend) CoachGreen else CoachSendIdle)
                     .clickable(enabled = canSend && !sending, onClick = onSend)
+                    .padding(horizontal = 14.dp)
                     .testTag("workspace-thread-send-reply"),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     if (sending) "发送中" else "发送",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
+                    color = if (canSend) Color.White else CoachSendIdleText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
             }
@@ -9688,6 +10551,7 @@ internal fun WorkspaceInlineReplyComposer(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
             )
+        }
         }
     }
 }
@@ -9824,6 +10688,10 @@ internal fun WorkspaceThreadContentCard(
     val duration = primaryVideo?.durationSeconds ?: item.durationSeconds
     val tags = workspaceThreadSourceTags(item)
     val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    val preparingPlayback = LocalPreparingWorkspacePlaybackId.current == item.itemId
+    var coverAspect by remember(item.itemId, coverUrl) {
+        mutableFloatStateOf(workspaceThreadVideoAspectRatio(item))
+    }
 
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(DSColors.cardWhite)
@@ -9848,88 +10716,77 @@ internal fun WorkspaceThreadContentCard(
                 )
             }
         } else if (item.hasVideoContent) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                Modifier.fillMaxWidth()
+                    .aspectRatio(coverAspect)
+                    .clip(RoundedCornerShape(17.dp)).background(Color.Black.copy(alpha = 0.90f))
+                    .clickable(enabled = !preparingPlayback) {
+                        primaryVideo?.let(onPlayAsset)
+                        playWorkspaceVideo(item.itemId, playableUrl)
+                    }.testTag("workspace-thread-source-video"),
+                contentAlignment = Alignment.Center,
             ) {
+                coverUrl?.let {
+                    AsyncImage(
+                        model = it,
+                        contentDescription = "原内容视频封面",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                        onSuccess = { state ->
+                            val width = state.result.drawable.intrinsicWidth
+                            val height = state.result.drawable.intrinsicHeight
+                            if (width > 0 && height > 0) {
+                                coverAspect = width.toFloat() / height.toFloat()
+                            }
+                        },
+                    )
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.12f)))
+                }
                 Box(
-                    Modifier.width(132.dp).height(176.dp)
-                        .clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.90f))
-                        .clickable(enabled = !playableUrl.isNullOrBlank()) {
-                            primaryVideo?.let(onPlayAsset)
-                            playWorkspaceVideo(playableUrl!!)
-                        }.testTag("workspace-thread-source-video"),
+                    Modifier.size(58.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.46f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    coverUrl?.let {
-                        AsyncImage(
-                            model = it,
-                            contentDescription = "原内容视频封面",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.12f)))
-                    }
-                    Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.46f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                    if (preparingPlayback) {
+                        CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
+                    } else {
                         Icon(
                             if (playableUrl.isNullOrBlank()) Icons.Filled.Refresh else Icons.Filled.PlayArrow,
                             contentDescription = if (playableUrl.isNullOrBlank()) "刷新视频" else "播放原视频",
                             tint = Color.White,
-                            modifier = Modifier.size(26.dp),
-                        )
-                    }
-                    duration?.let {
-                        Text(
-                            formatWorkspaceDuration(it),
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.Black.copy(alpha = 0.55f)).padding(horizontal = 6.dp, vertical = 3.dp),
+                            modifier = Modifier.size(28.dp),
                         )
                     }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                duration?.let {
                     Text(
-                        workspaceThreadSourceTitle(item, friendSpace),
-                        color = DSColors.inkGreen,
-                        fontSize = 16.sp,
+                        formatWorkspaceDuration(it),
+                        color = Color.White,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        workspaceThreadSourceMetadata(item, friendSpace),
-                        color = DSColors.shadowGray,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(9.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.58f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
             }
         }
 
-        if (item.isRemovedContent || !item.hasVideoContent) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(
-                    workspaceThreadSourceTitle(item, friendSpace),
-                    color = DSColors.inkGreen,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    workspaceThreadSourceMetadata(item, friendSpace),
-                    color = DSColors.shadowGray,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text(
+                workspaceThreadSourceTitle(item, friendSpace),
+                color = DSColors.inkGreen,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                workspaceThreadSourceMetadata(item, friendSpace),
+                color = DSColors.shadowGray,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
         }
 
         if (!item.isRemovedContent && tags.isNotEmpty()) {
@@ -10174,6 +11031,605 @@ private fun WorkspaceSaveToLibraryToggle(
     }
 }
 
+internal fun threadDiscussionVideos(thread: V2CoachThread?): List<V2CoachDiscussionResource> {
+    if (thread == null) return emptyList()
+    val entries = linkedMapOf<String, V2CoachDiscussionResource>()
+    thread.replies.filterNot(V2CoachWorkspaceItem::isRemovedContent).forEach { reply ->
+        (listOfNotNull(reply.primaryAsset) + reply.attachments)
+            .filter { asset -> !asset.isVoice && (asset.videoUrl != null || asset.coverUrl != null) }
+            .forEach { asset ->
+                val existing = entries[asset.assetId]
+                entries[asset.assetId] = if (existing == null) {
+                    V2CoachDiscussionResource(asset = asset, messageIds = listOf(reply.itemId))
+                } else {
+                    existing.copy(messageIds = (existing.messageIds + reply.itemId).distinct())
+                }
+            }
+    }
+    return entries.values.toList()
+}
+
+private enum class TeachingDetailPanel { DISCUSSION, MATERIALS }
+
+private val teachingAutoTitles = setOf(
+    "练习视频",
+    "挥杆视频",
+    "复练视频",
+    "教练分享",
+    "练习记录",
+    "分享内容",
+    "空间消息",
+)
+
+internal fun teachingThreadSummaryText(item: V2CoachWorkspaceItem): String? {
+    V2CoachWorkspaceItem.visibleCopy(item.text)?.let { return it }
+    val title = V2CoachWorkspaceItem.visibleCopy(item.title) ?: return null
+    return title.takeUnless { it in teachingAutoTitles }
+}
+
+internal fun teachingThreadContentTags(item: V2CoachWorkspaceItem): List<String> {
+    val tags = workspaceThreadSourceTags(item).toMutableList()
+    item.coachingFocus?.trim()?.takeIf { it.isNotEmpty() && it !in tags }?.let(tags::add)
+    return tags
+}
+
+@Composable
+private fun TeachingThreadVideoHeader(
+    item: V2CoachWorkspaceItem,
+    height: androidx.compose.ui.unit.Dp,
+    onPlayAsset: (com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit,
+) {
+    val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    val cover = item.primaryAsset?.coverUrl ?: item.coverUrl
+    val playable = item.primaryAsset?.videoUrl ?: item.videoUrl
+    val duration = item.primaryAsset?.durationSeconds ?: item.durationSeconds
+    Box(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(height)
+            .clip(RoundedCornerShape(16.dp))
+            .background(ContentMediaMatte)
+            .clickable {
+                item.primaryAsset?.let(onPlayAsset)
+                playWorkspaceVideo(item.itemId, playable)
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (!cover.isNullOrBlank()) {
+            AsyncImage(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        }
+        Icon(
+            Icons.Filled.PlayArrow,
+            "播放",
+            tint = Color.White,
+            modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.35f)),
+        )
+        duration?.takeIf { it.isFinite() && it > 0.0 }?.let {
+            Text(
+                teachingClock(it) ?: workspaceFeedDuration(it),
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.55f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TeachingThreadSummary(
+    item: V2CoachWorkspaceItem,
+    authorName: String,
+    statusLabel: String?,
+    showMemo: Boolean,
+    expanded: Boolean,
+    onOpenFullText: () -> Unit,
+    onOpenMemo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val summary = teachingThreadSummaryText(item)
+    var overflow by remember(summary) { mutableStateOf(false) }
+    val tags = teachingThreadContentTags(item)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        summary?.let { text ->
+            Text(
+                text,
+                color = ContentText,
+                fontSize = 16.sp,
+                lineHeight = 24.sp,
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { overflow = it.hasVisualOverflow },
+            )
+            if (overflow && !expanded) {
+                Row(
+                    Modifier.clickable(onClick = onOpenFullText),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("全文", color = CoachGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = CoachGreen,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
+        if (tags.isNotEmpty()) {
+            Text(
+                tags.joinToString("  "),
+                color = CoachGreen,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFE7F2EC))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "$authorName · ${teachingContentTime(item.createdAt)}",
+                color = ContentSecondary,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            statusLabel?.let { label ->
+                Text(
+                    label,
+                    color = if (label == "求点评") Color(0xFF8A6232) else CoachGreen,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(CircleShape)
+                        .background(if (label == "求点评") Color(0xFFF3E6D0) else Color.White)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            if (showMemo) {
+                Text(
+                    "查看 Memo",
+                    color = CoachGreen,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable(onClick = onOpenMemo),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeachingDiscussionEntry(
+    preview: String?,
+    onOpenDiscussion: () -> Unit,
+    onOpenMaterials: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.weight(1f).clickable(onClick = onOpenDiscussion),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("交流", color = CoachInk, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Icon(
+                    Icons.Filled.KeyboardArrowDown,
+                    contentDescription = "展开交流",
+                    tint = CoachMeta,
+                    modifier = Modifier.padding(start = 2.dp).size(18.dp),
+                )
+            }
+            Text(
+                "资料",
+                color = CoachGreen,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clickable(onClick = onOpenMaterials).padding(vertical = 4.dp),
+            )
+        }
+        preview?.let { text ->
+            Text(
+                text,
+                color = CoachBody,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenDiscussion),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TeachingDetailPanelBody(
+    panel: TeachingDetailPanel,
+    onSelect: (TeachingDetailPanel) -> Unit,
+    authorName: String,
+    originalText: String?,
+    replies: List<V2CoachWorkspaceItem>,
+    loading: Boolean,
+    syncError: String?,
+    loadingOlder: Boolean,
+    hasOlder: Boolean,
+    onLoadOlder: () -> Unit,
+    onRetrySync: () -> Unit,
+    friendSpace: Boolean,
+    coachPerspective: Boolean,
+    conversationReadOnly: Boolean,
+    displayedSource: V2CoachWorkspaceItem,
+    allMessages: List<V2CoachWorkspaceItem>,
+    savingAssetIds: Set<String>,
+    scrollToReplyItemId: String?,
+    onConsumeScrollTarget: () -> Unit,
+    onQuote: (String) -> Unit,
+    onDelete: (V2CoachWorkspaceItem) -> Unit,
+    onSaveAsset: ((com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit)?,
+    onPlayAsset: (com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit,
+    resources: List<V2CoachDiscussionResource>,
+    canAddResource: Boolean,
+    onAddResource: () -> Unit,
+    onOpenResourceDiscussion: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val voicePlayer = remember { TeachingVoicePlayer() }
+    DisposableEffect(voicePlayer) {
+        onDispose { voicePlayer.release() }
+    }
+    Column(modifier) {
+        Row(
+            Modifier.fillMaxWidth().height(44.dp).padding(start = 12.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TeachingPanelTab(
+                title = "交流",
+                selected = panel == TeachingDetailPanel.DISCUSSION,
+                onClick = { onSelect(TeachingDetailPanel.DISCUSSION) },
+            )
+            Spacer(Modifier.width(12.dp))
+            TeachingPanelTab(
+                title = "资料",
+                selected = panel == TeachingDetailPanel.MATERIALS,
+                onClick = { onSelect(TeachingDetailPanel.MATERIALS) },
+            )
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(ContentSectionLine))
+        when (panel) {
+            TeachingDetailPanel.DISCUSSION -> Column(
+                Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp, bottom = 4.dp),
+            ) {
+                if (hasOlder) {
+                    WorkspaceLoadOlderRepliesButton(loading = loadingOlder, onClick = onLoadOlder)
+                }
+                if (loading) {
+                    WorkspaceThreadDiscussionSyncState(errorMessage = syncError, onRetry = onRetrySync)
+                } else {
+                    if (!originalText.isNullOrBlank()) {
+                        TeachingContentMessage(
+                            item = displayedSource,
+                            senderName = authorName,
+                            origin = true,
+                            voicePlayer = voicePlayer,
+                            modifier = Modifier.padding(vertical = 10.dp),
+                        )
+                        if (replies.isNotEmpty()) {
+                            Box(Modifier.fillMaxWidth().height(1.dp).background(ContentSectionLine))
+                        }
+                    }
+                    if (replies.isNotEmpty()) {
+                        val unreadBoundary = workspaceFirstUnreadReplyIndex(
+                            source = displayedSource,
+                            replies = replies,
+                            coachPerspective = coachPerspective,
+                            friendSpace = friendSpace,
+                        )
+                        val unreadCount = unreadBoundary?.let { boundary ->
+                            workspaceUnreadReplyCount(
+                                replies = replies,
+                                boundary = boundary,
+                                coachPerspective = coachPerspective,
+                                friendSpace = friendSpace,
+                            )
+                        } ?: 0
+                        replies.forEachIndexed { index, reply ->
+                            if (unreadBoundary == index) {
+                                WorkspaceNewReplyDivider(
+                                    count = unreadCount,
+                                    coachPerspective = coachPerspective,
+                                    friendSpace = friendSpace,
+                                )
+                                Spacer(Modifier.height(12.dp))
+                            }
+                            val isMine = workspaceReplyIsMine(reply, coachPerspective, friendSpace)
+                            val referenced = allMessages.firstOrNull { it.itemId == reply.replyToItemId }
+                            val senderName = reply.sender?.nickname?.trim()?.takeIf(String::isNotEmpty)
+                                ?: if (isMine) "我" else if (reply.senderRole == "coach") "教练" else "学员"
+                            TeachingContentMessage(
+                                item = reply,
+                                senderName = senderName,
+                                voicePlayer = voicePlayer,
+                                referencedItem = referenced,
+                                savingAssetIds = savingAssetIds,
+                                onSaveAsset = onSaveAsset,
+                                onPlayAsset = onPlayAsset,
+                                onDelete = if (reply.isMine && reply.deletedAt == null) {
+                                    { onDelete(reply) }
+                                } else null,
+                                onQuote = if (!conversationReadOnly && !isMine && reply.deletedAt == null) {
+                                    { onQuote(reply.itemId) }
+                                } else null,
+                                onOpenReference = referenced?.let { target ->
+                                    {
+                                        if (target.parentItemId == null) {
+                                            onSelect(TeachingDetailPanel.DISCUSSION)
+                                        }
+                                        onOpenResourceDiscussion(target.itemId)
+                                    }
+                                },
+                                bringIntoView = scrollToReplyItemId == reply.itemId,
+                                onBroughtIntoView = {
+                                    if (scrollToReplyItemId == reply.itemId) onConsumeScrollTarget()
+                                },
+                                modifier = Modifier.padding(vertical = 10.dp),
+                            )
+                            if (index < replies.lastIndex) {
+                                Box(Modifier.fillMaxWidth().height(1.dp).background(ContentSectionLine))
+                            }
+                        }
+                    }
+                    syncError?.let { Text(it, color = DSColors.flagRed, fontSize = 11.sp) }
+                }
+            }
+            TeachingDetailPanel.MATERIALS -> Column(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("相关资料", color = CoachInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                if (resources.isEmpty()) {
+                    Text("还没有资料", color = CoachMeta, fontSize = 13.sp)
+                } else {
+                    resources.forEach { resource ->
+                        TeachingMaterialRow(
+                            resource = resource,
+                            onOpenDiscussion = onOpenResourceDiscussion,
+                            onPlayAsset = onPlayAsset,
+                        )
+                    }
+                }
+                if (canAddResource) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFE7F2EC))
+                            .border(1.dp, CoachGreen, RoundedCornerShape(10.dp))
+                            .clickable(onClick = onAddResource)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, tint = CoachGreen, modifier = Modifier.size(16.dp))
+                        Text("添加资料", color = CoachGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TeachingPanelTab(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier.width(64.dp).clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            title,
+            color = if (selected) CoachGreen else ContentSecondary,
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+        Box(
+            Modifier.padding(top = 4.dp).size(width = 40.dp, height = 3.dp)
+                .background(if (selected) CoachGreen else Color.Transparent),
+        )
+    }
+}
+
+@Composable
+private fun TeachingMaterialRow(
+    resource: V2CoachDiscussionResource,
+    onOpenDiscussion: (String?) -> Unit,
+    onPlayAsset: (com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit,
+) {
+    val asset = resource.asset
+    val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(width = 72.dp, height = 48.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE7EFE8))
+                .clickable {
+                    onPlayAsset(asset)
+                    playWorkspaceVideo(asset.assetId, asset.videoUrl)
+                },
+        ) {
+            asset.coverUrl?.let { AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+            Icon(Icons.Filled.PlayArrow, "播放", tint = Color.White, modifier = Modifier.align(Alignment.Center).size(18.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                asset.title.ifBlank { "相关资料" },
+                color = CoachInk,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "查看交流位置",
+                color = CoachGreen,
+                fontSize = 12.sp,
+                modifier = Modifier.clickable { onOpenDiscussion(resource.messageIds.firstOrNull()) },
+            )
+        }
+    }
+}
+
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun TeachingLinkedMemoOverlay(
+    memo: V2Memo,
+    onBack: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize().background(Color.White)) {
+        if (memo.hasVideo) {
+            V2VideoMemoPlayerScreen(memoId = memo.id, onBack = onBack)
+        } else {
+            V2MemoDetailScreen(memoId = memo.id, onBack = onBack)
+        }
+    }
+}
+
+@Composable
+private fun TeachingThreadMaterialCard(
+    resource: V2CoachDiscussionResource,
+    onOpenDiscussion: (String?) -> Unit,
+    onPlayAsset: (com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit,
+) {
+    val asset = resource.asset
+    val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    Column(Modifier.width(132.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(
+            Modifier.fillMaxWidth().height(78.dp).clip(RoundedCornerShape(10.dp)).background(DSColors.mistGreen)
+                .clickable {
+                    onPlayAsset(asset)
+                    playWorkspaceVideo(asset.assetId, asset.videoUrl)
+                },
+        ) {
+            asset.coverUrl?.let {
+                AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+            Icon(Icons.Filled.PlayArrow, "播放", tint = Color.White, modifier = Modifier.align(Alignment.Center).size(22.dp))
+        }
+        Text(
+            asset.title.ifBlank { "相关资料" },
+            color = DSColors.inkGreen,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            "查看交流位置",
+            color = CoachGreen,
+            fontSize = 11.sp,
+            modifier = Modifier.clickable { onOpenDiscussion(resource.messageIds.firstOrNull()) },
+        )
+    }
+}
+
+@Composable
+private fun CoachThreadPracticeBar(
+    item: V2CoachWorkspaceItem,
+    onOpenList: () -> Unit,
+    onPlayAsset: (com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit,
+) {
+    val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    val cover = item.primaryAsset?.coverUrl ?: item.coverUrl
+    val playable = item.primaryAsset?.videoUrl ?: item.videoUrl
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(width = 86.dp, height = 56.dp).clip(RoundedCornerShape(10.dp)).background(DSColors.mistGreen)
+                .clickable {
+                    item.primaryAsset?.let(onPlayAsset)
+                    playWorkspaceVideo(item.itemId, playable)
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!cover.isNullOrBlank()) {
+                AsyncImage(cover, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+            Icon(Icons.Filled.PlayArrow, "播放", tint = Color.White, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                workspaceThreadSourceTitle(item, friendSpace = false),
+                color = DSColors.inkGreen,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(workspaceFeedDate(item.createdAt), color = DSColors.shadowGray, fontSize = 11.sp)
+        }
+        Text(
+            "练习列表",
+            color = CoachGreen,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.clip(CircleShape).background(CoachPaper).clickable(onClick = onOpenList)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun CoachRelatedVideoRow(
+    resource: V2CoachDiscussionResource,
+    onOpenDiscussion: (String?) -> Unit,
+    onPlayAsset: (com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit,
+) {
+    val asset = resource.asset
+    val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White).padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(width = 86.dp, height = 56.dp).clip(RoundedCornerShape(10.dp)).background(DSColors.mistGreen)
+                .clickable {
+                    onPlayAsset(asset)
+                    playWorkspaceVideo(asset.assetId, asset.videoUrl)
+                },
+        ) {
+            asset.coverUrl?.let {
+                AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                asset.title.ifBlank { "相关视频" },
+                color = DSColors.inkGreen,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "查看交流位置",
+                color = CoachGreen,
+                fontSize = 12.sp,
+                modifier = Modifier.clickable { onOpenDiscussion(resource.messageIds.firstOrNull()) },
+            )
+        }
+    }
+}
+
 @Composable
 internal fun ThreadResourceList(
     resources: List<V2CoachDiscussionResource>,
@@ -10268,6 +11724,7 @@ private fun WorkspaceThreadResourceCard(
 ) {
     val asset = resource.asset
     val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    val preparingPlayback = LocalPreparingWorkspacePlaybackId.current == asset.assetId
     var menuExpanded by remember { mutableStateOf(false) }
     Column(
         modifier.shadow(8.dp, RoundedCornerShape(17.dp), ambientColor = DSColors.deepGreen.copy(alpha = 0.045f))
@@ -10279,9 +11736,9 @@ private fun WorkspaceThreadResourceCard(
         Box(
             Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp))
                 .background(DSColors.mistGreen)
-                .clickable(enabled = !asset.videoUrl.isNullOrBlank()) {
+                .clickable(enabled = !preparingPlayback) {
                     onPlayAsset(asset)
-                    playWorkspaceVideo(asset.videoUrl!!)
+                    playWorkspaceVideo(asset.assetId, asset.videoUrl)
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -10295,7 +11752,16 @@ private fun WorkspaceThreadResourceCard(
                 Modifier.size(38.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.46f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, "播放资料", tint = Color.White, modifier = Modifier.size(22.dp))
+                if (preparingPlayback) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        if (asset.videoUrl.isNullOrBlank()) Icons.Filled.Refresh else Icons.Filled.PlayArrow,
+                        if (asset.videoUrl.isNullOrBlank()) "刷新视频" else "播放资料",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
             asset.durationSeconds?.let { duration ->
                 Text(
@@ -10397,6 +11863,7 @@ internal fun ThreadMessage(
 ) {
     val context = LocalContext.current
     val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    val preparingPlaybackId = LocalPreparingWorkspacePlaybackId.current
     val primaryVideo = item.primaryAsset?.takeUnless { it.isVoice }
     val playableUrl = primaryVideo?.videoUrl ?: item.videoUrl
     var expanded by rememberSaveable(item.itemId) { mutableStateOf(false) }
@@ -10510,19 +11977,21 @@ internal fun ThreadMessage(
                                     coverUrl = primaryVideo.coverUrl ?: item.coverUrl,
                                     playableUrl = playableUrl,
                                     duration = primaryVideo.durationSeconds ?: item.durationSeconds,
+                                    preparing = preparingPlaybackId == item.itemId,
                                     onPlay = {
                                         onPlayAsset?.invoke(primaryVideo)
-                                        playWorkspaceVideo(playableUrl!!)
+                                        playWorkspaceVideo(item.itemId, playableUrl)
                                     },
                                 )
                             }
-                        } else if (item.hasVideoContent) {
+                        }                         else if (item.hasVideoContent && !teachingItemIsAudioOnly(item)) {
                             WorkspaceDiscussionDirectVideoCard(
                                 coverUrl = item.coverUrl,
                                 playableUrl = item.videoUrl,
                                 duration = item.durationSeconds,
+                                preparing = preparingPlaybackId == item.itemId,
                                 onPlay = {
-                                    playWorkspaceVideo(item.videoUrl!!)
+                                    playWorkspaceVideo(item.itemId, item.videoUrl)
                                 },
                             )
                         }
@@ -10695,11 +12164,12 @@ private fun WorkspaceDiscussionDirectVideoCard(
     coverUrl: String?,
     playableUrl: String?,
     duration: Double?,
+    preparing: Boolean = false,
     onPlay: () -> Unit,
 ) {
     Box(
         Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(12.dp))
-            .background(Color.Black.copy(alpha = 0.90f)).clickable(enabled = !playableUrl.isNullOrBlank(), onClick = onPlay),
+            .background(Color.Black.copy(alpha = 0.90f)).clickable(enabled = !preparing, onClick = onPlay),
         contentAlignment = Alignment.Center,
     ) {
         coverUrl?.let {
@@ -10707,12 +12177,16 @@ private fun WorkspaceDiscussionDirectVideoCard(
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.12f)))
         }
         Box(Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.46f)), contentAlignment = Alignment.Center) {
-            Icon(
-                if (playableUrl.isNullOrBlank()) Icons.Filled.Refresh else Icons.Filled.PlayArrow,
-                if (playableUrl.isNullOrBlank()) "刷新视频" else "播放视频",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp),
-            )
+            if (preparing) {
+                CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    if (playableUrl.isNullOrBlank()) Icons.Filled.Refresh else Icons.Filled.PlayArrow,
+                    if (playableUrl.isNullOrBlank()) "刷新视频" else "播放视频",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
         duration?.let {
             Text(
@@ -10736,12 +12210,13 @@ private fun WorkspaceDiscussionCompactVideoCard(
     onPlayAsset: ((com.mygolfswing.app.data.coach.V2CoachWorkspaceAsset) -> Unit)?,
 ) {
     val playWorkspaceVideo = LocalPlayWorkspaceVideo.current
+    val preparingPlayback = LocalPreparingWorkspacePlaybackId.current == asset.assetId
     Column(
         Modifier.width(204.dp).clip(RoundedCornerShape(12.dp)).background(DSColors.cardWhite)
             .border(0.8.dp, Color.Black.copy(alpha = 0.035f), RoundedCornerShape(12.dp))
-            .clickable(enabled = !asset.videoUrl.isNullOrBlank()) {
+            .clickable(enabled = !preparingPlayback) {
                 onPlayAsset?.invoke(asset)
-                playWorkspaceVideo(asset.videoUrl!!)
+                playWorkspaceVideo(asset.assetId, asset.videoUrl)
             },
     ) {
         Box(
@@ -10751,7 +12226,16 @@ private fun WorkspaceDiscussionCompactVideoCard(
             AsyncImage(asset.coverUrl, sourceLabel, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.08f)))
             Box(Modifier.size(34.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.48f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(19.dp))
+                if (preparingPlayback) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 1.5.dp)
+                } else {
+                    Icon(
+                        if (asset.videoUrl.isNullOrBlank()) Icons.Filled.Refresh else Icons.Filled.PlayArrow,
+                        if (asset.videoUrl.isNullOrBlank()) "刷新视频" else "播放视频",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
             }
             asset.durationSeconds?.let {
                 Text(
@@ -10931,7 +12415,7 @@ internal fun workspaceReplyIsMine(
         (!coachPerspective && reply.senderRole != "coach")
 }
 
-private fun workspaceThreadInstant(raw: String?): java.time.Instant? = raw?.let { value ->
+internal fun workspaceThreadInstant(raw: String?): java.time.Instant? = raw?.let { value ->
     runCatching { java.time.OffsetDateTime.parse(value).toInstant() }
         .recoverCatching { java.time.Instant.parse(value) }.getOrNull()
 }
@@ -10950,19 +12434,32 @@ private fun workspaceReceiptTimeSuffix(raw: String?): String {
 }
 
 @Composable
-internal fun WorkspaceDiscussionEmptyState() {
+internal fun WorkspaceDiscussionEmptyState(videoContext: Boolean = true) {
     Column(
-        Modifier.fillMaxWidth().padding(vertical = 46.dp).testTag("workspace-thread-discussion-empty"),
+        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp).testTag("workspace-thread-discussion-empty"),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Icon(Icons.Filled.ChatBubble, null, tint = DSColors.fairway.copy(alpha = 0.72f), modifier = Modifier.size(24.dp))
+        if (videoContext) {
+            Image(
+                painter = painterResource(R.drawable.teaching_discussion_empty),
+                contentDescription = null,
+                modifier = Modifier.width(110.dp).aspectRatio(120f / 96f),
+                contentScale = ContentScale.Fit,
+            )
+        }
         Text(
-            "说说你的想法，也可以引用素材一起讨论",
-            color = DSColors.shadowGray,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
+            "还没有交流",
+            color = CoachInk,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        Text(
+            if (videoContext) "围绕这段视频，说说你的想法" else "发一条消息，开始聊聊",
+            color = CoachMeta,
+            fontSize = 13.sp,
             textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }

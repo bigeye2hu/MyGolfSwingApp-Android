@@ -18,8 +18,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,15 +29,14 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -50,21 +47,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.store.V2CategoryStore
-import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.V2BackHandler
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 /**
  * 创建文字 Memo 页（对齐 iOS `V2MemoCreateTextView`）。
@@ -72,14 +70,18 @@ import java.util.UUID
 @Composable
 fun V2MemoCreateTextScreen(
     onClose: () -> Unit = {},
+    onSaved: () -> Unit = onClose,
+    persistCreatedMemo: (suspend (V2Memo) -> Unit)? = null,
 ) {
-    val goals by V2GoalStore.goals.collectAsState()
     var title by rememberSaveable { mutableStateOf("") }
     var body by rememberSaveable { mutableStateOf("") }
-    var selectedTagIds by remember { mutableStateOf(setOf<String>()) }
-    var selectedGoalIds by remember { mutableStateOf(setOf<UUID>()) }
-    var showDiscardConfirm by remember { mutableStateOf(false) }
-    var showAttachmentPlan by remember { mutableStateOf(false) }
+    var selectedTagIds by rememberSaveable(
+        stateSaver = listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) { mutableStateOf(emptySet<String>()) }
+    var showDiscardConfirm by rememberSaveable { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -87,32 +89,34 @@ fun V2MemoCreateTextScreen(
     val canSave = title.trim().isNotEmpty() && body.trim().isNotEmpty() && !saving
     val hasDraft = title.isNotBlank() ||
         body.isNotBlank() ||
-        selectedTagIds.isNotEmpty() ||
-        selectedGoalIds.isNotEmpty()
+        selectedTagIds.isNotEmpty()
     fun attemptClose() {
         if (saving) return
         if (hasDraft) showDiscardConfirm = true else onClose()
     }
     fun saveMemo() {
-        if (!canSave) return
+        if (saving || !canSave) return
+        saving = true
+        saveError = null
+        val draftTitle = title.trim()
+        val draftBody = body.trim()
+        val draftTagIds = selectedTagIds.toList()
         scope.launch {
-            saving = true
-            saveError = null
             try {
-                val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
-                val trimmedTitle = title.trim()
-                val trimmedBody = body.trim()
-                val topic = V2MemoBridge.inferTopic(null, tagNames, trimmedTitle)
+                val tagNames = V2CategoryStore.tagNamesFor(draftTagIds.toSet())
+                val topic = V2MemoBridge.inferTopic(null, tagNames, draftTitle)
                 val memo = V2Memo.textMemo(
-                    title = trimmedTitle,
-                    body = trimmedBody,
+                    title = draftTitle,
+                    body = draftBody,
                     topic = topic,
                     tags = tagNames,
-                    linkedGoalIds = selectedGoalIds.toList(),
-                ).copy(tagIds = selectedTagIds.toList())
-                V2MemoStore.createAndWait(memo)
-                selectedGoalIds.forEach { goalId -> V2GoalStore.linkMemo(memo.id, goalId) }
-                onClose()
+                ).copy(tagIds = draftTagIds)
+                if (persistCreatedMemo != null) {
+                    persistCreatedMemo(memo)
+                } else {
+                    V2MemoStore.createAndWait(memo)
+                }
+                onSaved()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -130,6 +134,7 @@ fun V2MemoCreateTextScreen(
             .fillMaxSize()
             .background(TextMemoCreateSurface),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             CreateMemoNavBar(
                 onClose = ::attemptClose,
@@ -152,19 +157,11 @@ fun V2MemoCreateTextScreen(
                     body = body,
                     onBodyChange = { body = it.take(TextMemoBodyMaxLength) },
                 )
-                AttachVideoReferenceRow(onClick = { showAttachmentPlan = true })
+                AttachVideoReferenceRow()
                 V2MemoTagPicker(
                     selectedTagIds = selectedTagIds,
                     onSelectedTagIdsChange = { selectedTagIds = it },
                 )
-                LinkedGoalsSection(
-                    goals = goals.filter { it.status == V2Goal.Status.ACTIVE },
-                    selected = selectedGoalIds,
-                    onToggle = { id ->
-                        selectedGoalIds = if (id in selectedGoalIds) selectedGoalIds - id else selectedGoalIds + id
-                    },
-                )
-
             }
         }
 
@@ -177,53 +174,26 @@ fun V2MemoCreateTextScreen(
     }
 
     saveError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { saveError = null },
-            title = { Text("保存失败") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { saveError = null }) {
-                    Text("好", color = Color(0xFF2D6A4F))
-                }
-            },
+        VideoMemoOperationFailureDialog(
+            title = "保存失败",
+            message = message,
+            primaryLabel = "好",
+            onPrimary = { saveError = null },
+            onDismiss = { saveError = null },
         )
     }
 
     if (showDiscardConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDiscardConfirm = false },
-            title = { Text("放弃这条 Memo？") },
-            text = { Text("未保存的内容将丢失。") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDiscardConfirm = false
-                        onClose()
-                    },
-                ) {
-                    Text("放弃", color = Color(0xFFC0392B))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardConfirm = false }) {
-                    Text("继续编辑")
-                }
+        VideoMemoDiscardSheet(
+            editing = false,
+            onContinue = { showDiscardConfirm = false },
+            onDiscard = {
+                showDiscardConfirm = false
+                onClose()
             },
         )
     }
 
-    if (showAttachmentPlan) {
-        AlertDialog(
-            onDismissRequest = { showAttachmentPlan = false },
-            title = { Text("视频参考替代方案") },
-            text = { Text("当前文字 Memo 会先保留心得、标签和目标关联；需要带视频复盘时，可以创建视频 Memo，或在目标里关联已有 Memo。") },
-            confirmButton = {
-                TextButton(onClick = { showAttachmentPlan = false }) {
-                    Text("知道了", color = Color(0xFF2D6A4F))
-                }
-            },
-        )
-    }
 }
 
 private val DSPadding = 16.dp
@@ -271,7 +241,7 @@ private fun CreateMemoNavBar(
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
-            Text(text = "新建文字 Memo", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+            Text(text = "记一个发现", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
             Spacer(modifier = Modifier.weight(1f))
             Spacer(modifier = Modifier.size(32.dp))
         }
@@ -311,7 +281,7 @@ private fun TitleInputSection(
         BasicTextField(
             value = title,
             onValueChange = onTitleChange,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("text-memo-title-field"),
             singleLine = true,
             textStyle = TextStyle(
                 fontSize = 22.sp,
@@ -366,7 +336,8 @@ private fun BodyInputCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .defaultMinSize(minHeight = 200.dp)
-                    .padding(end = 44.dp),
+                    .padding(end = 44.dp)
+                    .testTag("text-memo-body-field"),
                 textStyle = TextStyle(fontSize = 15.sp, color = Color(0xFF1B2A21)),
                 cursorBrush = SolidColor(Color(0xFF2D6A4F)),
                 decorationBox = { inner ->
@@ -497,15 +468,15 @@ private fun OutlineField(
 }
 
 @Composable
-private fun AttachVideoReferenceRow(onClick: () -> Unit) {
+private fun AttachVideoReferenceRow() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(0.7f)
+            .semantics { contentDescription = "挂视频参考暂未接入" }
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFFFAF7F0))
             .border(width = 1.dp, color = Color(0xFFE5E7EB), shape = RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -525,64 +496,6 @@ private fun AttachVideoReferenceRow(onClick: () -> Unit) {
             modifier = Modifier.size(11.dp),
         )
     }
-}
-
-@Composable
-private fun LinkedGoalsSection(
-    goals: List<V2Goal>,
-    selected: Set<UUID>,
-    onToggle: (UUID) -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        SectionLabelInline("关联到目标")
-        if (goals.isEmpty()) {
-            Text("还没有进行中的目标", fontSize = 12.sp, color = Color(0xFF9CA3AF), modifier = Modifier.padding(vertical = 8.dp))
-        } else {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(goals, key = { it.id }) { goal ->
-                    val on = goal.id in selected
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(if (on) Color(0xFFE8F5E9) else Color.White)
-                            .border(1.dp, if (on) Color(0xFF2D6A4F) else Color(0xFFE5E7EB), RoundedCornerShape(50))
-                            .clickable { onToggle(goal.id) }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Flag,
-                            contentDescription = null,
-                            tint = if (on) Color(0xFF2D6A4F) else Color(0xFF9CA3AF),
-                            modifier = Modifier.size(10.dp),
-                        )
-                        Text(
-                            text = goal.title,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (on) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionLabelInline(text: String) {
-    Text(
-        text = text,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Bold,
-        color = Color(0xFF1B2A21),
-    )
 }
 
 @Composable
@@ -609,11 +522,11 @@ private fun TextMemoBottomSaveBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(top = 12.dp, bottom = 32.dp),
+                .padding(top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "将保存到 随手记 · 文字 Memo",
+                text = "先保存。没有字数目标，也不会自动分享",
                 fontSize = 11.sp,
                 color = Color(0xFF9CA3AF),
                 modifier = Modifier.fillMaxWidth(),
@@ -622,15 +535,16 @@ private fun TextMemoBottomSaveBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(40.dp)
                     .clip(RoundedCornerShape(28.dp))
                     .background(Color(0xFF2D6A4F).copy(alpha = if (canSubmit) 1f else 0.4f))
+                    .testTag("text-memo-save")
                     .clickable(enabled = canSubmit, onClick = onSubmit),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    text = if (saving) "保存中…" else "保存文字 Memo",
+                    text = if (saving) "保存中…" else "保存",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,

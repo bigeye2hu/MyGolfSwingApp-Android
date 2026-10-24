@@ -7,7 +7,9 @@ import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2PlazaCategoryChip
 import com.mygolfswing.app.data.model.V2PlazaCoach
 import com.mygolfswing.app.data.model.V2PlazaVideo
+import com.mygolfswing.app.data.model.V2PlazaSortOption
 import com.mygolfswing.app.data.model.V2Topic
+import com.mygolfswing.app.data.repo.normalizedPlazaCoachName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +45,8 @@ import java.util.UUID
  * - Debug 包网络请求失败时回退 mock 数据，方便开发调试
  * - Release 包不展示 mock，避免上线用户误把示例内容当成真实广场资源
  */
+internal const val PLAZA_WATCH_HISTORY_LIMIT = 200
+
 object V2PlazaStore {
 
     private val repo get() = ServiceLocator.plazaRepo
@@ -51,7 +55,6 @@ object V2PlazaStore {
     private const val WATCH_HISTORY_PREFS = "v2_plaza_watch_history"
     private const val SAVED_VIDEO_PREFS = "v2_plaza_saved_videos"
     private const val LIKED_VIDEO_PREFS = "v2_plaza_liked_videos"
-    private const val WATCH_HISTORY_LIMIT = 50
     private val allowMockFallback: Boolean
         get() = ServiceLocator.appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
@@ -60,6 +63,9 @@ object V2PlazaStore {
 
     private val _selectedCategoryId = MutableStateFlow("all")
     val selectedCategoryId: StateFlow<String> = _selectedCategoryId.asStateFlow()
+
+    private val _selectedSort = MutableStateFlow(V2PlazaSortOption.LATEST)
+    val selectedSort: StateFlow<V2PlazaSortOption> = _selectedSort.asStateFlow()
 
     private val _heroVideo = MutableStateFlow<V2PlazaVideo?>(null)
     val heroVideo: StateFlow<V2PlazaVideo?> = _heroVideo.asStateFlow()
@@ -94,13 +100,23 @@ object V2PlazaStore {
     private val _savedVideoCache = MutableStateFlow<List<V2PlazaVideo>>(emptyList())
     val savedVideoCache: StateFlow<List<V2PlazaVideo>> = _savedVideoCache.asStateFlow()
 
-    private val _showSavedOnly = MutableStateFlow(false)
-    val showSavedOnly: StateFlow<Boolean> = _showSavedOnly.asStateFlow()
+    private val _favoriteVideos = MutableStateFlow<List<V2PlazaVideo>>(emptyList())
+    val favoriteVideos: StateFlow<List<V2PlazaVideo>> = _favoriteVideos.asStateFlow()
+
+    private val _isLoadingFavorites = MutableStateFlow(false)
+    val isLoadingFavorites: StateFlow<Boolean> = _isLoadingFavorites.asStateFlow()
+
+    private val _favoriteErrorMessage = MutableStateFlow<String?>(null)
+    val favoriteErrorMessage: StateFlow<String?> = _favoriteErrorMessage.asStateFlow()
+
+    private val _favoriteOpenRequest = MutableStateFlow(0L)
+    val favoriteOpenRequest: StateFlow<Long> = _favoriteOpenRequest.asStateFlow()
 
     private val _watchHistory = MutableStateFlow<List<V2PlazaWatchHistoryItem>>(emptyList())
     val watchHistory: StateFlow<List<V2PlazaWatchHistoryItem>> = _watchHistory.asStateFlow()
 
     private var nextOffset = 0
+    private var refreshVersion = 0L
     private var watchHistoryUserId: String = ""
     private var savedVideoUserId: String = ""
     private var likedVideoUserId: String = ""
@@ -125,13 +141,17 @@ object V2PlazaStore {
         _savedIds.value = emptySet()
         _likedIds.value = emptySet()
         _savedVideoCache.value = emptyList()
+        _favoriteVideos.value = emptyList()
+        _isLoadingFavorites.value = false
+        _favoriteErrorMessage.value = null
         _videos.value = emptyList()
         _heroVideo.value = null
         _searchKeyword.value = ""
         _isSearchActive.value = false
+        _selectedSort.value = V2PlazaSortOption.LATEST
         _lastError.value = null
         _isUsingMock.value = false
-        _showSavedOnly.value = false
+        _favoriteOpenRequest.value = 0L
         _watchHistory.value = emptyList()
         watchHistoryUserId = ""
         savedVideoUserId = ""
@@ -151,6 +171,9 @@ object V2PlazaStore {
                 _savedIds.value = ids
                 _videos.value = _videos.value.map { it.copy(isSaved = ids.contains(it.saveKey())) }
                 _heroVideo.value = _heroVideo.value?.let { it.copy(isSaved = ids.contains(it.saveKey())) }
+                _favoriteVideos.value = _favoriteVideos.value
+                    .filter { ids.contains(it.saveKey()) }
+                    .map { it.copy(isSaved = true) }
                 pruneSavedVideoCache(ids)
             }.collect()
         }
@@ -168,31 +191,67 @@ object V2PlazaStore {
     }
 
     fun selectCategory(id: String) {
-        _showSavedOnly.value = false
+        // iOS 在分类变化时退出搜索，再加载该分类；否则分类标题与结果范围会不一致。
+        _searchKeyword.value = ""
+        _isSearchActive.value = false
         _selectedCategoryId.value = id
         refresh()
     }
 
+    fun selectSort(option: V2PlazaSortOption) {
+        if (_selectedSort.value == option) return
+        _searchKeyword.value = ""
+        _isSearchActive.value = false
+        _selectedSort.value = option
+        refresh()
+    }
+
     fun setSearchKeyword(keyword: String) {
-        _showSavedOnly.value = false
         _searchKeyword.value = keyword
         _isSearchActive.value = keyword.isNotBlank()
         refresh()
     }
 
     fun clearSearch() {
-        _showSavedOnly.value = false
         _searchKeyword.value = ""
         _isSearchActive.value = false
         refresh()
     }
 
-    fun toggleSavedOnly() {
-        _showSavedOnly.value = !_showSavedOnly.value
-        if (_showSavedOnly.value) {
-            _searchKeyword.value = ""
-            _isSearchActive.value = false
-            _selectedCategoryId.value = "all"
+    fun requestOpenFavorites() {
+        _favoriteOpenRequest.value += 1L
+    }
+
+    fun refreshFavoriteVideos() {
+        if (_isLoadingFavorites.value) return
+        scope.launch {
+            _isLoadingFavorites.value = true
+            _favoriteErrorMessage.value = null
+            try {
+                repo.fetchFavoriteVideos()
+                    .onSuccess { favorites ->
+                        val normalized = favorites
+                            .map { it.copy(isSaved = true) }
+                            .distinctBy { it.saveKey() }
+                        _favoriteVideos.value = normalized
+                        cacheSavedVideosFrom(normalized)
+                        mergeTransientVideos(normalized)
+                        scope.launch { hydrateCoachProfiles(normalized) }
+                    }
+                    .onFailure { error ->
+                        val fallback = _savedVideoCache.value
+                            .map { it.copy(isSaved = true) }
+                            .distinctBy { it.saveKey() }
+                        _favoriteVideos.value = fallback
+                        _favoriteErrorMessage.value = if (fallback.isEmpty()) {
+                            plazaThrowableError("收藏加载失败，请稍后重试", error)
+                        } else {
+                            null
+                        }
+                    }
+            } finally {
+                _isLoadingFavorites.value = false
+            }
         }
     }
 
@@ -210,7 +269,15 @@ object V2PlazaStore {
         val saveKey = video.saveKey()
         val nowSaved = _savedIds.value.contains(saveKey)
         _savedIds.value = if (nowSaved) _savedIds.value - saveKey else _savedIds.value + saveKey
-        if (nowSaved) removeSavedVideoCache(saveKey) else addSavedVideoCache(video.copy(isSaved = true))
+        if (nowSaved) {
+            removeSavedVideoCache(saveKey)
+            _favoriteVideos.value = _favoriteVideos.value.filterNot { it.saveKey() == saveKey }
+        } else {
+            val savedVideo = video.copy(isSaved = true)
+            addSavedVideoCache(savedVideo)
+            _favoriteVideos.value = (listOf(savedVideo) + _favoriteVideos.value)
+                .distinctBy { it.saveKey() }
+        }
         applySaveState(videoId = videoId, saved = !nowSaved)
         scope.launch {
             runPlazaStoreCatching {
@@ -218,7 +285,15 @@ object V2PlazaStore {
             }.onFailure { e ->
                 _lastError.value = plazaThrowableError("收藏同步失败，请稍后重试", e)
                 _savedIds.value = if (nowSaved) _savedIds.value + saveKey else _savedIds.value - saveKey
-                if (nowSaved) addSavedVideoCache(video.copy(isSaved = true)) else removeSavedVideoCache(saveKey)
+                if (nowSaved) {
+                    val restored = video.copy(isSaved = true)
+                    addSavedVideoCache(restored)
+                    _favoriteVideos.value = (listOf(restored) + _favoriteVideos.value)
+                        .distinctBy { it.saveKey() }
+                } else {
+                    removeSavedVideoCache(saveKey)
+                    _favoriteVideos.value = _favoriteVideos.value.filterNot { it.saveKey() == saveKey }
+                }
                 applySaveState(videoId = videoId, saved = nowSaved)
             }
         }
@@ -278,15 +353,21 @@ object V2PlazaStore {
     fun homeRecommendations(): List<V2PlazaVideo> =
         _videos.value.sortedByDescending { it.publishedAtMs }.take(6)
 
-    fun filteredVideos(): List<V2PlazaVideo> {
-        val keyword = _searchKeyword.value.trim()
-        if (keyword.isBlank()) return _videos.value
+    fun filteredVideos(): List<V2PlazaVideo> =
+        filterPlazaVideos(_videos.value, _searchKeyword.value)
+
+    internal fun filterPlazaVideos(
+        videos: List<V2PlazaVideo>,
+        rawKeyword: String,
+    ): List<V2PlazaVideo> {
+        val keyword = rawKeyword.trim()
+        if (keyword.isBlank()) return videos
         val tokens = keyword
             .split(Regex("\\s+"))
             .map { it.trim().lowercase() }
             .filter { it.isNotBlank() }
-        if (tokens.isEmpty()) return _videos.value
-        return _videos.value.filter { video ->
+        if (tokens.isEmpty()) return videos
+        return videos.filter { video ->
             val haystack = listOfNotNull(
                 video.title,
                 video.coach.displayName,
@@ -313,6 +394,7 @@ object V2PlazaStore {
             coachName = video.coach.displayName,
             coachInitial = video.coach.initialChar,
             coachTint = video.coach.avatarTint.name,
+            coachAvatarUrl = video.coach.avatarUrl,
             thumbnailUrl = video.thumbnailUrl,
             thumbnailKind = video.thumbnailKind.name,
             videoUrl = video.videoUrl,
@@ -320,11 +402,13 @@ object V2PlazaStore {
             categoryDisplayName = video.categoryDisplayName,
             viewCount = video.viewCount,
             saveCount = video.saveCount,
+            likeCount = video.likeCount,
             durationSec = video.durationSec,
             progress = progress.takeIf { it > 0.0 } ?: old?.progress ?: 0.0,
             watchedAtMs = System.currentTimeMillis(),
         )
-        _watchHistory.value = (listOf(item) + _watchHistory.value.filterNot { it.saveKey == item.saveKey }).take(WATCH_HISTORY_LIMIT)
+        _watchHistory.value = (listOf(item) + _watchHistory.value.filterNot { it.saveKey == item.saveKey })
+            .take(PLAZA_WATCH_HISTORY_LIMIT)
         persistWatchHistory()
     }
 
@@ -365,7 +449,8 @@ object V2PlazaStore {
         cacheSavedVideosFrom(merged)
     }
 
-    fun refresh() {
+    fun refresh(refreshCoachProfiles: Boolean = false) {
+        val requestVersion = ++refreshVersion
         scope.launch {
             _isLoading.value = true
             _isLoadingMore.value = false
@@ -392,8 +477,10 @@ object V2PlazaStore {
                     categoryId = cid,
                     parentCategoryId = parentCid.takeIf { keyword == null },
                     keyword = keyword,
+                    sortBy = _selectedSort.value.wireValue,
                 )
                 result.onSuccess { list ->
+                    if (requestVersion != refreshVersion) return@onSuccess
                     _lastError.value = null
                     _isUsingMock.value = false
                     val saved = _savedIds.value
@@ -401,10 +488,15 @@ object V2PlazaStore {
                     cacheSavedVideosFrom(merged)
                     val hero = pickHero(merged)
                     _heroVideo.value = hero
-                    _videos.value = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
+                    val grid = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
+                    _videos.value = normalizePlazaNewBadges(grid)
                     nextOffset = list.size
                     _hasMore.value = list.size >= PAGE_SIZE
+                    // iOS 先展示视频，再由 CoachRow 渐进补全头像；不要让多次教练请求阻塞首屏。
+                    if (refreshCoachProfiles) repo.invalidateCoachProfileCache()
+                    scope.launch { hydrateCoachProfiles(merged) }
                 }.onFailure { e ->
+                    if (requestVersion != refreshVersion) return@onFailure
                     _lastError.value = plazaThrowableError("广场内容加载失败，请下拉重试", e)
                     _hasMore.value = false
                     if (shouldUsePlazaMockFallback(
@@ -419,6 +511,7 @@ object V2PlazaStore {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
+                if (requestVersion != refreshVersion) return@launch
                 _lastError.value = plazaThrowableError("广场内容加载失败，请下拉重试", e)
                 _hasMore.value = false
                 if (shouldUsePlazaMockFallback(
@@ -430,7 +523,7 @@ object V2PlazaStore {
                     _isUsingMock.value = true
                 }
             } finally {
-                _isLoading.value = false
+                if (requestVersion == refreshVersion) _isLoading.value = false
             }
         }
     }
@@ -452,6 +545,7 @@ object V2PlazaStore {
                     categoryId = cid,
                     parentCategoryId = parentCid.takeIf { keyword == null },
                     keyword = keyword,
+                    sortBy = _selectedSort.value.wireValue,
                 )
                 result.onSuccess { more ->
                     _lastError.value = null
@@ -464,7 +558,9 @@ object V2PlazaStore {
                     cacheSavedVideosFrom(merged)
                     val hero = _heroVideo.value?.let { h -> merged.firstOrNull { it.saveKey() == h.saveKey() } } ?: pickHero(merged)
                     _heroVideo.value = hero
-                    _videos.value = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
+                    val grid = hero?.let { h -> merged.filter { it.saveKey() != h.saveKey() } } ?: merged
+                    _videos.value = normalizePlazaNewBadges(grid)
+                    scope.launch { hydrateCoachProfiles(appended) }
                 }.onFailure { e ->
                     _lastError.value = plazaThrowableError("更多内容加载失败，请稍后重试", e)
                 }
@@ -486,6 +582,51 @@ object V2PlazaStore {
         throw e
     } catch (e: Throwable) {
         Result.failure(e)
+    }
+
+    private suspend fun hydrateCoachProfiles(videos: List<V2PlazaVideo>) {
+        videos.mapNotNull { it.sourceCoachId?.trim()?.takeIf(String::isNotEmpty) }
+            .distinct()
+            .forEach { coachId ->
+                repo.fetchCoachProfile(coachId).onSuccess { profile ->
+                    val displayName = normalizedPlazaCoachName(profile.name)
+                    val avatarUrl = profile.avatarUrl?.trim()?.takeIf(String::isNotEmpty)
+                    fun V2PlazaVideo.resolveCoach(): V2PlazaVideo {
+                        if (sourceCoachId != coachId) return this
+                        return copy(
+                            coach = coach.copy(
+                                displayName = displayName,
+                                initialChar = displayName.firstOrNull()?.toString() ?: "?",
+                                avatarUrl = avatarUrl,
+                            ),
+                        )
+                    }
+
+                    _heroVideo.value = _heroVideo.value?.resolveCoach()
+                    _videos.value = _videos.value.map(V2PlazaVideo::resolveCoach)
+                    _favoriteVideos.value = _favoriteVideos.value.map(V2PlazaVideo::resolveCoach)
+
+                    val savedBefore = _savedVideoCache.value
+                    val savedAfter = savedBefore.map(V2PlazaVideo::resolveCoach)
+                    if (savedAfter != savedBefore) {
+                        _savedVideoCache.value = savedAfter
+                        persistSavedVideos()
+                    }
+
+                    val historyBefore = _watchHistory.value
+                    val historyAfter = historyBefore.map { item ->
+                        if (item.sourceCoachId != coachId) item else item.copy(
+                            coachName = displayName,
+                            coachInitial = displayName.firstOrNull()?.toString() ?: "?",
+                            coachAvatarUrl = avatarUrl,
+                        )
+                    }
+                    if (historyAfter != historyBefore) {
+                        _watchHistory.value = historyAfter
+                        persistWatchHistory()
+                    }
+                }
+            }
     }
 
     private fun resetWithMockData() {
@@ -573,7 +714,13 @@ object V2PlazaStore {
         )
         val hero = pickHero(sample)
         _heroVideo.value = hero
-        _videos.value = hero?.let { h -> sample.filter { it.saveKey() != h.saveKey() } } ?: sample
+        val grid = hero?.let { h -> sample.filter { it.saveKey() != h.saveKey() } } ?: sample
+        _videos.value = normalizePlazaNewBadges(
+            when (_selectedSort.value) {
+                V2PlazaSortOption.LATEST -> grid.sortedByDescending(V2PlazaVideo::publishedAtMs)
+                V2PlazaSortOption.POPULAR -> grid.sortedByDescending(V2PlazaVideo::viewCount)
+            },
+        )
         _hasMore.value = false
         nextOffset = sample.size
     }
@@ -592,10 +739,25 @@ object V2PlazaStore {
         return pool[idx].copy(isFeaturedToday = true)
     }
 
+    internal fun normalizePlazaNewBadges(
+        videos: List<V2PlazaVideo>,
+        nowMs: Long = System.currentTimeMillis(),
+        maxBadges: Int = 3,
+    ): List<V2PlazaVideo> {
+        val windowMs = 48L * 3600 * 1000
+        val newIds = videos
+            .filter { (nowMs - it.publishedAtMs) in 0 until windowMs }
+            .sortedByDescending(V2PlazaVideo::publishedAtMs)
+            .take(maxBadges.coerceAtLeast(0))
+            .mapTo(mutableSetOf(), V2PlazaVideo::id)
+        return videos.map { it.copy(isNew = it.id in newIds) }
+    }
+
     private fun loadPersistedSavedVideos(userId: String) {
         savedVideoUserId = userId
         if (userId.isBlank()) {
             _savedVideoCache.value = emptyList()
+            _favoriteVideos.value = emptyList()
             return
         }
         val raw = savedVideoPrefs().getString(savedVideoKey(userId), null)
@@ -606,6 +768,7 @@ object V2PlazaStore {
             ?.filter { saved.isEmpty() || saved.contains(it.saveKey()) }
             ?.distinctBy { it.saveKey() }
             ?: emptyList()
+        _favoriteVideos.value = _savedVideoCache.value
     }
 
     private fun addSavedVideoCache(video: V2PlazaVideo) {
@@ -697,8 +860,10 @@ object V2PlazaStore {
             "coachName" to JsonPrimitive(video.coach.displayName),
             "coachInitial" to JsonPrimitive(video.coach.initialChar),
             "coachTint" to JsonPrimitive(video.coach.avatarTint.name),
+            "coachAvatarUrl" to JsonPrimitive(video.coach.avatarUrl),
             "viewCount" to JsonPrimitive(video.viewCount),
             "saveCount" to JsonPrimitive(video.saveCount),
+            "likeCount" to JsonPrimitive(video.likeCount),
             "thumbnailKind" to JsonPrimitive(video.thumbnailKind.name),
             "thumbnailUrl" to JsonPrimitive(video.thumbnailUrl),
             "videoUrl" to JsonPrimitive(video.videoUrl),
@@ -735,9 +900,11 @@ object V2PlazaStore {
                 displayName = o["coachName"]?.jsonPrimitive?.contentOrNull ?: "教练",
                 initialChar = o["coachInitial"]?.jsonPrimitive?.contentOrNull ?: "C",
                 avatarTint = tint,
+                avatarUrl = o["coachAvatarUrl"]?.jsonPrimitive?.contentOrNull,
             ),
             viewCount = o["viewCount"]?.jsonPrimitive?.intOrNull ?: 0,
             saveCount = o["saveCount"]?.jsonPrimitive?.intOrNull ?: 0,
+            likeCount = o["likeCount"]?.jsonPrimitive?.intOrNull ?: 0,
             thumbnailKind = thumb,
             thumbnailUrl = o["thumbnailUrl"]?.jsonPrimitive?.contentOrNull,
             videoUrl = o["videoUrl"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -777,7 +944,7 @@ object V2PlazaStore {
         _watchHistory.value = raw
             ?.let { parseWatchHistory(it) }
             ?.sortedByDescending { it.watchedAtMs }
-            ?.take(WATCH_HISTORY_LIMIT)
+            ?.take(PLAZA_WATCH_HISTORY_LIMIT)
             ?: emptyList()
     }
 
@@ -785,7 +952,7 @@ object V2PlazaStore {
         val userId = watchHistoryUserId.takeIf { it.isNotBlank() } ?: return
         watchHistoryPrefs()
             .edit {
-                putString(watchHistoryKey(userId), encodeWatchHistory(_watchHistory.value.take(WATCH_HISTORY_LIMIT)))
+                putString(watchHistoryKey(userId), encodeWatchHistory(_watchHistory.value.take(PLAZA_WATCH_HISTORY_LIMIT)))
             }
     }
 
@@ -809,6 +976,7 @@ object V2PlazaStore {
                         "coachName" to JsonPrimitive(item.coachName),
                         "coachInitial" to JsonPrimitive(item.coachInitial),
                         "coachTint" to JsonPrimitive(item.coachTint),
+                        "coachAvatarUrl" to JsonPrimitive(item.coachAvatarUrl),
                         "thumbnailUrl" to JsonPrimitive(item.thumbnailUrl),
                         "thumbnailKind" to JsonPrimitive(item.thumbnailKind),
                         "videoUrl" to JsonPrimitive(item.videoUrl),
@@ -816,6 +984,7 @@ object V2PlazaStore {
                         "categoryDisplayName" to JsonPrimitive(item.categoryDisplayName),
                         "viewCount" to JsonPrimitive(item.viewCount),
                         "saveCount" to JsonPrimitive(item.saveCount),
+                        "likeCount" to JsonPrimitive(item.likeCount),
                         "durationSec" to JsonPrimitive(item.durationSec),
                         "progress" to JsonPrimitive(item.progress),
                         "watchedAtMs" to JsonPrimitive(item.watchedAtMs),
@@ -839,6 +1008,7 @@ object V2PlazaStore {
                     coachName = o["coachName"]?.jsonPrimitive?.contentOrNull ?: "教练",
                     coachInitial = o["coachInitial"]?.jsonPrimitive?.contentOrNull ?: "C",
                     coachTint = o["coachTint"]?.jsonPrimitive?.contentOrNull ?: V2PlazaCoach.AvatarTint.GREEN.name,
+                    coachAvatarUrl = o["coachAvatarUrl"]?.jsonPrimitive?.contentOrNull,
                     thumbnailUrl = o["thumbnailUrl"]?.jsonPrimitive?.contentOrNull,
                     thumbnailKind = o["thumbnailKind"]?.jsonPrimitive?.contentOrNull ?: V2PlazaVideo.ThumbnailKind.GREEN_SWING.name,
                     videoUrl = o["videoUrl"]?.jsonPrimitive?.contentOrNull ?: "",
@@ -846,6 +1016,7 @@ object V2PlazaStore {
                     categoryDisplayName = o["categoryDisplayName"]?.jsonPrimitive?.contentOrNull,
                     viewCount = o["viewCount"]?.jsonPrimitive?.intOrNull ?: 0,
                     saveCount = o["saveCount"]?.jsonPrimitive?.intOrNull ?: 0,
+                    likeCount = o["likeCount"]?.jsonPrimitive?.intOrNull ?: 0,
                     durationSec = o["durationSec"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
                     progress = o["progress"]?.jsonPrimitive?.doubleOrNull?.coerceIn(0.0, 1.0) ?: 0.0,
                     watchedAtMs = o["watchedAtMs"]?.jsonPrimitive?.longOrNull ?: 0L,
@@ -866,6 +1037,7 @@ data class V2PlazaWatchHistoryItem(
     val coachName: String,
     val coachInitial: String = "C",
     val coachTint: String = V2PlazaCoach.AvatarTint.GREEN.name,
+    val coachAvatarUrl: String? = null,
     val thumbnailUrl: String?,
     val thumbnailKind: String = V2PlazaVideo.ThumbnailKind.GREEN_SWING.name,
     val videoUrl: String = "",
@@ -873,6 +1045,7 @@ data class V2PlazaWatchHistoryItem(
     val categoryDisplayName: String? = null,
     val viewCount: Int = 0,
     val saveCount: Int = 0,
+    val likeCount: Int = 0,
     val durationSec: Double,
     val progress: Double,
     val watchedAtMs: Long,
@@ -892,9 +1065,15 @@ data class V2PlazaWatchHistoryItem(
             durationSec = durationSec,
             topic = topicValue,
             categoryDisplayName = categoryDisplayName,
-            coach = V2PlazaCoach(coachName, coachInitial.takeIf { it.isNotBlank() } ?: "C", tint),
+            coach = V2PlazaCoach(
+                coachName,
+                coachInitial.takeIf { it.isNotBlank() } ?: "C",
+                tint,
+                coachAvatarUrl,
+            ),
             viewCount = viewCount,
             saveCount = saveCount,
+            likeCount = likeCount,
             thumbnailKind = thumb,
             thumbnailUrl = thumbnailUrl,
             videoUrl = videoUrl,

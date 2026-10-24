@@ -1,12 +1,13 @@
 package com.mygolfswing.app.ui.auth
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,14 +15,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -36,213 +38,250 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.store.V2ProfileStore
-import com.mygolfswing.app.ui.common.V2NavTopBarCentered
-import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.designsystem.DSColors
-import com.mygolfswing.app.ui.designsystem.DSSpacing
-import com.mygolfswing.app.ui.designsystem.DSTypography
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 修改 / 设置登录密码（对齐 iOS `ProfileSettingsPage` 的密码 sheet）。
- *
- * - profile.hasPassword == true → 「修改登录密码」：当前密码 + 新密码 + 确认
- *   → [V2AuthRepository.updatePassword]
- * - profile.hasPassword == false → 「设置登录密码」：使用绑定手机短信
- *   → [V2AuthRepository.setPasswordWithSms]
+ * 兼容旧导航入口；当前账号设置页直接在原页面上显示 [V2ChangePasswordDialog]，
+ * 与 iOS `ProfileSettingsPage.passwordSetupAlert` 的模态层级一致。
  */
 @Composable
 fun V2ChangePasswordScreen(
     onBack: () -> Unit,
     onChangeSuccess: () -> Unit,
 ) {
+    V2RoomPage(Modifier.fillMaxSize()) { }
+    V2ChangePasswordDialog(onDismiss = onBack, onChangeSuccess = onChangeSuccess)
+}
+
+@Composable
+fun V2ChangePasswordDialog(
+    onDismiss: () -> Unit,
+    onChangeSuccess: () -> Unit,
+) {
     val profile by V2ProfileStore.profile.collectAsState()
     val hasPassword = profile.hasPassword
     val phone = profile.phone
-    val needsPhoneBinding = !hasPassword && phone.isNullOrBlank()
 
-    val title = if (hasPassword) "修改登录密码" else "设置登录密码"
-
-    var oldPw by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
-    var newPw by remember { mutableStateOf("") }
-    var confirmPw by remember { mutableStateOf("") }
+    var oldPassword by remember { mutableStateOf("") }
+    var smsCode by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+    var isSendingCode by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
+    var succeeded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(countdown) {
         if (countdown > 0) {
-            delay(1000)
+            delay(1_000)
             countdown -= 1
         }
     }
+    LaunchedEffect(succeeded) {
+        if (succeeded) {
+            delay(1_500)
+            onChangeSuccess()
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite),
+    Dialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        V2NavTopBarCentered(title = title, onBack = onBack)
-        Column(
+        Box(
             modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .imePadding()
-                .v2NavigationBarPadding()
-                .padding(horizontal = DSSpacing.lg)
-                .padding(top = 4.dp)
-                .fillMaxWidth()
-                .background(DSColors.cardWhite, RoundedCornerShape(20.dp))
-                .padding(DSSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.40f))
+                .clickable(enabled = !isSaving, onClick = onDismiss)
+                .imePadding(),
+            contentAlignment = Alignment.Center,
         ) {
-            if (hasPassword) {
-                Text("请输入当前密码以验证身份", style = DSTypography.caption, color = DSColors.shadowGray)
-                OutlinedTextField(
-                    value = oldPw,
-                    onValueChange = { oldPw = it; error = null },
-                    placeholder = { Text("当前密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
-                )
-            } else {
-                Text(
-                    if (needsPhoneBinding) {
-                        "设置后可使用手机号 + 密码登录"
+            val consumeCardTap = { Unit }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 360.dp)
+                    .padding(horizontal = 24.dp)
+                    .shadow(
+                        elevation = 24.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = DSColors.deepGreen.copy(alpha = 0.20f),
+                        spotColor = DSColors.deepGreen.copy(alpha = 0.20f),
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .border(1.dp, DSColors.fairway.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+                    .clickable(onClick = consumeCardTap),
+            ) {
+                PasswordDialogHeader(hasPassword = hasPassword)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DSColors.cardWhite)
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(15.dp),
+                ) {
+                    if (hasPassword) {
+                        PasswordSetupField("当前密码") {
+                            PasswordInput(
+                                value = oldPassword,
+                                onValueChange = { oldPassword = it; error = null },
+                                placeholder = "请输入当前密码",
+                            )
+                        }
                     } else {
-                        "将向绑定手机 ${phone?.maskMiddle() ?: "未绑定"} 发送验证码"
-                    },
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
-                )
-                if (needsPhoneBinding) {
-                    PhoneBindingRequiredNotice(onBack = onBack)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = code,
-                            onValueChange = { code = it.filter { c -> c.isDigit() }.take(6); error = null },
-                            placeholder = { Text("6 位验证码") },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            modifier = Modifier.weight(1f),
-                            colors = fieldColors(),
+                        PasswordSetupField("验证手机号 ${phone.orEmpty().maskMiddle()}") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                PasswordInput(
+                                    value = smsCode,
+                                    onValueChange = {
+                                        smsCode = it.filter(Char::isDigit).take(6)
+                                        error = null
+                                    },
+                                    placeholder = "请输入验证码",
+                                    keyboardType = KeyboardType.NumberPassword,
+                                    secure = false,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                PasswordAction(
+                                    label = if (countdown > 0) "${countdown}s" else "获取验证码",
+                                    foreground = if (countdown > 0) DSColors.shadowGray else DSColors.fairway,
+                                    background = DSColors.mistGreen,
+                                    enabled = countdown == 0 && !isSendingCode && !isSaving,
+                                    onClick = {
+                                        if (phone.isNullOrBlank()) {
+                                            error = "未绑定手机号"
+                                        } else {
+                                            scope.launch {
+                                                isSendingCode = true
+                                                error = null
+                                                try {
+                                                    ServiceLocator.authRepo.sendSmsCode(phone)
+                                                        .onSuccess { countdown = 60 }
+                                                        .onFailure {
+                                                            error = authUserError("验证码发送失败，请稍后重试", it.message)
+                                                        }
+                                                } catch (e: CancellationException) {
+                                                    throw e
+                                                } catch (e: Throwable) {
+                                                    error = authThrowableError("验证码发送失败，请稍后重试", e)
+                                                } finally {
+                                                    isSendingCode = false
+                                                }
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.width(86.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    PasswordSetupField("新密码") {
+                        PasswordInput(
+                            value = newPassword,
+                            onValueChange = { newPassword = it; error = null },
+                            placeholder = "8位以上，包含字母和数字",
                         )
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedButton(
+                    }
+                    PasswordSetupField("确认新密码") {
+                        PasswordInput(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it; error = null },
+                            placeholder = "再次输入新密码",
+                        )
+                    }
+
+                    error?.let { message ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Error, contentDescription = null, tint = DSColors.flagRed, modifier = Modifier.size(14.dp))
+                            Text(message, color = DSColors.flagRed, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    if (succeeded) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(15.dp))
+                            Text("密码设置成功", color = DSColors.fairway, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.padding(top = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        PasswordAction(
+                            label = "取消",
+                            foreground = DSColors.inkGreen,
+                            background = DSColors.mistGreen,
+                            enabled = !isSaving,
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                        )
+                        PasswordAction(
+                            label = "确认",
+                            foreground = Color.White,
+                            background = DSColors.fairway,
+                            enabled = !isSaving && !succeeded,
+                            loading = isSaving,
                             onClick = {
-                                scope.launch {
-                                    loading = true
-                                    try {
-                                        val r = ServiceLocator.authRepo.sendSmsCode(
-                                            phone.orEmpty(),
-                                            purpose = com.mygolfswing.app.data.repo.V2AuthRepository.SmsPurpose.SET_PASSWORD,
-                                        )
-                                        r.onSuccess { countdown = 60 }
-                                            .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Throwable) {
-                                        error = authThrowableError("验证码发送失败，请稍后重试", e)
-                                    } finally {
-                                        loading = false
+                                val validationError = if (hasPassword) {
+                                    validateChange(oldPassword, newPassword, confirmPassword)
+                                } else {
+                                    validateSet(smsCode, newPassword, confirmPassword, phone)
+                                }
+                                if (validationError != null) {
+                                    error = validationError
+                                } else {
+                                    scope.launch {
+                                        isSaving = true
+                                        error = null
+                                        try {
+                                            val result = if (hasPassword) {
+                                                ServiceLocator.authRepo.updatePassword(oldPassword, newPassword)
+                                            } else {
+                                                ServiceLocator.authRepo.setPasswordWithSms(phone!!, smsCode, newPassword)
+                                            }
+                                            result.onSuccess {
+                                                V2ProfileStore.refresh(force = true)
+                                                succeeded = true
+                                            }.onFailure {
+                                                error = authUserError("操作失败，请检查输入后重试", it.message)
+                                            }
+                                        } catch (e: CancellationException) {
+                                            throw e
+                                        } catch (e: Throwable) {
+                                            error = authThrowableError("操作失败，请检查输入后重试", e)
+                                        } finally {
+                                            isSaving = false
+                                        }
                                     }
                                 }
                             },
-                            enabled = countdown == 0 && !loading,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(56.dp),
-                            border = BorderStroke(1.dp, DSColors.fairway),
-                        ) {
-                            Text(
-                                if (countdown > 0) "${countdown}s" else "获取验证码",
-                                color = if (countdown > 0) DSColors.shadowGray else DSColors.fairway,
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (!needsPhoneBinding) {
-                OutlinedTextField(
-                    value = newPw,
-                    onValueChange = { newPw = it; error = null },
-                    placeholder = { Text("新密码（至少 8 位，含字母+数字）") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
-                )
-                OutlinedTextField(
-                    value = confirmPw,
-                    onValueChange = { confirmPw = it; error = null },
-                    placeholder = { Text("确认新密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
-                )
-
-                if (!error.isNullOrBlank()) {
-                    Text(error!!, color = DSColors.flagRed, style = DSTypography.caption)
-                }
-
-                Button(
-                    onClick = {
-                        val v = if (hasPassword) {
-                            validateChange(oldPw, newPw, confirmPw)
-                        } else {
-                            validateSet(code, newPw, confirmPw, phone)
-                        }
-                        if (v != null) {
-                            error = v; return@Button
-                        }
-                        scope.launch {
-                            loading = true
-                            try {
-                                val r = if (hasPassword) {
-                                    ServiceLocator.authRepo.updatePassword(oldPw, newPw)
-                                } else {
-                                    ServiceLocator.authRepo.setPasswordWithSms(phone!!, code, newPw)
-                                }
-                                r.onSuccess { onChangeSuccess() }
-                                    .onFailure { error = authUserError("操作失败，请检查输入后重试", it.message) }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Throwable) {
-                                error = authThrowableError("操作失败，请检查输入后重试", e)
-                            } finally {
-                                loading = false
-                            }
-                        }
-                    },
-                    enabled = !loading,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DSColors.fairway,
-                        contentColor = DSColors.warmWhite,
-                    ),
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    if (loading) {
-                        CircularProgressIndicator(
-                            color = DSColors.warmWhite,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.weight(1f),
                         )
-                    } else {
-                        Text(title, style = DSTypography.bodyBold)
                     }
                 }
             }
@@ -251,58 +290,133 @@ fun V2ChangePasswordScreen(
 }
 
 @Composable
-private fun PhoneBindingRequiredNotice(onBack: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(DSColors.mistGreen.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text("需要先绑定手机号", style = DSTypography.bodyBold, color = DSColors.inkGreen)
-        Text(
-            "返回账号与安全，在“手机号”一栏完成绑定后即可设置登录密码。",
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
+private fun PasswordDialogHeader(hasPassword: Boolean) {
+    Box(modifier = Modifier.fillMaxWidth().height(116.dp)) {
+        Image(
+            painter = painterResource(R.drawable.golf_course_background),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
         )
-        Button(
-            onClick = onBack,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = DSColors.fairway,
-                contentColor = DSColors.warmWhite,
-            ),
-            modifier = Modifier.fillMaxWidth().height(44.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            DSColors.deepGreen.copy(alpha = 0.76f),
+                            DSColors.fairway.copy(alpha = 0.48f),
+                        ),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier.align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Text("返回绑定手机号", style = DSTypography.bodyBold)
+            Icon(Icons.Filled.Key, contentDescription = null, tint = Color.White, modifier = Modifier.size(19.dp))
+            Text(
+                if (hasPassword) "修改登录密码" else "设置登录密码",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            Text(
+                if (hasPassword) "验证当前密码后设置新密码" else "验证绑定手机号后设置登录密码",
+                color = Color.White.copy(alpha = 0.82f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
         }
     }
 }
 
 @Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = DSColors.fairway,
-    cursorColor = DSColors.fairway,
-)
+private fun PasswordSetupField(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text(title, color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        content()
+    }
+}
 
-private fun validateChange(oldPw: String, newPw: String, confirmPw: String): String? {
-    if (oldPw.isBlank()) return "请输入当前密码"
-    if (newPw.length < 8) return "新密码至少 8 位"
-    if (!newPw.any { it.isLetter() } || !newPw.any { it.isDigit() }) return "密码需包含字母和数字"
-    if (newPw != confirmPw) return "两次密码不一致"
+@Composable
+private fun PasswordInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    keyboardType: KeyboardType = KeyboardType.Password,
+    secure: Boolean = true,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        placeholder = { Text(placeholder, fontSize = 15.sp) },
+        singleLine = true,
+        visualTransformation = if (secure) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        modifier = modifier.fillMaxWidth().height(48.dp),
+        textStyle = TextStyle(fontSize = 15.sp, color = DSColors.inkGreen),
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = Color(0xFFF9F6EF),
+            unfocusedContainerColor = Color(0xFFF9F6EF),
+            focusedBorderColor = DSColors.fairway.copy(alpha = 0.10f),
+            unfocusedBorderColor = DSColors.fairway.copy(alpha = 0.10f),
+            cursorColor = DSColors.fairway,
+            focusedTextColor = DSColors.inkGreen,
+            unfocusedTextColor = DSColors.inkGreen,
+            focusedPlaceholderColor = DSColors.shadowGray.copy(alpha = 0.7f),
+            unfocusedPlaceholderColor = DSColors.shadowGray.copy(alpha = 0.7f),
+        ),
+    )
+}
+
+@Composable
+private fun PasswordAction(
+    label: String,
+    foreground: Color,
+    background: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    loading: Boolean = false,
+) {
+    Box(
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(background.copy(alpha = if (enabled || loading) 1f else 0.55f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (loading) {
+            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+        } else {
+            Text(label, color = foreground, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+internal fun validateChange(oldPassword: String, newPassword: String, confirmPassword: String): String? {
+    if (newPassword.length < 8) return "新密码至少 8 位"
+    if (!newPassword.any(Char::isLetter) || !newPassword.any(Char::isDigit)) return "密码需包含字母和数字"
+    if (newPassword != confirmPassword) return "两次输入的新密码不一致"
+    if (oldPassword.isBlank()) return "请输入当前密码"
     return null
 }
 
-private fun validateSet(code: String, newPw: String, confirmPw: String, phone: String?): String? {
-    if (phone.isNullOrBlank()) return "未绑定手机，无法设置密码"
-    if (code.length != 6) return "请输入 6 位验证码"
-    if (newPw.length < 8) return "密码至少 8 位"
-    if (!newPw.any { it.isLetter() } || !newPw.any { it.isDigit() }) return "密码需包含字母和数字"
-    if (newPw != confirmPw) return "两次密码不一致"
+internal fun validateSet(smsCode: String, newPassword: String, confirmPassword: String, phone: String?): String? {
+    if (newPassword.length < 8) return "密码至少 8 位"
+    if (!newPassword.any(Char::isLetter) || !newPassword.any(Char::isDigit)) return "密码需包含字母和数字"
+    if (newPassword != confirmPassword) return "两次输入的新密码不一致"
+    if (smsCode.length != 6) return "请输入6位验证码"
+    if (phone.isNullOrBlank()) return "未绑定手机号，无法设置密码"
     return null
 }
 
 private fun String.maskMiddle(): String {
     if (length <= 7) return this
-    return "${substring(0, 3)}****${substring(length - 4)}"
+    return "${take(3)}****${takeLast(4)}"
 }

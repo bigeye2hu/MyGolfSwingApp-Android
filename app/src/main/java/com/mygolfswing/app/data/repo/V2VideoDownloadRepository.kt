@@ -1,8 +1,10 @@
 package com.mygolfswing.app.data.repo
 
 import com.mygolfswing.app.data.net.V2NetClient
+import com.mygolfswing.app.data.net.V2ApiConfig
 import com.mygolfswing.app.data.session.V2SessionStore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -10,6 +12,13 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /**
  * 基于积分的视频下载仓库（对齐 iOS `CreditsBasedDownloadService`）。
@@ -21,6 +30,21 @@ class V2VideoDownloadRepository(
     private val net: V2NetClient,
     private val session: V2SessionStore,
 ) {
+    /** Mirrors iOS `TikTokGolfScraperClient.checkConnection()` against the download host root. */
+    suspend fun checkServiceConnection(): Boolean = try {
+        val request = Request.Builder()
+            .url(V2ApiConfig.DOWNLOAD_SERVICE_HEALTH)
+            .get()
+            .build()
+        net.httpClient.newCall(request).awaitResponse().use { response ->
+            isDownloadServiceHealthy(response.code)
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Throwable) {
+        false
+    }
+
     suspend fun start(url: String): Result<V2DownloadStartResult> = runDownloadCatching {
         require(session.current().isLoggedIn) { "请先登录后再下载视频" }
         val resp = net.downloadApi.startDownload(JsonObject(mapOf("url" to JsonPrimitive(url))))
@@ -58,6 +82,21 @@ class V2VideoDownloadRepository(
     private fun JsonObject.string(key: String): String? =
         this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
+}
+
+internal fun isDownloadServiceHealthy(statusCode: Int?): Boolean = statusCode == 200
+
+private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (continuation.isActive) continuation.resumeWithException(e)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            if (continuation.isActive) continuation.resume(response) else response.close()
+        }
+    })
 }
 
 internal suspend inline fun <T> runDownloadCatching(

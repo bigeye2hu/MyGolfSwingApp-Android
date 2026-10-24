@@ -26,23 +26,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.ArrowCircleRight
-import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -59,6 +56,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,8 +66,7 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.store.V2GoalStore
-import com.mygolfswing.app.ui.common.V2MissingEntityScreen
-import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -76,6 +75,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.math.roundToInt
 
 /**
  * 目标详情页（对齐 iOS `V2GoalDetailView`）。
@@ -87,12 +87,11 @@ fun V2GoalDetailScreen(
     onEdit: () -> Unit = {},
 ) {
     var showMemoPicker by remember { mutableStateOf(false) }
-    var showAllTimeline by remember { mutableStateOf(false) }
     val goals by V2GoalStore.goals.collectAsState()
     val goal = goals.firstOrNull { it.id == goalId }
 
     if (goal == null) {
-        V2MissingEntityScreen(message = "目标不存在", onBack = onBack, title = "目标详情")
+        GoalNotFoundPage(onBack = onBack)
         return
     }
 
@@ -108,6 +107,7 @@ fun V2GoalDetailScreen(
                 ),
             ),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             DetailNavBar(goal = goal, onBack = onBack, onEdit = onEdit)
 
@@ -117,17 +117,18 @@ fun V2GoalDetailScreen(
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(
                     horizontal = 20.dp,
-                    vertical = DSSpacing.md,
                 ),
                 verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
             ) {
                 item { ProgressCard(goal = goal) }
                 item { InfoCard(goal = goal) }
-                item { TimelineCard(goal = goal, onSeeAll = { showAllTimeline = true }) }
+                item { TimelineCard(goal = goal) }
                 item { MemoCard(goal = goal, onManage = { showMemoPicker = true }) }
-                item { Spacer(modifier = Modifier.height(112.dp)) }
+                item { Spacer(modifier = Modifier.height(140.dp)) }
             }
+        }
 
+        Box(modifier = Modifier.align(Alignment.BottomCenter)) {
             DetailBottomBar(goal = goal)
         }
 
@@ -142,8 +143,69 @@ fun V2GoalDetailScreen(
             )
         }
 
-        if (showAllTimeline) {
-            GoalTimelineSheet(goal = goal, onDismiss = { showAllTimeline = false })
+    }
+}
+
+@Composable
+private fun GoalNotFoundPage(onBack: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    0.0f to Color(0xFFE8F5E9),
+                    0.30f to Color(0xFFF1F8F4),
+                    0.65f to Color(0xFFF5F5F0),
+                    1.0f to Color(0xFFEDE8E0),
+                ),
+            ),
+    ) {
+        V2RoomBackground(Modifier.fillMaxSize())
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Folder,
+                    contentDescription = null,
+                    tint = DSColors.shadowGray.copy(alpha = 0.50f),
+                    modifier = Modifier.size(36.dp),
+                )
+                Text(
+                    text = "?",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "该目标不存在或已被删除",
+                fontSize = 14.sp,
+                color = DSColors.shadowGray,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(DSColors.fairway)
+                    .clickable(onClick = onBack)
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "返回",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White,
+                )
+            }
         }
     }
 }
@@ -162,7 +224,11 @@ private fun DetailNavBar(goal: V2Goal, onBack: () -> Unit, onEdit: () -> Unit) {
             .padding(top = 8.dp, bottom = DSSpacing.lg),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleIcon(icon = Icons.AutoMirrored.Filled.ArrowBack, onClick = onBack)
+        CircleIcon(
+            icon = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = "返回",
+            onClick = onBack,
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -197,7 +263,11 @@ private fun DetailNavBar(goal: V2Goal, onBack: () -> Unit, onEdit: () -> Unit) {
                 )
             }
         }
-        CircleIcon(icon = Icons.Filled.Edit, onClick = onEdit)
+        CircleIcon(
+            icon = Icons.Filled.Edit,
+            contentDescription = "编辑目标",
+            onClick = onEdit,
+        )
     }
 }
 
@@ -211,6 +281,7 @@ private fun statusDotColor(status: V2Goal.Status): Color = when (status) {
 @Composable
 private fun CircleIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     onClick: () -> Unit,
 ) {
     Box(
@@ -230,7 +301,7 @@ private fun CircleIcon(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            contentDescription = contentDescription,
             tint = Color(0xFF4B5563),
             modifier = Modifier.size(14.dp),
         )
@@ -384,7 +455,7 @@ private fun ProgressCard(goal: V2Goal) {
     val percentText = if (goal.targetSessions == null && goal.metric.kind == V2Goal.Metric.Kind.FREE) {
         "长期进行中"
     } else {
-        "${(goal.ratio * 100).toInt()}%"
+        "${(goal.ratio * 100).roundToInt()}%"
     }
     val remainingText = goal.remainingSessions
         ?.takeIf { goal.status == V2Goal.Status.ACTIVE && it > 0 }
@@ -401,7 +472,7 @@ private fun ProgressCard(goal: V2Goal) {
             .clip(RoundedCornerShape(24.dp))
             .background(DSColors.cardWhite.copy(alpha = 0.88f))
             .border(width = 1.dp, color = Color.White.copy(alpha = 0.75f), shape = RoundedCornerShape(24.dp))
-            .padding(horizontal = DSSpacing.lg),
+            .padding(horizontal = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         ProgressRing(
@@ -564,7 +635,7 @@ private fun VerticalDivider() {
 }
 
 @Composable
-private fun TimelineCard(goal: V2Goal, onSeeAll: () -> Unit) {
+private fun TimelineCard(goal: V2Goal) {
     val sorted = goal.progress.checkInDates.sortedDescending()
     val items = sorted.take(3)
     val total = sorted.size
@@ -581,17 +652,13 @@ private fun TimelineCard(goal: V2Goal, onSeeAll: () -> Unit) {
             .clip(RoundedCornerShape(24.dp))
             .background(DSColors.cardWhite.copy(alpha = 0.88f))
             .border(width = 1.dp, color = Color.White.copy(alpha = 0.75f), shape = RoundedCornerShape(24.dp))
-            .padding(DSSpacing.lg),
+            .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("练习记录", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
             Spacer(modifier = Modifier.weight(1f))
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .clickable(onClick = onSeeAll)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -623,84 +690,6 @@ private fun TimelineCard(goal: V2Goal, onSeeAll: () -> Unit) {
         }
     }
 }
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun GoalTimelineSheet(goal: V2Goal, onDismiss: () -> Unit) {
-    val sorted = goal.progress.checkInDates.sortedDescending()
-    val total = sorted.size
-    val unit = goal.sessionUnit ?: "次"
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = DSSpacing.lg)
-                .padding(bottom = DSSpacing.lg)
-                .v2NavigationBarPadding(),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("全部练习记录", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
-                    Text("共 $total 条打卡记录", fontSize = 12.sp, color = DSColors.shadowGray)
-                }
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(DSColors.fairway.copy(alpha = 0.08f))
-                        .clickable(onClick = onDismiss),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = "关闭", tint = DSColors.fairway, modifier = Modifier.size(16.dp))
-                }
-            }
-            if (sorted.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 28.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("还没有打卡记录", fontSize = 12.sp, color = DSColors.shadowGray)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 520.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(bottom = 8.dp),
-                ) {
-                    items(
-                        items = sorted.mapIndexed { index, date ->
-                            GoalTimelineEntry(
-                                date = date,
-                                sequenceNo = total - index,
-                                colorIndex = index,
-                            )
-                        },
-                        key = { "${it.sequenceNo}-${it.date}" },
-                    ) { entry ->
-                        TimelineRow(
-                            date = entry.date,
-                            sequenceNo = entry.sequenceNo,
-                            unit = unit,
-                            dotColor = timelineDotColor(entry.colorIndex),
-                            isLast = entry.colorIndex == sorted.lastIndex,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private data class GoalTimelineEntry(
-    val date: LocalDateTime,
-    val sequenceNo: Int,
-    val colorIndex: Int,
-)
 
 @Composable
 private fun TimelineRow(
@@ -854,10 +843,10 @@ private fun MemoCard(goal: V2Goal, onManage: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(
-                    imageVector = Icons.Filled.EditNote,
+                    imageVector = Icons.Outlined.Inbox,
                     contentDescription = null,
                     tint = DSColors.shadowGray.copy(alpha = 0.6f),
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier.size(22.dp).testTag("goal-detail-memo-empty-tray"),
                 )
                 Text("还没有关联任何 Memo", fontSize = 12.sp, color = DSColors.shadowGray)
             }
@@ -938,7 +927,6 @@ private val MemoDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("
 private fun DetailBottomBar(goal: V2Goal) {
     val isActive = goal.status == V2Goal.Status.ACTIVE
     val canPauseToggle = goal.status == V2Goal.Status.ACTIVE || goal.status == V2Goal.Status.PAUSED
-    val canCheckIn = isActive && !goal.hasCheckedInToday
     val hintText = when (goal.status) {
         V2Goal.Status.ACTIVE -> "保持节奏，每天一点进步"
         V2Goal.Status.PAUSED -> "目标已暂停，点击下方恢复继续打卡"
@@ -957,7 +945,6 @@ private fun DetailBottomBar(goal: V2Goal) {
                     ),
                 ),
             )
-            .v2NavigationBarPadding()
             .padding(horizontal = 20.dp)
             .padding(top = DSSpacing.lg, bottom = DSSpacing.xxl),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -973,12 +960,7 @@ private fun DetailBottomBar(goal: V2Goal) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SecondaryBtn(
-                text = when (goal.status) {
-                    V2Goal.Status.PAUSED -> "恢复目标"
-                    V2Goal.Status.COMPLETED -> "已完成"
-                    V2Goal.Status.ARCHIVED -> "已归档"
-                    else -> "暂停目标"
-                },
+                text = if (goal.status == V2Goal.Status.PAUSED) "恢复目标" else "暂停目标",
                 icon = if (goal.status == V2Goal.Status.PAUSED) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                 enabled = canPauseToggle,
                 onClick = {
@@ -987,19 +969,9 @@ private fun DetailBottomBar(goal: V2Goal) {
                 modifier = Modifier.weight(1f),
             )
             PrimaryBtn(
-                text = when {
-                    goal.status == V2Goal.Status.COMPLETED -> "已完成"
-                    goal.status == V2Goal.Status.ARCHIVED -> "已归档"
-                    goal.hasCheckedInToday -> "今日已练"
-                    isActive -> "继续练习"
-                    else -> "已暂停"
-                },
-                icon = when {
-                    goal.status == V2Goal.Status.COMPLETED -> Icons.Filled.EmojiEvents
-                    goal.hasCheckedInToday -> Icons.Filled.CheckCircle
-                    else -> Icons.Filled.ArrowCircleRight
-                },
-                enabled = canCheckIn,
+                text = "继续练习",
+                icon = Icons.Filled.ArrowCircleRight,
+                enabled = true,
                 onClick = { V2GoalStore.checkIn(goal.id) },
                 modifier = Modifier.weight(1f),
             )
@@ -1017,7 +989,8 @@ private fun SecondaryBtn(
 ) {
     Row(
         modifier = modifier
-            .height(52.dp)
+            .testTag("goal-detail-pause-toggle")
+            .height(40.dp)
             .shadow(
                 elevation = 2.dp,
                 shape = RoundedCornerShape(16.dp),
@@ -1028,7 +1001,10 @@ private fun SecondaryBtn(
             .background(Color.White.copy(alpha = 0.88f))
             .border(1.dp, Color.Black.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
             .alpha(if (enabled) 1f else 0.5f)
-            .then(if (enabled) Modifier.clickable { onClick() } else Modifier),
+            .then(if (enabled) Modifier.clickable { onClick() } else Modifier)
+            // SwiftUI's disabled Button remains discoverable as unavailable.
+            // Keep the same accessibility contract for completed/archived goals.
+            .semantics { if (!enabled) disabled() },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -1060,7 +1036,8 @@ private fun PrimaryBtn(
     else Brush.horizontalGradient(listOf(DSColors.shadowGray.copy(alpha = 0.5f), DSColors.shadowGray.copy(alpha = 0.4f)))
     Row(
         modifier = modifier
-            .height(52.dp)
+            .testTag("goal-detail-continue")
+            .height(40.dp)
             .shadow(
                 elevation = if (enabled) 11.dp else 0.dp,
                 shape = RoundedCornerShape(16.dp),

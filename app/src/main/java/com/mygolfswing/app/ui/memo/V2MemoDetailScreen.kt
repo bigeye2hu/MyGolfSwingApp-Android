@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,11 +28,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -39,6 +42,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -48,8 +53,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
@@ -61,6 +68,7 @@ import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.V2BackHandler
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -80,6 +88,8 @@ private const val TextMemoBodyMaxLength = 240
 fun V2MemoDetailScreen(
     memoId: UUID,
     onBack: () -> Unit = {},
+    persistUpdatedMemo: (suspend (V2Memo) -> Unit)? = null,
+    persistDeletedMemo: (suspend (UUID) -> Unit)? = null,
 ) {
     val memos by V2MemoStore.allMemos.collectAsState()
     val goals by V2GoalStore.goals.collectAsState()
@@ -90,9 +100,15 @@ fun V2MemoDetailScreen(
         return
     }
 
-    var title by remember(memo.id) { mutableStateOf(memo.title ?: memo.displayTitle ?: "") }
-    var body by remember(memo.id) { mutableStateOf(memo.text ?: "") }
-    var selectedTagIds by remember(memo.id) {
+    var title by rememberSaveable(memo.id) { mutableStateOf(memo.title ?: memo.displayTitle ?: "") }
+    var body by rememberSaveable(memo.id) { mutableStateOf(memo.text ?: "") }
+    var selectedTagIds by rememberSaveable(
+        memo.id,
+        stateSaver = listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) {
         mutableStateOf(
             if (memo.tagIds.isNotEmpty()) {
                 memo.tagIds.toSet()
@@ -103,12 +119,19 @@ fun V2MemoDetailScreen(
             },
         )
     }
-    var selectedGoalIds by remember(memo.id) { mutableStateOf(memo.linkedGoalIds.toSet()) }
-    var priorityRaw by remember(memo.id) { mutableStateOf(normalizedTextMemoPriority(memo.priorityRaw)) }
-    var dirty by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var showDiscardConfirm by remember { mutableStateOf(false) }
-    var showAttachmentPlan by remember { mutableStateOf(false) }
+    var selectedGoalIds by rememberSaveable(
+        memo.id,
+        stateSaver = listSaver<Set<UUID>, String>(
+            save = { ids -> ids.map(UUID::toString) },
+            restore = { values -> values.mapTo(linkedSetOf(), UUID::fromString) },
+        ),
+    ) { mutableStateOf(memo.linkedGoalIds.toSet()) }
+    var priorityRaw by rememberSaveable(memo.id) {
+        mutableStateOf(normalizedTextMemoPriority(memo.priorityRaw))
+    }
+    var dirty by rememberSaveable(memo.id) { mutableStateOf(false) }
+    var showDeleteConfirm by rememberSaveable(memo.id) { mutableStateOf(false) }
+    var showDiscardConfirm by rememberSaveable(memo.id) { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
@@ -121,28 +144,35 @@ fun V2MemoDetailScreen(
     }
 
     fun saveChanges() {
-        if (!canSave) return
-        val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
-        val trimmedTitle = title.trim()
-        val trimmedBody = body.trim()
+        if (saving || !canSave) return
+        saving = true
+        saveError = null
+        val draftTitle = title.trim()
+        val draftBody = body.trim()
+        val draftTagIds = selectedTagIds.toList()
+        val draftGoalIds = selectedGoalIds.toSet()
+        val draftPriorityRaw = priorityRaw
         val sourceHint = if (memo.isAiInsightMemo()) "ai" else null
-        val updated = memo.copy(
-            title = trimmedTitle,
-            displayTitle = trimmedTitle,
-            text = trimmedBody,
-            tags = tagNames,
-            tagIds = selectedTagIds.toList(),
-            linkedGoalIds = selectedGoalIds.toList(),
-            topic = V2MemoBridge.inferTopic(null, tagNames, trimmedTitle),
-            accent = V2MemoBridge.inferAccent(sourceHint, priorityRaw, tagNames),
-            priorityRaw = priorityRaw,
-        )
         scope.launch {
-            saving = true
-            saveError = null
             try {
-                V2MemoStore.updateAndWait(updated)
-                V2GoalStore.replaceMemoLinks(memo.id, selectedGoalIds)
+                val tagNames = V2CategoryStore.tagNamesFor(draftTagIds.toSet())
+                val updated = memo.copy(
+                    title = draftTitle,
+                    displayTitle = draftTitle,
+                    text = draftBody,
+                    tags = tagNames,
+                    tagIds = draftTagIds,
+                    linkedGoalIds = draftGoalIds.toList(),
+                    topic = V2MemoBridge.inferTopic(null, tagNames, draftTitle),
+                    accent = V2MemoBridge.inferAccent(sourceHint, draftPriorityRaw, tagNames),
+                    priorityRaw = draftPriorityRaw,
+                )
+                if (persistUpdatedMemo != null) {
+                    persistUpdatedMemo(updated)
+                } else {
+                    V2MemoStore.updateAndWait(updated)
+                }
+                V2GoalStore.replaceMemoLinks(memo.id, draftGoalIds)
                 dirty = false
                 onBack()
             } catch (e: CancellationException) {
@@ -157,11 +187,15 @@ fun V2MemoDetailScreen(
 
     fun deleteMemo() {
         if (deleting) return
+        deleting = true
+        deleteError = null
         scope.launch {
-            deleting = true
-            deleteError = null
             try {
-                V2MemoStore.deleteAndWait(memo.id)
+                if (persistDeletedMemo != null) {
+                    persistDeletedMemo(memo.id)
+                } else {
+                    V2MemoStore.deleteAndWait(memo.id)
+                }
                 onBack()
             } catch (e: CancellationException) {
                 throw e
@@ -181,6 +215,7 @@ fun V2MemoDetailScreen(
             .fillMaxSize()
             .background(DSColors.warmWhite),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             DetailNavBar(
                 onBack = ::attemptBack,
@@ -196,43 +231,46 @@ fun V2MemoDetailScreen(
                     .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
                 verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
             ) {
-                TextMemoPriorityHeader(
-                    priorityRaw = priorityRaw,
-                    parentCategoryName = parentCategoryNameFor(selectedTagIds),
-                    onCycle = {
-                        priorityRaw = nextTextMemoPriority(priorityRaw)
-                        dirty = true
-                    },
-                )
-                BasicTextField(
-                    value = title,
-                    onValueChange = {
-                        title = it.take(TextMemoTitleMaxLength)
-                        dirty = true
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 1.dp),
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF1A1A1A),
-                    ),
-                    cursorBrush = SolidColor(DSColors.fairway),
-                    decorationBox = { inner ->
-                        if (title.isEmpty()) {
-                            Text(
-                                "标题",
-                                fontSize = 30.sp,
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFFC5C5C5),
-                            )
-                        }
-                        inner()
-                    },
-                )
-                TextMemoSubtitle(memo)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextMemoPriorityHeader(
+                        priorityRaw = priorityRaw,
+                        parentCategoryName = parentCategoryNameFor(selectedTagIds),
+                        onCycle = {
+                            priorityRaw = nextTextMemoPriority(priorityRaw)
+                            dirty = true
+                        },
+                    )
+                    BasicTextField(
+                        value = title,
+                        onValueChange = {
+                            title = it.take(TextMemoTitleMaxLength)
+                            dirty = true
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 1.dp)
+                            .testTag("text-memo-detail-title-field"),
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF1A1A1A),
+                        ),
+                        cursorBrush = SolidColor(DSColors.fairway),
+                        decorationBox = { inner ->
+                            if (title.isEmpty()) {
+                                Text(
+                                    "标题",
+                                    fontSize = 30.sp,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color(0xFFC5C5C5),
+                                )
+                            }
+                            inner()
+                        },
+                    )
+                    TextMemoSubtitle(memo, modifier = Modifier.padding(top = 2.dp))
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -255,7 +293,8 @@ fun V2MemoDetailScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 220.dp),
+                            .heightIn(min = 220.dp)
+                            .testTag("text-memo-detail-body-field"),
                         textStyle = TextStyle(fontSize = 14.sp, color = Color(0xFF1A1A1A)),
                         cursorBrush = SolidColor(DSColors.fairway),
                         decorationBox = { inner ->
@@ -275,7 +314,7 @@ fun V2MemoDetailScreen(
                         Text("${body.length}字", fontSize = 11.sp, color = DSColors.shadowGray)
                     }
                 }
-                TextMemoAttachmentsSection(onAddClick = { showAttachmentPlan = true })
+                TextMemoAttachmentsSection(memo)
                 V2MemoTagPickerField(
                     selectedTagIds = selectedTagIds,
                     onSelectedTagIdsChange = { selectedTagIds = it; dirty = true },
@@ -297,157 +336,194 @@ fun V2MemoDetailScreen(
                 TextMemoDecorativeFooter()
             }
 
-            if (dirty) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .imePadding()
-                        .v2NavigationBarPadding()
-                        .background(DSColors.warmWhite.copy(alpha = 0.95f))
-                        .drawBehind {
-                            drawLine(
-                                color = Color.Black.copy(alpha = 0.06f),
-                                start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                                end = androidx.compose.ui.geometry.Offset(size.width, 0f),
-                                strokeWidth = 1.dp.toPx(),
-                            )
-                        }
-                        .padding(DSSpacing.lg)
-                        .shadow(
-                            elevation = 10.dp,
-                            shape = RoundedCornerShape(50),
-                            ambientColor = DSColors.fairway.copy(alpha = 0.4f),
-                            spotColor = DSColors.fairway.copy(alpha = 0.4f),
-                        )
-                        .clip(RoundedCornerShape(50))
-                        .background(if (canSave || saving) DSColors.fairway else DSColors.fairway.copy(alpha = 0.4f))
-                        .clickable(enabled = canSave, onClick = ::saveChanges)
-                        .padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (saving) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        } else {
-                            Icon(
-                                Icons.Filled.CheckCircle,
-                                null,
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp),
-                            )
-                        }
-                        Text(
-                            if (saving) "保存中…" else "保存",
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
+            TextMemoDetailSaveBar(
+                canSave = canSave,
+                saving = saving,
+                onSave = ::saveChanges,
+            )
         }
     }
 
     saveError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { saveError = null },
-            title = { Text("保存失败") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { saveError = null }) {
-                    Text("好", color = DSColors.fairway)
-                }
-            },
+        VideoMemoOperationFailureDialog(
+            title = "保存失败",
+            tagPrefix = "text-memo-detail-save-failure",
+            message = message,
+            primaryLabel = "好",
+            onPrimary = { saveError = null },
+            onDismiss = { saveError = null },
         )
     }
 
     if (showDiscardConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDiscardConfirm = false },
-            title = { Text("放弃未保存的修改？") },
-            text = { Text("已修改的内容将丢失。") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDiscardConfirm = false
-                        onBack()
-                    },
-                ) {
-                    Text("放弃", color = DSColors.flagRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardConfirm = false }) {
-                    Text("继续编辑")
-                }
+        VideoMemoDiscardSheet(
+            editing = true,
+            onContinue = { showDiscardConfirm = false },
+            onDiscard = {
+                showDiscardConfirm = false
+                onBack()
             },
         )
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { if (!deleting) showDeleteConfirm = false },
-            title = { Text("删除这条 Memo？") },
-            text = { Text("删除后无法恢复。") },
-            confirmButton = {
-                TextButton(
-                    enabled = !deleting,
-                    onClick = ::deleteMemo,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        if (deleting) {
-                            CircularProgressIndicator(
-                                color = DSColors.flagRed,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
-                        Text(if (deleting) "删除中..." else "删除", color = DSColors.flagRed)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !deleting, onClick = { showDeleteConfirm = false }) {
-                    Text("取消")
-                }
-            },
+        TextMemoDeleteConfirmationSheet(
+            deleting = deleting,
+            onConfirm = ::deleteMemo,
+            onDismiss = { showDeleteConfirm = false },
         )
     }
 
     deleteError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { deleteError = null },
-            title = { Text("删除失败") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { deleteError = null }) {
-                    Text("好", color = DSColors.fairway)
-                }
-            },
+        VideoMemoOperationFailureDialog(
+            title = "删除失败",
+            tagPrefix = "text-memo-delete-failure",
+            message = message,
+            primaryLabel = "好",
+            onPrimary = { deleteError = null },
+            onDismiss = { deleteError = null },
         )
     }
 
-    if (showAttachmentPlan) {
-        AlertDialog(
-            onDismissRequest = { showAttachmentPlan = false },
-            title = { Text("附件替代方案") },
-            text = { Text("当前文字 Memo 会优先保留正文、标签、优先级和目标关联；需要带视频复盘时，可以创建视频 Memo，或在目标详情里关联已有 Memo。") },
-            confirmButton = {
-                TextButton(onClick = { showAttachmentPlan = false }) {
-                    Text("知道了", color = DSColors.fairway)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun TextMemoDeleteConfirmationSheet(
+    deleting: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = { if (!deleting) onDismiss() },
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.34f),
+        dragHandle = null,
+        tonalElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                .padding(horizontal = 12.dp).padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(Color.White),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "删除这条 Memo？",
+                        color = Color(0xFF6B7280),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        "删除后无法恢复",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                    )
                 }
-            },
-        )
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE5E7EB)))
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                        .clickable(enabled = !deleting, onClick = onConfirm)
+                        .testTag("text-memo-delete-confirm"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (deleting) "删除中…" else "删除",
+                        color = Color(0xFFC0392B),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+                    .clip(RoundedCornerShape(14.dp)).background(Color.White)
+                    .clickable(enabled = !deleting, onClick = onDismiss)
+                    .testTag("text-memo-delete-cancel"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "取消",
+                    color = DSColors.fairway,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun TextMemoDetailSaveBar(
+    canSave: Boolean,
+    saving: Boolean,
+    onSave: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .imePadding()
+            .v2NavigationBarPadding()
+            .background(DSColors.warmWhite.copy(alpha = 0.95f))
+            .drawBehind {
+                drawLine(
+                    color = Color.Black.copy(alpha = 0.06f),
+                    start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                    end = androidx.compose.ui.geometry.Offset(size.width, 0f),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+            .padding(DSSpacing.lg)
+            .shadow(
+                elevation = 10.dp,
+                shape = RoundedCornerShape(50),
+                ambientColor = DSColors.fairway.copy(alpha = 0.4f),
+                spotColor = DSColors.fairway.copy(alpha = 0.4f),
+            )
+            .clip(RoundedCornerShape(50))
+            .background(if (canSave || saving) DSColors.fairway else DSColors.fairway.copy(alpha = 0.4f))
+            .testTag("text-memo-detail-save")
+            .clickable(enabled = canSave, onClick = onSave)
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (saving) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(16.dp),
+                )
+            } else {
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    null,
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+            Text(
+                if (saving) "保存中…" else "保存",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
@@ -460,7 +536,7 @@ private fun DetailNavBar(
         modifier = Modifier
             .fillMaxWidth()
             .v2StatusBarPadding()
-            .background(DSColors.cardWhite.copy(alpha = 0.92f))
+            .background(DSColors.warmWhite)
             .padding(horizontal = DSSpacing.lg)
             .padding(top = 12.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -530,65 +606,103 @@ private fun TextMemoPriorityHeader(
 }
 
 @Composable
-private fun TextMemoAttachmentsSection(onAddClick: () -> Unit) {
+internal fun TextMemoAttachmentsSection(
+    memo: V2Memo,
+    modifier: Modifier = Modifier,
+) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("附件", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.deepGreen)
             Spacer(Modifier.weight(1f))
             Text(
-                "+ 添加",
+                "暂不支持添加",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = DSColors.fairway.copy(alpha = 0.45f),
-                modifier = Modifier
-                    .clickable(onClick = onAddClick)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                color = DSColors.shadowGray,
             )
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(88.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(DSColors.mistGreen.copy(alpha = 0.4f))
-                .clickable(onClick = onAddClick)
-                .drawBehind {
-                    val stroke = Stroke(
-                        width = 2.dp.toPx(),
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())),
+        if (memo.attachedVideoIds.isEmpty() && memo.attachedImageIds.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(88.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DSColors.mistGreen.copy(alpha = 0.4f))
+                    .drawBehind {
+                        val stroke = Stroke(
+                            width = 2.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())),
+                        )
+                        drawRoundRect(
+                            color = Color(0xFFB5CFC1),
+                            style = stroke,
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx(), 14.dp.toPx()),
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(
+                        Icons.Filled.PhotoLibrary,
+                        contentDescription = null,
+                        tint = DSColors.shadowGray.copy(alpha = 0.7f),
+                        modifier = Modifier.size(22.dp),
                     )
-                    drawRoundRect(
-                        color = Color(0xFFB5CFC1),
-                        style = stroke,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx(), 14.dp.toPx()),
+                    Text("暂无附件", fontSize = 12.sp, color = DSColors.shadowGray)
+                }
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (memo.attachedVideoIds.isNotEmpty()) {
+                    TextMemoAttachmentChip(
+                        icon = Icons.Filled.Videocam,
+                        text = "${memo.attachedVideoIds.size} 个视频",
+                        color = Color(0xFF3B82F6),
                     )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(
-                    Icons.Filled.PhotoLibrary,
-                    contentDescription = null,
-                    tint = DSColors.shadowGray.copy(alpha = 0.7f),
-                    modifier = Modifier.size(22.dp),
-                )
-                Text("点击添加视频或图片", fontSize = 12.sp, color = DSColors.shadowGray)
+                }
+                if (memo.attachedImageIds.isNotEmpty()) {
+                    TextMemoAttachmentChip(
+                        icon = Icons.Filled.PhotoLibrary,
+                        text = "${memo.attachedImageIds.size} 张图片",
+                        color = Color(0xFF10B981),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun TextMemoSubtitle(memo: V2Memo) {
+private fun TextMemoAttachmentChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    color: Color,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(color.copy(alpha = 0.12f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(11.dp))
+        Text(text, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = color)
+    }
+}
+
+@Composable
+private fun TextMemoSubtitle(memo: V2Memo, modifier: Modifier = Modifier) {
     val fmt = remember { DateTimeFormatter.ofPattern("yyyy年M月d日") }
     Text(
         "${fmt.format(memo.createdAt)} · ${textMemoSourceLabel(memo)}",
         fontSize = 12.sp,
         color = DSColors.shadowGray,
-        modifier = Modifier.padding(top = 2.dp),
+        modifier = modifier,
     )
 }
 
@@ -756,9 +870,10 @@ private fun DeleteBtn(onClick: () -> Unit) {
             .size(38.dp)
             .clip(CircleShape)
             .background(DSColors.flagRed.copy(alpha = 0.08f))
+            .testTag("text-memo-delete")
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Filled.DeleteOutline, null, tint = DSColors.flagRed, modifier = Modifier.size(14.dp))
+        Icon(Icons.Filled.DeleteOutline, "删除 Memo", tint = DSColors.flagRed, modifier = Modifier.size(14.dp))
     }
 }

@@ -2,6 +2,7 @@
 <paths>
     <cache-path name="videos" path="videos/" />
     <cache-path name="avatars" path="avatars/" />
+    <cache-path name="chat_media" path="chat_media/" />
     <files-path name="memo_videos" path="videos/" />
     <files-path name="user_videos" path="users/" />
     <external-files-path name="external_videos" path="videos/" />

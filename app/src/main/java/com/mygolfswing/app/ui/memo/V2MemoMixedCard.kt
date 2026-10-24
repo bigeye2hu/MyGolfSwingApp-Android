@@ -38,11 +38,11 @@ import java.util.Locale
 
 /** 视频笔记横滑卡（对齐 iOS `V2MemoMixedCard`，210×161） */
 @Composable
-fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier) {
+fun V2MemoMixedCard(memo: V2Memo, modifier: Modifier = Modifier, guestPreview: Boolean = false) {
     val cardW = 210.dp
     val cardH = 161.dp
     val thumbW = 80.dp
-    val playable = remember(memo.videoUrl) { memoVideoPlayable(memo.videoUrl) }
+    val playable = remember(memo.videoUrl, guestPreview) { guestPreview || memoVideoPlayable(memo.videoUrl) }
 
     Box(modifier = modifier.width(cardW).height(cardH)) {
         Row(

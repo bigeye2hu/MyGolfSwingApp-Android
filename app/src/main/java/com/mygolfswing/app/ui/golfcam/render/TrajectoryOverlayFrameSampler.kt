@@ -42,6 +42,7 @@ internal object TrajectoryOverlayFrameSampler {
                     bezier = bezier,
                     timing = timing,
                     params = TrajectoryMotionModel.parametersFromStyle(style),
+                    arcTableOverride = arcTable,
                 ).progressAtTime(elapsedSec)
         }
         val headProgress = rawHeadProgress.takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0f

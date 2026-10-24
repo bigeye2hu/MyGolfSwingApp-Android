@@ -12,7 +12,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import kotlin.math.abs
-import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 internal const val GOLF_CAM_THUMBNAIL_PRELOAD_COUNT = 120
@@ -60,17 +59,11 @@ internal fun golfCamTrimImpactPreloadSampleTimesMs(
     val safeStartMs = trimStartMs.coerceAtLeast(0L)
     val safeEndExclusiveMs = GolfCamFrameTimeline.endExclusiveMsAfterStart(safeStartMs, trimEndMs)
     val totalFrames = GolfCamFrameTimeline.totalFramesForRange(safeStartMs, safeEndExclusiveMs, frameRate)
-    val count = maxThumbnails
-        .coerceIn(0, GOLF_CAM_TRIM_IMPACT_PRELOAD_COUNT)
-        .coerceAtMost(totalFrames)
-    if (count == 0) return emptyList()
-    if (count == 1) return listOf(safeStartMs)
-    val lastFrameIndex = GolfCamFrameTimeline.lastFrameIndexForRange(safeStartMs, safeEndExclusiveMs, frameRate)
+    val requestedCount = maxThumbnails.coerceIn(0, GOLF_CAM_TRIM_IMPACT_PRELOAD_COUNT)
+    if (requestedCount == 0) return emptyList()
+    val frameIndices = impactFrameThumbnailFrameIndices(totalFrames, requestedCount)
     val lastFrameTimeMs = GolfCamFrameTimeline.lastFrameTimeMsForRange(safeStartMs, safeEndExclusiveMs, frameRate)
-    return (0 until count).map { index ->
-        val frameIndex = (index * lastFrameIndex.toDouble() / (count - 1).toDouble())
-            .roundToInt()
-            .coerceIn(0, lastFrameIndex)
+    return frameIndices.map { frameIndex ->
         GolfCamFrameTimeline.timeMsForFrame(safeStartMs, frameIndex, frameRate)
             .coerceIn(safeStartMs, lastFrameTimeMs)
     }.distinct()

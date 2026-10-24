@@ -32,7 +32,11 @@ class V2CreditsRepository(
         val uid = session.current().userId ?: return null
         @Suppress("UNUSED_VARIABLE") val _uid = uid
         val now = System.currentTimeMillis()
-        if (!force && now - (lastFetchAtByUser[uid] ?: 0L) < cacheTtlMs) {
+        val lastFetchAt = lastFetchAtByUser[uid]
+            ?: session.creditsLastUpdateEpochMillis(uid)
+            ?: 0L
+        if (!force && now - lastFetchAt < cacheTtlMs) {
+            lastFetchAtByUser[uid] = lastFetchAt
             return session.current().credits
         }
         return runCreditsCatching {
@@ -40,15 +44,18 @@ class V2CreditsRepository(
             val available = resp["credits_available"]?.jsonPrimitive?.intOrNull
                 ?: resp["credits_balance"]?.jsonPrimitive?.intOrNull
                 ?: 0
-            session.updateCredits(available)
-            lastFetchAtByUser[uid] = System.currentTimeMillis()
+            val confirmedAt = System.currentTimeMillis()
+            session.updateCredits(available, serverConfirmedAtEpochMillis = confirmedAt)
+            lastFetchAtByUser[uid] = confirmedAt
             available
         }.getOrNull()
     }
 
     /** 清除本地积分请求缓存后，强制以服务端余额校准本机显示。 */
     suspend fun resetLocalCacheAndRefresh(): Int? {
-        reset()
+        val uid = session.current().userId ?: return null
+        lastFetchAtByUser.remove(uid)
+        session.clearCreditsCache(uid)
         return fetchBalance(force = true)
     }
 
@@ -81,8 +88,9 @@ class V2CreditsRepository(
             ?: resp["credits_balance"]?.jsonPrimitive?.intOrNull
             ?: resp["available_balance"]?.jsonPrimitive?.intOrNull
             ?: amount
-        session.updateCredits(available)
-        session.current().userId?.let { lastFetchAtByUser[it] = System.currentTimeMillis() }
+        val confirmedAt = System.currentTimeMillis()
+        session.updateCredits(available, serverConfirmedAtEpochMillis = confirmedAt)
+        session.current().userId?.let { lastFetchAtByUser[it] = confirmedAt }
         available
     }
 

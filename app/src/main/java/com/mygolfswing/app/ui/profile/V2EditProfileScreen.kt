@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
@@ -11,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,25 +33,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,18 +64,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.store.V2ProfileStore
-import com.mygolfswing.app.ui.common.V2NavTopBarCentered
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -114,114 +122,139 @@ private val locationProvinces = listOf(
     "山西", "贵州", "黑龙江", "吉林", "甘肃", "内蒙古", "新疆", "海南",
     "宁夏", "青海", "西藏", "香港", "澳门", "台湾",
 )
-private val locationSearchAliases = mapOf(
-    "北京" to listOf("beijing", "bj"),
-    "上海" to listOf("shanghai", "sh"),
-    "广州" to listOf("guangzhou", "gz"),
-    "深圳" to listOf("shenzhen", "sz"),
-    "杭州" to listOf("hangzhou", "hz"),
-    "成都" to listOf("chengdu", "cd"),
-    "重庆" to listOf("chongqing", "cq"),
-    "武汉" to listOf("wuhan", "wh"),
-    "西安" to listOf("xian", "xa"),
-    "南京" to listOf("nanjing", "nj"),
-    "苏州" to listOf("suzhou"),
-    "天津" to listOf("tianjin", "tj"),
-    "青岛" to listOf("qingdao", "qd"),
-    "厦门" to listOf("xiamen", "xm"),
-    "三亚" to listOf("sanya", "sy"),
-    "海口" to listOf("haikou", "hk"),
-    "广东" to listOf("guangdong", "gd"),
-    "浙江" to listOf("zhejiang", "zj"),
-    "江苏" to listOf("jiangsu", "js"),
-    "山东" to listOf("shandong", "sd"),
-    "四川" to listOf("sichuan", "sc"),
-    "湖北" to listOf("hubei", "hb"),
-    "湖南" to listOf("hunan", "hn"),
-    "河南" to listOf("henan"),
-    "福建" to listOf("fujian", "fj"),
-    "安徽" to listOf("anhui", "ah"),
-    "河北" to listOf("hebei"),
-    "陕西" to listOf("shaanxi", "shanxi", "sx"),
-    "辽宁" to listOf("liaoning", "ln"),
-    "江西" to listOf("jiangxi", "jx"),
-    "云南" to listOf("yunnan", "yn"),
-    "广西" to listOf("guangxi", "gx"),
-    "山西" to listOf("shanxi"),
-    "贵州" to listOf("guizhou", "gz"),
-    "黑龙江" to listOf("heilongjiang", "hlj"),
-    "吉林" to listOf("jilin", "jl"),
-    "甘肃" to listOf("gansu", "gs"),
-    "内蒙古" to listOf("neimenggu", "nmg", "inner mongolia"),
-    "新疆" to listOf("xinjiang", "xj"),
-    "海南" to listOf("hainan", "hn"),
-    "宁夏" to listOf("ningxia", "nx"),
-    "青海" to listOf("qinghai", "qh"),
-    "西藏" to listOf("xizang", "tibet", "xz"),
-    "香港" to listOf("xianggang", "hongkong", "hk"),
-    "澳门" to listOf("aomen", "macau", "mo"),
-    "台湾" to listOf("taiwan", "tw"),
+
+internal data class ProfileEditUpdate(
+    val nickname: String?,
+    val gender: String,
+    val birthday: String,
+    val location: String,
+    val bio: String,
+    val handicap: String?,
+    val golfAge: Int?,
+    val golfStartYear: Int?,
+    val dominantHand: String,
+    val golfBrands: List<String>?,
+)
+
+internal data class ProfileEditCameraOutput(
+    val file: File,
+    val uri: Uri,
+)
+
+internal data class ProfileEditOperations(
+    val decodeAvatar: (Uri) -> Bitmap?,
+    val uploadAvatar: suspend (Bitmap) -> Result<String>,
+    val updateProfile: suspend (ProfileEditUpdate) -> Result<Unit>,
+    val createCameraOutput: () -> ProfileEditCameraOutput,
+    val launchGallery: (((Uri?) -> Unit) -> Unit)? = null,
+    val launchCamera: ((ProfileEditCameraOutput, (Boolean) -> Unit) -> Unit)? = null,
 )
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun V2EditProfileScreen(
+internal fun V2EditProfileScreen(
     onBack: () -> Unit,
     onSaved: () -> Unit,
     title: String = "编辑资料",
+    isCompletionFlow: Boolean = false,
+    operations: ProfileEditOperations? = null,
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val currentYear = LocalDate.now().year
+    val defaultOperations = remember(context) {
+        ProfileEditOperations(
+            decodeAvatar = { uri ->
+                context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
+            },
+            uploadAvatar = ServiceLocator.authRepo::uploadAvatar,
+            updateProfile = { update ->
+                ServiceLocator.authRepo.updateUserInfo(
+                    nickname = update.nickname,
+                    gender = update.gender,
+                    birthday = update.birthday,
+                    location = update.location,
+                    bio = update.bio,
+                    handicap = update.handicap,
+                    golfAge = update.golfAge,
+                    golfStartYear = update.golfStartYear,
+                    dominantHand = update.dominantHand,
+                    golfBrands = update.golfBrands,
+                ).map { Unit }
+            },
+            createCameraOutput = {
+                createProfileEditCameraOutput(
+                    createFile = { createAvatarCameraOutputFile(context) },
+                    createUri = { outputFile ->
+                        FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            outputFile,
+                        )
+                    },
+                )
+            },
+        )
+    }
+    val resolvedOperations = operations ?: defaultOperations
 
-    var nickname by remember(profile.nickname) { mutableStateOf(profile.nickname.takeIf { it != "未登录" } ?: "") }
-    var gender by remember(profile.gender) { mutableStateOf(profile.gender) }
-    var birthday by remember(profile.birthday) { mutableStateOf(profile.birthday ?: "") }
-    var hasBirthday by remember(profile.birthday) { mutableStateOf(!profile.birthday.isNullOrBlank()) }
-    var location by remember(profile.location) { mutableStateOf(profile.location ?: "") }
-    var bio by remember(profile.bio) { mutableStateOf(profile.bio ?: "") }
-    var handicap by remember(profile.handicap) {
+    var nickname by rememberSaveable(profile.nickname) {
+        mutableStateOf(profile.nickname.takeIf { it != "未登录" } ?: "")
+    }
+    var gender by rememberSaveable(profile.gender) { mutableStateOf(profile.gender) }
+    var birthday by rememberSaveable(profile.birthday) { mutableStateOf(profile.birthday ?: "") }
+    var hasBirthday by rememberSaveable(profile.birthday) { mutableStateOf(!profile.birthday.isNullOrBlank()) }
+    var location by rememberSaveable(profile.location) { mutableStateOf(profile.location ?: "") }
+    var bio by rememberSaveable(profile.bio) { mutableStateOf(profile.bio ?: "") }
+    var handicap by rememberSaveable(profile.handicap) {
         mutableStateOf(profile.handicap.takeIf { it != "未设置" }?.normalizedHandicapText() ?: "18.0")
     }
-    var golfStartYear by remember(profile.golfYears, currentYear) {
+    var golfStartYear by rememberSaveable(profile.golfYears, currentYear) {
         mutableStateOf(
             (extractStartYear(profile.golfYears) ?: currentYear).coerceIn(1970, currentYear).toString(),
         )
     }
-    var dominantHand by remember(profile.dominantHand) { mutableStateOf(profile.dominantHand) }
-    val selectedBrands = remember(profile.golfBrands) {
-        mutableStateListOf<String>().apply { addAll(profile.golfBrands) }
+    var dominantHand by rememberSaveable(profile.dominantHand) {
+        mutableStateOf(profile.dominantHand.takeUnless { it.isBlank() || it == "未设置" } ?: "右手")
+    }
+    var selectedBrands by rememberSaveable(profile.golfBrands) {
+        mutableStateOf(ArrayList(profile.golfBrands))
     }
     var avatarBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var pendingCameraAvatarUri by remember { mutableStateOf<Uri?>(null) }
-    var pendingCameraAvatarFile by remember { mutableStateOf<File?>(null) }
+    var pendingCameraAvatarUriText by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCameraAvatarFilePath by rememberSaveable { mutableStateOf<String?>(null) }
     var uploadingAvatar by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var showSaveSuccess by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
-    var showLocationPicker by remember { mutableStateOf(false) }
-    var showAvatarSourcePicker by remember { mutableStateOf(false) }
+    var showLocationPicker by rememberSaveable { mutableStateOf(false) }
+    var showAvatarSourcePicker by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    fun uploadAvatarFromUri(uri: Uri) {
+    fun uploadAvatarFromUri(uri: Uri, cleanupFile: File? = null) {
         scope.launch {
             uploadingAvatar = true
             try {
-                val bm = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                val bm = resolvedOperations.decodeAvatar(uri)
                 if (bm == null) {
-                    error = "无法读取头像图片"
+                    saveError = "头像上传失败，请换一张图片或稍后重试"
                     return@launch
                 }
+                val previousBitmap = avatarBitmap
+                // 与 iOS 一致：选中后立即预览；只有上传失败时才回退旧头像。
                 avatarBitmap = bm
-                ServiceLocator.authRepo.uploadAvatar(bm).onFailure {
-                    error = profileEditError("头像上传失败，请换一张图片或稍后重试", it.message)
-                }
+                resolvedOperations.uploadAvatar(bm)
+                    .onFailure {
+                        avatarBitmap = previousBitmap
+                        saveError = profileEditError("头像上传失败，请换一张图片或稍后重试", it.message)
+                    }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
-                error = profileEditThrowableError("头像上传失败，请换一张图片或稍后重试", e)
+                saveError = profileEditThrowableError("头像上传失败，请换一张图片或稍后重试", e)
             } finally {
+                cleanupFile?.delete()
                 uploadingAvatar = false
             }
         }
@@ -239,46 +272,55 @@ fun V2EditProfileScreen(
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture(),
     ) { ok ->
-        val uri = pendingCameraAvatarUri
+        val uri = pendingCameraAvatarUriText?.let(Uri::parse)
+        val file = pendingCameraAvatarFilePath?.let(::File)
         if (ok && uri != null) {
-            uploadAvatarFromUri(uri)
+            uploadAvatarFromUri(uri, cleanupFile = file)
         } else {
-            pendingCameraAvatarFile?.delete()
+            file?.delete()
         }
-        pendingCameraAvatarUri = null
-        pendingCameraAvatarFile = null
+        pendingCameraAvatarUriText = null
+        pendingCameraAvatarFilePath = null
     }
 
     fun openGalleryAvatarPicker() {
         runCatching {
-            galleryPicker.launch(
-                androidx.activity.result.PickVisualMediaRequest(
-                    ActivityResultContracts.PickVisualMedia.ImageOnly,
-                ),
-            )
+            val override = resolvedOperations.launchGallery
+            if (override != null) {
+                override { uri -> if (uri != null) uploadAvatarFromUri(uri) }
+            } else {
+                galleryPicker.launch(
+                    androidx.activity.result.PickVisualMediaRequest(
+                        ActivityResultContracts.PickVisualMedia.ImageOnly,
+                    ),
+                )
+            }
         }.onFailure {
-            error = profileEditError("无法打开相册，请稍后重试或改用拍照", it.message)
+            saveError = profileEditError("无法打开相册，请稍后重试或改用拍照", it.message)
         }
     }
 
     fun openCameraAvatarPicker() {
         var file: File? = null
         runCatching {
-            val outputFile = createAvatarCameraOutputFile(context)
-            file = outputFile
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                outputFile,
-            )
-            pendingCameraAvatarFile = file
-            pendingCameraAvatarUri = uri
-            cameraLauncher.launch(uri)
+            val output = resolvedOperations.createCameraOutput()
+            file = output.file
+            val override = resolvedOperations.launchCamera
+            if (override != null) {
+                override(output) { ok ->
+                    if (ok) uploadAvatarFromUri(output.uri, cleanupFile = output.file)
+                    else output.file.delete()
+                }
+            } else {
+                pendingCameraAvatarFilePath = output.file.absolutePath
+                pendingCameraAvatarUriText = output.uri.toString()
+                cameraLauncher.launch(output.uri)
+            }
         }.onFailure {
-            pendingCameraAvatarFile = null
-            pendingCameraAvatarUri = null
+            pendingCameraAvatarFilePath = null
+            pendingCameraAvatarUriText = null
             file?.delete()
-            error = profileEditError("无法打开相机，请检查权限或改从相册选择", it.message)
+            saveError = profileEditError("无法打开相机，请检查权限或改从相册选择", it.message)
         }
     }
 
@@ -300,15 +342,17 @@ fun V2EditProfileScreen(
         openGalleryAvatarPicker()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite)
-            .imePadding()
-            .v2NavigationBarPadding()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        V2NavTopBarCentered(title = title, onBack = { if (!saving) onBack() })
+    BackHandler(enabled = saving) {}
+
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .v2NavigationBarPadding()
+                .verticalScroll(rememberScrollState()),
+        ) {
+            ProfileEditTopBar(title = title, enabled = !saving, onCancel = onBack)
 
         // 头像
         AvatarSection(
@@ -318,65 +362,45 @@ fun V2EditProfileScreen(
             onPickPhoto = ::showAvatarSourceOptions,
         )
 
-        Spacer(Modifier.height(8.dp))
-
         // 基础信息
         Section(title = "基础信息") {
             FormItem(label = "昵称") {
-                OutlinedTextField(
+                ProfileEditSingleLineField(
                     value = nickname,
                     onValueChange = { nickname = it },
-                    placeholder = { Text("展示给球友的名字") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
+                    placeholder = "输入您的昵称",
+                    modifier = Modifier.testTag("profile-edit-nickname"),
                 )
             }
             FormItem(label = "性别") {
-                EqualChoiceRow(
-                    options = genderOptions,
+                GenderChoiceRow(
                     selected = gender,
-                    onSelect = { gender = it },
+                    expanded = isCompletionFlow,
+                    onSelect = { option ->
+                        gender = if (isCompletionFlow && gender == option) "" else option
+                    },
                 )
             }
-            FormItem(label = "生日") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = if (hasBirthday) "已设置" else "不显示生日",
-                        style = DSTypography.body,
-                        color = if (hasBirthday) DSColors.inkGreen else DSColors.shadowGray,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = hasBirthday,
-                        onCheckedChange = { checked ->
-                            hasBirthday = checked
-                            if (checked && birthday.isBlank()) birthday = LocalDate.now().toString()
+            ProfileEditBirthdayField(
+                hasBirthday = hasBirthday,
+                birthday = birthday,
+                onBirthdayEnabledChange = { checked ->
+                    hasBirthday = checked
+                    if (checked && birthday.isBlank()) birthday = LocalDate.now().toString()
+                },
+                onPick = {
+                    val initial = parseBirthdayDate(birthday) ?: LocalDate.now()
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, day ->
+                            birthday = LocalDate.of(year, month + 1, day).toString()
                         },
-                    )
-                }
-                if (hasBirthday) {
-                    BirthdayPickerField(
-                        birthday = birthday,
-                        onPick = {
-                            val initial = parseBirthdayDate(birthday) ?: LocalDate.now()
-                            DatePickerDialog(
-                                context,
-                                { _, year, month, day ->
-                                    birthday = LocalDate.of(year, month + 1, day).toString()
-                                },
-                                initial.year,
-                                initial.monthValue - 1,
-                                initial.dayOfMonth,
-                            ).show()
-                        },
-                    )
-                }
-            }
+                        initial.year,
+                        initial.monthValue - 1,
+                        initial.dayOfMonth,
+                    ).show()
+                },
+            )
             FormItem(label = "地区") {
                 LocationPickerField(
                     location = location,
@@ -384,12 +408,10 @@ fun V2EditProfileScreen(
                 )
             }
             FormItem(label = "个人简介", trailing = "${bio.length}/100") {
-                OutlinedTextField(
+                ProfileEditBioField(
                     value = bio,
                     onValueChange = { if (it.length <= 100) bio = it },
-                    placeholder = { Text("和球友分享你的故事…") },
-                    modifier = Modifier.fillMaxWidth().height(96.dp),
-                    colors = fieldColors(),
+                    modifier = Modifier.testTag("profile-edit-bio"),
                 )
             }
         }
@@ -431,7 +453,9 @@ fun V2EditProfileScreen(
                 brands = brandOptions,
                 selectedBrands = selectedBrands,
                 onToggle = { brand ->
-                    if (brand in selectedBrands) selectedBrands.remove(brand) else selectedBrands.add(brand)
+                    selectedBrands = ArrayList(selectedBrands).apply {
+                        if (brand in this) remove(brand) else add(brand)
+                    }
                 },
             )
         }
@@ -452,10 +476,6 @@ fun V2EditProfileScreen(
         val saveButtonShape = RoundedCornerShape(16.dp)
         Button(
             onClick = {
-                if (nickname.isBlank()) {
-                    error = "昵称不能为空"
-                    return@Button
-                }
                 val handicapValue = handicap.ifBlank { null }?.toDoubleOrNull()
                 if (handicap.isNotBlank() && (handicapValue == null || handicapValue !in 0.0..54.9)) {
                     error = "差点需在 0.0-54.9 之间"
@@ -472,17 +492,19 @@ fun V2EditProfileScreen(
                     error = null
                     saveError = null
                     val r = try {
-                        ServiceLocator.authRepo.updateUserInfo(
-                            nickname = nickname.trim(),
-                            gender = gender.takeUnless { it.isBlank() || it == "保密" },
-                            birthday = if (hasBirthday) birthday.ifBlank { null } else null,
-                            location = location.ifBlank { null },
-                            bio = bio.ifBlank { null },
-                            handicap = handicapValue?.toString(),
-                            golfAge = startYear?.let { (LocalDate.now().year - it).coerceAtLeast(0) },
-                            golfStartYear = startYear,
-                            dominantHand = dominantHand.takeIf { it != "未设置" },
-                            golfBrands = selectedBrands.toList(),
+                        resolvedOperations.updateProfile(
+                            ProfileEditUpdate(
+                                nickname = profileEditNicknamePatch(nickname),
+                                gender = gender.takeUnless { it.isBlank() || it == "保密" } ?: "",
+                                birthday = if (hasBirthday) birthday else "",
+                                location = location,
+                                bio = bio,
+                                handicap = handicapValue?.toString(),
+                                golfAge = startYear?.let { (LocalDate.now().year - it).coerceAtLeast(0) },
+                                golfStartYear = startYear,
+                                dominantHand = dominantHand,
+                                golfBrands = selectedBrands.toList().takeIf { it.isNotEmpty() },
+                            ),
                         )
                     } catch (e: CancellationException) {
                         throw e
@@ -506,7 +528,7 @@ fun V2EditProfileScreen(
             modifier = Modifier
                 .padding(horizontal = DSSpacing.lg)
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(40.dp)
                 .alpha(if (saving) 0.7f else 1f)
                 .shadow(
                     elevation = 10.dp,
@@ -526,13 +548,14 @@ fun V2EditProfileScreen(
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("保存中…", style = DSTypography.bodyBold)
+                Text("保存中…", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             } else {
-                Text("保存资料", style = DSTypography.bodyBold)
+                Text("保存资料", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
 
-        Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(40.dp))
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -545,10 +568,6 @@ fun V2EditProfileScreen(
             selectedLocation = location,
             onSelect = {
                 location = it
-                showLocationPicker = false
-            },
-            onClear = {
-                location = ""
                 showLocationPicker = false
             },
             onDismiss = { showLocationPicker = false },
@@ -596,6 +615,120 @@ fun V2EditProfileScreen(
 }
 
 @Composable
+private fun ProfileEditTopBar(
+    title: String,
+    enabled: Boolean,
+    onCancel: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .v2StatusBarPadding()
+            .height(44.dp)
+            .testTag("profile-edit-top-bar"),
+    ) {
+        Text(
+            text = title,
+            style = DSTypography.titleMedium,
+            color = DSColors.inkGreen,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .width(72.dp)
+                .height(44.dp)
+                .clickable(enabled = enabled, onClick = onCancel),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "取消",
+                color = DSColors.fairway,
+                fontSize = 17.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileEditSingleLineField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = DSTypography.body.copy(color = DSColors.inkGreen),
+        cursorBrush = SolidColor(DSColors.fairway),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .background(DSColors.mistGreen, RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp),
+        decorationBox = { innerField ->
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (value.isEmpty()) {
+                    Text(placeholder, color = DSColors.shadowGray, fontSize = 15.sp)
+                }
+                innerField()
+            }
+        },
+    )
+}
+
+@Composable
+private fun ProfileEditBirthdayField(
+    hasBirthday: Boolean,
+    birthday: String,
+    onBirthdayEnabledChange: (Boolean) -> Unit,
+    onPick: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("生日", color = DSColors.shadowGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = hasBirthday,
+                onCheckedChange = onBirthdayEnabledChange,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = DSColors.fairway,
+                    uncheckedThumbColor = Color.White,
+                    uncheckedTrackColor = DSColors.shadowGray.copy(alpha = 0.35f),
+                    uncheckedBorderColor = Color.Transparent,
+                ),
+            )
+        }
+        if (hasBirthday) BirthdayPickerField(birthday = birthday, onPick = onPick)
+    }
+}
+
+@Composable
+private fun ProfileEditBioField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        textStyle = DSTypography.body.copy(color = DSColors.inkGreen),
+        cursorBrush = SolidColor(DSColors.fairway),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(96.dp)
+            .background(DSColors.mistGreen, RoundedCornerShape(12.dp))
+            .padding(8.dp),
+    )
+}
+
+@Composable
 private fun AvatarSection(
     avatarUrl: String?,
     localBitmap: Bitmap?,
@@ -605,7 +738,7 @@ private fun AvatarSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 16.dp),
+            .padding(top = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
@@ -698,10 +831,12 @@ private fun AvatarSourcePickerDialog(
 ) {
     Dialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 36.dp)
                 .background(DSColors.cardWhite, RoundedCornerShape(16.dp)),
         ) {
             AvatarSourceOption(
@@ -729,7 +864,6 @@ private fun AvatarSourcePickerDialog(
             AvatarSourceOption(
                 icon = null,
                 title = "取消",
-                textColor = DSColors.shadowGray,
                 onClick = onDismiss,
             )
         }
@@ -740,7 +874,6 @@ private fun AvatarSourcePickerDialog(
 private fun AvatarSourceOption(
     icon: androidx.compose.ui.graphics.vector.ImageVector?,
     title: String,
-    textColor: Color = DSColors.inkGreen,
     onClick: () -> Unit,
 ) {
     Row(
@@ -756,11 +889,11 @@ private fun AvatarSourceOption(
                 icon,
                 contentDescription = null,
                 tint = DSColors.fairway,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(10.dp))
         }
-        Text(title, style = DSTypography.bodyBold, color = textColor, textAlign = TextAlign.Center)
+        Text(title, style = DSTypography.bodyBold, color = DSColors.inkGreen, textAlign = TextAlign.Center)
     }
 }
 
@@ -770,7 +903,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .padding(horizontal = DSSpacing.lg)
-            .padding(top = 8.dp)
+            .padding(top = DSSpacing.lg)
             .fillMaxWidth()
             .shadow(
                 elevation = 8.dp,
@@ -782,7 +915,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
             .padding(DSSpacing.lg),
         verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
     ) {
-        Text(title, style = DSTypography.bodyBold, color = DSColors.inkGreen)
+        Text(title, color = DSColors.inkGreen, fontSize = 17.sp, fontWeight = FontWeight.Bold)
         content()
     }
 }
@@ -795,10 +928,10 @@ private fun FormItem(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, style = DSTypography.caption, color = DSColors.shadowGray)
+            Text(label, color = DSColors.shadowGray, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             if (trailing != null) {
                 Spacer(modifier = Modifier.weight(1f))
-                Text(trailing, style = DSTypography.caption, color = DSColors.shadowGray)
+                Text(trailing, color = DSColors.shadowGray, fontSize = 11.sp)
             }
         }
         content()
@@ -867,10 +1000,9 @@ private fun LocationPickerField(
 }
 
 @Composable
-private fun LocationPickerDialog(
+internal fun LocationPickerDialog(
     selectedLocation: String,
     onSelect: (String) -> Unit,
-    onClear: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var searchText by rememberSaveable { mutableStateOf("") }
@@ -882,75 +1014,127 @@ private fun LocationPickerDialog(
         locationProvinces.filter { it.matchesLocationSearch(normalizedSearch) }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择地区", style = DSTypography.titleMedium, color = DSColors.inkGreen) },
-        text = {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                OutlinedTextField(
-                    value = searchText,
-                    onValueChange = { searchText = it },
-                    placeholder = { Text("搜索城市") },
-                    trailingIcon = {
-                        if (searchText.isNotBlank()) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "清除搜索",
-                                tint = DSColors.shadowGray,
-                                modifier = Modifier
-                                    .clickable { searchText = "" }
-                                    .padding(4.dp),
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        V2RoomPage(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .v2StatusBarPadding()
+                        .height(44.dp)
+                        .testTag("profile-location-picker-top-bar"),
+                ) {
+                    Text(
+                        "选择地区",
+                        style = DSTypography.titleMedium,
+                        color = DSColors.inkGreen,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = DSSpacing.sm),
+                    ) {
+                        Text("完成", color = DSColors.fairway, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .imePadding()
+                        .v2NavigationBarPadding()
+                        .padding(DSSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DSColors.mistGreen)
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = DSColors.shadowGray,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Box(Modifier.weight(1f)) {
+                            if (searchText.isEmpty()) {
+                                Text("搜索城市", color = DSColors.shadowGray, fontSize = 15.sp)
+                            }
+                            BasicTextField(
+                                value = searchText,
+                                onValueChange = { searchText = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    color = DSColors.inkGreen,
+                                    fontSize = 15.sp,
+                                ),
+                                cursorBrush = SolidColor(DSColors.fairway),
                             )
                         }
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors(),
-                )
-                LocationPickerSection(
-                    title = "热门城市",
-                    options = filteredCities,
-                    selectedLocation = selectedLocation,
-                    emptyText = "没有匹配的城市",
-                    onSelect = onSelect,
-                )
-                LocationPickerSection(
-                    title = "选择省份 / 地区",
-                    options = filteredProvinces,
-                    selectedLocation = selectedLocation,
-                    emptyText = "没有匹配的省份",
-                    onSelect = onSelect,
-                )
+                        if (searchText.isNotEmpty()) {
+                            Icon(
+                                imageVector = Icons.Filled.Cancel,
+                                contentDescription = "清除搜索",
+                                tint = DSColors.shadowGray.copy(alpha = 0.6f),
+                                modifier = Modifier.size(14.dp).clickable { searchText = "" },
+                            )
+                        }
+                    }
+                    LocationPickerSection(
+                        title = "热门城市",
+                        options = filteredCities,
+                        selectedLocation = selectedLocation,
+                        emptyText = "没有匹配的城市",
+                        columns = 4,
+                        onSelect = onSelect,
+                    )
+                    LocationPickerSection(
+                        title = "选择省份 / 地区",
+                        options = filteredProvinces,
+                        selectedLocation = selectedLocation,
+                        emptyText = "没有匹配的省份",
+                        columns = 3,
+                        onSelect = onSelect,
+                    )
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("完成", color = DSColors.fairway)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onClear) {
-                Text("清除", color = DSColors.shadowGray)
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
 private fun LocationPickerSection(
     title: String,
     options: List<String>,
     selectedLocation: String,
     emptyText: String,
+    columns: Int,
     onSelect: (String) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 8.dp,
+                shape = shape,
+                ambientColor = DSColors.fairway.copy(alpha = 0.06f),
+                spotColor = DSColors.fairway.copy(alpha = 0.06f),
+            )
+            .clip(shape)
+            .background(DSColors.cardWhite)
+            .padding(DSSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = DSTypography.bodyBold, color = DSColors.inkGreen)
             Spacer(modifier = Modifier.weight(1f))
@@ -965,24 +1149,53 @@ private fun LocationPickerSection(
                 color = DSColors.shadowGray,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 16.dp),
                 textAlign = TextAlign.Center,
             )
         } else {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                options.forEach { option ->
-                    PillChoice(
-                        text = option,
-                        selected = selectedLocation == option,
-                        onClick = { onSelect(option) },
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                options.chunked(columns).forEach { rowOptions ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        rowOptions.forEach { option ->
+                            LocationPickerChip(
+                                text = option,
+                                selected = selectedLocation == option,
+                                onClick = { onSelect(option) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(columns - rowOptions.size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun LocationPickerChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        color = if (selected) Color.White else DSColors.inkGreen,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        textAlign = TextAlign.Center,
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) DSColors.fairway else DSColors.mistGreen)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+    )
 }
 
 @Composable
@@ -1159,6 +1372,107 @@ private fun EqualChoiceButton(
 }
 
 @Composable
+private fun GenderChoiceRow(
+    selected: String,
+    expanded: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+    ) {
+        GenderChoiceButton(
+            text = genderOptions[0],
+            drawableRes = R.drawable.complete_profile_gender_boy,
+            selected = selected == genderOptions[0],
+            expanded = expanded,
+            onClick = { onSelect(genderOptions[0]) },
+            modifier = Modifier.weight(1f),
+        )
+        GenderChoiceButton(
+            text = genderOptions[1],
+            drawableRes = R.drawable.complete_profile_gender_girl,
+            selected = selected == genderOptions[1],
+            expanded = expanded,
+            onClick = { onSelect(genderOptions[1]) },
+            modifier = Modifier.weight(1f),
+        )
+        GenderChoiceButton(
+            text = genderOptions[2],
+            selected = selected == genderOptions[2] || (!expanded && selected.isBlank()),
+            expanded = expanded,
+            onClick = { onSelect(genderOptions[2]) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun GenderChoiceButton(
+    text: String,
+    selected: Boolean,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    drawableRes: Int? = null,
+) {
+    val foreground = if (selected) DSColors.warmWhite else DSColors.shadowGray
+    val content: @Composable () -> Unit = {
+        if (drawableRes != null) {
+            FoundationImage(
+                painter = painterResource(drawableRes),
+                contentDescription = null,
+                modifier = Modifier.size(if (expanded) 28.dp else 22.dp),
+            )
+        } else {
+            Icon(
+                Icons.Filled.VisibilityOff,
+                contentDescription = null,
+                tint = foreground,
+                modifier = Modifier.size(if (expanded) 21.dp else 15.dp),
+            )
+        }
+        Text(
+            text = text,
+            color = foreground,
+            fontSize = if (expanded) 13.sp else 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+    }
+
+    if (expanded) {
+        Column(
+            modifier = modifier
+                .height(64.dp)
+                .background(
+                    if (selected) DSColors.fairway else DSColors.mistGreen,
+                    RoundedCornerShape(13.dp),
+                )
+                .clickable(onClick = onClick),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+        ) {
+            content()
+        }
+    } else {
+        Row(
+            modifier = modifier
+                .height(42.dp)
+                .background(
+                    if (selected) DSColors.fairway else DSColors.mistGreen,
+                    RoundedCornerShape(12.dp),
+                )
+                .clickable(onClick = onClick),
+            horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
 private fun BrandChoiceGrid(
     brands: List<String>,
     selectedBrands: List<String>,
@@ -1235,15 +1549,7 @@ private fun PillChoice(text: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = DSColors.fairway,
-    unfocusedBorderColor = Color.Transparent,
-    focusedContainerColor = DSColors.mistGreen,
-    unfocusedContainerColor = DSColors.mistGreen,
-    disabledContainerColor = DSColors.mistGreen,
-    cursorColor = DSColors.fairway,
-)
+internal fun profileEditNicknamePatch(value: String): String? = value.takeIf { it.isNotEmpty() }
 
 internal fun profileEditError(base: String, debugDetail: String?): String {
     return profileEditError(base, debugDetail, ServiceLocator.isDebuggable)
@@ -1298,15 +1604,24 @@ private fun String.normalizedLocationSearch(): String =
 
 private fun String.matchesLocationSearch(normalizedQuery: String): Boolean {
     if (normalizedQuery.isBlank()) return true
-    val normalizedSelf = normalizedLocationSearch()
-    return normalizedSelf.contains(normalizedQuery) ||
-        locationSearchAliases.orEmptyFor(this).any { it.normalizedLocationSearch().contains(normalizedQuery) }
+    return normalizedLocationSearch().contains(normalizedQuery)
 }
-
-private fun Map<String, List<String>>.orEmptyFor(key: String): List<String> = this[key].orEmpty()
 
 private fun createAvatarCameraOutputFile(context: android.content.Context): File {
     val dir = File(context.cacheDir, "avatars").apply { mkdirs() }
     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
     return File(dir, "avatar_$timestamp.jpg")
+}
+
+internal fun createProfileEditCameraOutput(
+    createFile: () -> File,
+    createUri: (File) -> Uri,
+): ProfileEditCameraOutput {
+    val file = createFile()
+    return try {
+        ProfileEditCameraOutput(file = file, uri = createUri(file))
+    } catch (error: Throwable) {
+        file.delete()
+        throw error
+    }
 }

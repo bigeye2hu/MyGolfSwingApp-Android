@@ -32,11 +32,23 @@ object V2GoalStore {
     val goals: StateFlow<List<V2Goal>> = _goals.asStateFlow()
 
     private val pendingDeletedGoalIds = mutableSetOf<UUID>()
+    @Volatile private var inMemoryTestingSnapshotActive = false
 
     private val memoStore = V2MemoStore
 
     fun resetInMemory() {
+        inMemoryTestingSnapshotActive = false
         _goals.value = emptyList()
+        pendingDeletedGoalIds.clear()
+    }
+
+    /** 仅供 UI 自动化用例注入稳定快照，不触发 Room 或云端写入。 */
+    internal fun replaceInMemoryForTesting(goals: List<V2Goal>) {
+        // Instrumented tests run inside the real Application, where the Room
+        // collector is already active. Ignore Room emissions until reset so a
+        // deterministic page snapshot is not replaced midway through a test.
+        inMemoryTestingSnapshotActive = true
+        _goals.value = goals
         pendingDeletedGoalIds.clear()
     }
 
@@ -51,7 +63,9 @@ object V2GoalStore {
         collecting = true
         scope.launch {
             repo.observeAll().collect { latest ->
-                _goals.value = mergeRoomGoals(latest)
+                if (!inMemoryTestingSnapshotActive) {
+                    _goals.value = mergeRoomGoals(latest)
+                }
             }
         }
     }
@@ -179,13 +193,17 @@ object V2GoalStore {
     }
 
     fun update(goal: V2Goal) {
+        val now = LocalDateTime.now()
+        val updated = recalculateGoalStatusAfterEdit(goal.copy(updatedAt = now), now)
+        _goals.value = _goals.value.map { if (it.id == updated.id) updated else it }
         scope.launch {
-            repo.upsert(goal.copy(updatedAt = LocalDateTime.now()))
+            repo.upsert(updated)
         }
     }
 
     suspend fun updateAndWait(goal: V2Goal): UUID {
-        val updated = goal.copy(updatedAt = LocalDateTime.now())
+        val now = LocalDateTime.now()
+        val updated = recalculateGoalStatusAfterEdit(goal.copy(updatedAt = now), now)
         repo.upsert(updated)
         _goals.value = _goals.value.map { if (it.id == updated.id) updated else it }
         return updated.id
@@ -432,6 +450,36 @@ object V2GoalStore {
             }
             repo.bulkReplaceLocal(mocks)
         }
+    }
+}
+
+/**
+ * Re-evaluates only the active/completed boundary after an edit, matching iOS
+ * `V2GoalStore.update`. Paused and archived goals retain their explicit state.
+ */
+internal fun recalculateGoalStatusAfterEdit(
+    goal: V2Goal,
+    now: LocalDateTime,
+): V2Goal {
+    val reached = goal.targetSessions
+        ?.takeIf { it > 0 }
+        ?.let { goal.progress.current >= it }
+        ?: (
+            goal.metric.kind != V2Goal.Metric.Kind.FREE &&
+                goal.metric.target > 0 &&
+                goal.progress.current >= goal.metric.target
+            )
+    return when {
+        reached && goal.status == V2Goal.Status.ACTIVE -> goal.copy(
+            status = V2Goal.Status.COMPLETED,
+            completedAt = now,
+        )
+        !reached && goal.status == V2Goal.Status.COMPLETED -> goal.copy(
+            status = V2Goal.Status.ACTIVE,
+            completedAt = null,
+            completionCelebrated = false,
+        )
+        else -> goal
     }
 }
 

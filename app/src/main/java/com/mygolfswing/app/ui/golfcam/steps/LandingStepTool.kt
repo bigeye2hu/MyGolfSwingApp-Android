@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,7 +42,10 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -54,6 +58,7 @@ import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.LandingOutput
 import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
@@ -62,7 +67,8 @@ import kotlin.math.roundToInt
 
 private const val MIN_FLIGHT_SEC = 0.5
 private const val MAX_FLIGHT_SEC = 8.0
-private const val DEFAULT_FLIGHT_SEC = 4.5
+private const val DEFAULT_FLIGHT_SEC = 6.0
+internal const val LANDING_STEP_TOOL_PANEL_HEIGHT_DP = 132
 internal const val LANDING_THUMB_COUNT = 12
 internal const val LANDING_TIMELINE_HEIGHT_DP = 56
 internal const val LANDING_TIMELINE_THUMB_WIDTH_DP = 32
@@ -100,9 +106,8 @@ private fun finiteFloatIn(value: Float, min: Float, max: Float, fallback: Float)
 }
 
 internal fun landingTailSeconds(impactTimeMs: Long, clipEndMs: Long): Double {
-    return ((clipEndMs - impactTimeMs) / 1000.0)
-        .coerceAtLeast(MIN_FLIGHT_SEC)
-        .coerceAtMost(MAX_FLIGHT_SEC)
+    if (clipEndMs <= impactTimeMs) return MAX_FLIGHT_SEC
+    return max(MIN_FLIGHT_SEC, (clipEndMs - impactTimeMs) / 1000.0)
 }
 
 internal fun landingFlightTimeSeconds(landing: LandingOutput?): Double {
@@ -186,18 +191,31 @@ fun LandingStepTool(
     val yPct = (landing?.normalizedY ?: 0.5f) * 100f
     val flightTime = landingFlightTimeSeconds(landing)
     var sliderValue by remember(flightTime) { mutableDoubleStateOf(flightTime) }
+    var hasUserAdjustedTime by remember { mutableStateOf(false) }
     val isInVirtualSegment = isLandingVirtualSegment(sliderValue, tTail)
 
     LaunchedEffect(Unit) {
         if (landing == null) onFlightTimeChange?.invoke(sliderValue)
     }
+    LaunchedEffect(sliderValue, hasUserAdjustedTime) {
+        if (hasUserAdjustedTime) {
+            delay(80L)
+            onFlightTimeChange?.invoke(sliderValue)
+        }
+    }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(LANDING_STEP_TOOL_PANEL_HEIGHT_DP.dp)
+            .testTag("golfcam-landing-tool"),
         verticalArrangement = Arrangement.spacedBy(LANDING_TOOL_VERTICAL_SPACING_DP.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(top = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -267,26 +285,33 @@ fun LandingStepTool(
             tTailSec = tTail,
             onTimeChanged = { newTime ->
                 sliderValue = newTime
-                onFlightTimeChange?.invoke(newTime)
+                hasUserAdjustedTime = true
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(LANDING_TIMELINE_HEIGHT_DP.dp),
+                .height(LANDING_TIMELINE_HEIGHT_DP.dp)
+                .padding(horizontal = 8.dp)
+                .testTag("golfcam-landing-timeline"),
         )
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(LANDING_HINT_SPACING_DP.dp),
-            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(
+                LANDING_HINT_SPACING_DP.dp,
+                alignment = Alignment.CenterHorizontally,
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
         ) {
             Icon(
-                Icons.Filled.LocationOn,
+                Icons.Outlined.MyLocation,
                 null,
                 tint = DSColors.fairway,
                 modifier = Modifier.size(LANDING_HINT_ICON_SIZE_DP.dp),
             )
             Text(
-                "滑动时间轴选择落点时间，拖动画面中的落点标记",
+                "滑动时间轴选时间，双指放大后拖动落点标记",
                 color = DSColors.shadowGray,
                 fontSize = LANDING_HINT_FONT_SP.sp,
             )
@@ -308,6 +333,10 @@ private fun LandingThumbnailTimeline(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val currentFlightTime by rememberUpdatedState(flightTimeSec)
+    val currentTailTime by rememberUpdatedState(tTailSec)
+    val currentOnTimeChanged by rememberUpdatedState(onTimeChanged)
     val thumbnailSampleTimesMs = remember(trimStartMs, impactTimeMs, clipEndMs, frameRate) {
         List(LANDING_THUMB_COUNT) { index ->
             val relSec = index * MAX_FLIGHT_SEC / (LANDING_THUMB_COUNT - 1)
@@ -372,12 +401,28 @@ private fun LandingThumbnailTimeline(
         Canvas(
             modifier = Modifier
                 .matchParentSize()
-                .pointerInput(widthPx, flightTimeSec) {
-                    detectDragGestures { change, dragAmount ->
+                .pointerInput(widthPx, pixelsPerSecond) {
+                    var workingTime = currentFlightTime
+                    var wasVirtual = workingTime > currentTailTime
+                    detectDragGestures(
+                        onDragStart = {
+                            workingTime = currentFlightTime
+                            wasVirtual = workingTime > currentTailTime
+                        },
+                        onDragEnd = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                    ) { change, dragAmount ->
                         change.consume()
-                        val next = (flightTimeSec - dragAmount.x / pixelsPerSecond)
+                        val next = (workingTime - dragAmount.x / pixelsPerSecond)
                             .coerceIn(MIN_FLIGHT_SEC, MAX_FLIGHT_SEC)
-                        onTimeChanged(next)
+                        workingTime = next
+                        val isVirtual = next > currentTailTime
+                        if (isVirtual != wasVirtual) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            wasVirtual = isVirtual
+                        }
+                        currentOnTimeChanged(next)
                     }
                 },
         ) {

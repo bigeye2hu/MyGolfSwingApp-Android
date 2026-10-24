@@ -23,6 +23,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URI
+import java.util.concurrent.TimeUnit
 
 internal fun normalizedAIBaseUrl(raw: String?): String? {
     val trimmed = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
@@ -159,8 +160,100 @@ class V2AIService(
         return id.modelOrDefault(session.aiModel.first())
     }
 
+    /**
+     * Lightweight connection check used by the Profile management screen.
+     *
+     * This mirrors iOS `AIService.testConnectivity`: built-in AI uses its
+     * dedicated `/chat/test` route, while external providers first use
+     * `GET /models` so a normal verification does not consume chat tokens.
+     * Providers that do not expose `/models` may return 404, in which case we
+     * fall back to one non-streaming `hi` request just like iOS.
+     */
+    suspend fun testConnectivity() = withContext(Dispatchers.IO) {
+        val provider = currentProvider()
+        val apiKey = session.aiApiKey.first()
+        if (provider != ProviderId.BUILTIN && apiKey.isNullOrBlank()) {
+            error("请先配置 AI API Key")
+        }
+        val baseUrl = normalizedAIBaseUrl(
+            session.aiBaseUrl.first()?.takeIf { it.isNotBlank() } ?: provider.defaultBase,
+        ) ?: error("AI Base URL 必须是有效的 HTTPS 地址")
+        val currentSession = session.current()
+        val request = if (provider == ProviderId.BUILTIN) {
+            Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/chat/test")
+                .post("".toRequestBody(null))
+                .apply {
+                    currentSession.userId?.let { header("X-TC-UID", it) }
+                    currentSession.userSig?.let { header("X-TC-UserSig", it) }
+                }
+                .build()
+        } else {
+            Request.Builder()
+                .url("${baseUrl.trimEnd('/')}/models")
+                .get()
+                .header("Authorization", "Bearer $apiKey")
+                .build()
+        }
+        val connectivityClient = net.httpClient.newBuilder()
+            .callTimeout(10, TimeUnit.SECONDS)
+            .build()
+        connectivityClient.newCall(request).execute().use { response ->
+            if (provider != ProviderId.BUILTIN && response.code == 404) {
+                quickConnectivityPing(provider, baseUrl, apiKey.orEmpty())
+                return@withContext
+            }
+            if (response.code != 200) {
+                val detail = response.body?.string().orEmpty().take(240)
+                error("AI 连接测试失败：HTTP ${response.code}${detail.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()}")
+            }
+        }
+    }
+
     private suspend fun currentRequestModel(providerId: ProviderId): String {
         return providerId.modelOrDefault(session.aiModel.first())
+    }
+
+    private suspend fun quickConnectivityPing(
+        provider: ProviderId,
+        baseUrl: String,
+        apiKey: String,
+    ) {
+        val body = JsonObject(
+            mapOf(
+                "model" to JsonPrimitive(currentRequestModel(provider)),
+                "messages" to JsonArray(
+                    listOf(
+                        JsonObject(
+                            mapOf(
+                                "role" to JsonPrimitive("user"),
+                                "content" to JsonPrimitive("hi"),
+                            ),
+                        ),
+                    ),
+                ),
+                "stream" to JsonPrimitive(false),
+            ),
+        )
+        val request = Request.Builder()
+            .url("${baseUrl.trimEnd('/')}/chat/completions")
+            .post(
+                net.json.encodeToString(JsonObject.serializer(), body)
+                    .toRequestBody("application/json".toMediaType()),
+            )
+            .header("Authorization", "Bearer $apiKey")
+            .build()
+        val pingClient = net.httpClient.newBuilder()
+            .callTimeout(15, TimeUnit.SECONDS)
+            .build()
+        pingClient.newCall(request).execute().use { response ->
+            val payload = response.body?.string().orEmpty()
+            if (response.code != 200) {
+                error("AI 连接测试失败：HTTP ${response.code}${payload.take(240).takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()}")
+            }
+            runCatching { net.json.parseToJsonElement(payload) }
+                .getOrElse { error("AI 连接测试失败：响应格式无效") }
+        }
     }
 
     /**

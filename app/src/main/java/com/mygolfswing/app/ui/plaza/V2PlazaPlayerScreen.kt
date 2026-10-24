@@ -5,23 +5,30 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -34,14 +41,16 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -57,11 +66,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -70,19 +83,27 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.data.coach.V2CoachConnection
 import com.mygolfswing.app.data.memo.V2MemoBridge
+import com.mygolfswing.app.data.model.V2CategoryGroup
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoSource
 import com.mygolfswing.app.data.repo.V2PlazaComment
+import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.plazaReleaseSafeError
 import com.mygolfswing.app.data.store.plazaThrowableError
 import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.V2ModalTopBarCentered
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.player.VideoPlayerProgressBar
+import com.mygolfswing.app.ui.player.VideoPlayerTool
+import com.mygolfswing.app.ui.designsystem.DSLayout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,6 +139,8 @@ fun V2PlazaPlayerScreen(
     val savedVideoCache by V2PlazaStore.savedVideoCache.collectAsState()
     val watchHistory by V2PlazaStore.watchHistory.collectAsState()
     val likedIds by V2PlazaStore.likedIds.collectAsState()
+    val memoList by V2MemoStore.allMemos.collectAsState()
+    val memoCategoryGroups by V2CategoryStore.groups.collectAsState()
     val plazaError by V2PlazaStore.lastError.collectAsState()
     val profile by V2ProfileStore.profile.collectAsState()
     val video = remember(hero, videos, savedVideoCache, watchHistory, videoId) {
@@ -137,19 +160,27 @@ fun V2PlazaPlayerScreen(
     var commentsLoading by remember { mutableStateOf(false) }
     var commentSubmitting by remember { mutableStateOf(false) }
     var commentDraft by remember { mutableStateOf("") }
+    var commentMentionDraft by remember(videoId) { mutableStateOf(V2PublicMentionDraft()) }
+    var commentRequestId by remember(videoId) { mutableStateOf(UUID.randomUUID().toString()) }
+    var lastCommentAttemptBody by remember(videoId) { mutableStateOf<String?>(null) }
+    var showMentionPicker by remember { mutableStateOf(false) }
+    var mentionPeople by remember { mutableStateOf<List<V2PublicMentionPerson>>(emptyList()) }
+    var mentionPeopleLoading by remember { mutableStateOf(false) }
     var commentError by remember { mutableStateOf<String?>(null) }
     var commentReportTarget by remember { mutableStateOf<V2PlazaComment?>(null) }
     var commentReportSubmittingId by remember { mutableStateOf<UUID?>(null) }
     var reportSubmitting by remember { mutableStateOf(false) }
     var reportDetail by remember { mutableStateOf("") }
-    var reportReason by remember { mutableStateOf("copyright") }
+    var feedbackTab by remember { mutableStateOf("report") }
+    var reportReason by remember { mutableStateOf("") }
     var reportResult by remember { mutableStateOf<PlazaSubmitResult?>(null) }
-    var claimType by remember { mutableStateOf("creator") }
+    var claimType by remember { mutableStateOf("") }
     var claimContact by remember { mutableStateOf("") }
     var claimPlatformLink by remember { mutableStateOf("") }
     var memoCreating by remember { mutableStateOf(false) }
     var showMemoSaveSheet by remember { mutableStateOf(false) }
-    var selectedMemoTags by remember(videoId) { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedMemoGroupId by remember(videoId) { mutableStateOf<String?>(null) }
+    var selectedMemoTagIds by remember(videoId) { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
 
     if (video == null) {
@@ -168,6 +199,9 @@ fun V2PlazaPlayerScreen(
     }
     val cloudVideoId = video.sourceVideoId?.takeIf { it.isNotBlank() } ?: video.saveKey()
     val liked = likedIds.contains(cloudVideoId)
+    val existingPlazaMemo = remember(memoList, video.id, video.videoUrl) {
+        findExistingPlazaMemo(memoList, video)
+    }
 
     fun openMemoSaveSheet() {
         if (memoCreating) return
@@ -180,22 +214,37 @@ fun V2PlazaPlayerScreen(
             toastMessage = "当前视频没有可用播放地址"
             return
         }
-        selectedMemoTags = defaultPlazaMemoTags(video).toSet()
+        selectedMemoGroupId = memoCategoryGroups.firstOrNull()?.id
+        selectedMemoTagIds = emptySet()
         showMemoSaveSheet = true
     }
 
-    fun createMemoFromVideo(tags: List<String> = defaultPlazaMemoTags(video)) {
+    fun saveOrRemoveMemo() {
         scope.launch {
             memoCreating = true
             try {
-                val result = createOrFindPlazaVideoMemo(video, tags)
-                showMemoSaveSheet = false
-                toastMessage = if (result.created) "已创建练球 Memo" else "已打开已有 Memo"
-                onMemoCreated(result.memoId)
+                val existing = existingPlazaMemo
+                if (existing != null) {
+                    V2MemoStore.deleteAndWait(existing.id)
+                    showMemoSaveSheet = false
+                    toastMessage = "已从视频备忘录移除"
+                } else {
+                    val selectedItems = memoCategoryGroups
+                        .flatMap(V2CategoryGroup::items)
+                        .filter { it.id in selectedMemoTagIds }
+                    val result = createOrFindPlazaVideoMemo(
+                        video = video,
+                        tagIds = selectedItems.map { it.id },
+                        tags = selectedItems.map { it.name },
+                    )
+                    showMemoSaveSheet = false
+                    toastMessage = if (result.created) "已保存到视频备忘录" else "已存到视频备忘录"
+                    onMemoCreated(result.memoId)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                toastMessage = plazaThrowableError("创建 Memo 失败，请稍后重试", e)
+                toastMessage = plazaThrowableError("保存 Memo 失败，请稍后重试", e)
             } finally {
                 memoCreating = false
             }
@@ -226,6 +275,24 @@ fun V2PlazaPlayerScreen(
             } finally {
                 commentsLoading = false
             }
+        }
+    }
+
+    fun openMentionPicker() {
+        showMentionPicker = true
+        scope.launch {
+            mentionPeopleLoading = true
+            val studentConnections = ServiceLocator.friendSpaceSyncRepo
+                .syncOrLoadConnections()
+                .getOrDefault(emptyList())
+            val coachConnections = runCatching {
+                ServiceLocator.coachWorkspaceRepo.connections()
+            }.getOrDefault(emptyList())
+            mentionPeople = publicMentionPeople(
+                connections = studentConnections + coachConnections,
+                currentUserId = profile.userId,
+            )
+            mentionPeopleLoading = false
         }
     }
 
@@ -367,6 +434,7 @@ fun V2PlazaPlayerScreen(
                     liked = liked,
                     saved = video.isSaved,
                     saveCount = video.saveCount,
+                    memoSaved = existingPlazaMemo != null,
                     memoCreating = memoCreating,
                     onLike = {
                         if (!profile.isLoggedIn) {
@@ -393,13 +461,8 @@ fun V2PlazaPlayerScreen(
                         }
                     },
                     onComment = {
-                        if (!profile.isLoggedIn) {
-                            toastMessage = "登录后可评论"
-                            onRequestLoginForTarget(V2PlazaPlayerLoginTarget.COMMENTS, null)
-                        } else {
-                            showComments = true
-                            loadComments()
-                        }
+                        showComments = true
+                        loadComments()
                     },
                     onDownload = {
                         if (!profile.isLoggedIn) {
@@ -496,13 +559,21 @@ fun V2PlazaPlayerScreen(
     if (showMemoSaveSheet) {
         PlazaSaveMemoDialog(
             video = video,
-            selectedTags = selectedMemoTags,
+            groups = memoCategoryGroups,
+            selectedGroupId = selectedMemoGroupId,
+            selectedTagIds = selectedMemoTagIds,
+            alreadySaved = existingPlazaMemo != null,
             saving = memoCreating,
-            onTagToggle = { tag ->
-                selectedMemoTags = if (tag in selectedMemoTags) selectedMemoTags - tag else selectedMemoTags + tag
+            onGroupSelect = { groupId -> selectedMemoGroupId = groupId },
+            onTagToggle = { tagId ->
+                selectedMemoTagIds = when {
+                    tagId in selectedMemoTagIds -> selectedMemoTagIds - tagId
+                    selectedMemoTagIds.size < 5 -> selectedMemoTagIds + tagId
+                    else -> selectedMemoTagIds
+                }
             },
             onDismiss = { if (!memoCreating) showMemoSaveSheet = false },
-            onConfirm = { createMemoFromVideo(selectedMemoTags.toList()) },
+            onConfirm = ::saveOrRemoveMemo,
         )
     }
 
@@ -514,10 +585,18 @@ fun V2PlazaPlayerScreen(
             draft = commentDraft,
             error = commentError,
             currentUserId = profile.userId,
+            isLoggedIn = profile.isLoggedIn,
             reportingCommentId = commentReportSubmittingId,
             onDraftChange = {
-                commentDraft = it
+                val next = commentMentionDraft.updateText(it)
+                commentMentionDraft = next
+                commentDraft = next.text
                 commentError = null
+            },
+            onMention = ::openMentionPicker,
+            onLoginRequest = {
+                showComments = false
+                onRequestLoginForTarget(V2PlazaPlayerLoginTarget.COMMENTS, null)
             },
             onDismiss = {
                 showComments = false
@@ -545,10 +624,27 @@ fun V2PlazaPlayerScreen(
                         commentSubmitting = true
                         commentError = null
                         try {
-                            ServiceLocator.plazaRepo.addComment(cloudVideoId, text)
+                            val mentions = commentMentionDraft.updateText(commentDraft).userIds
+                            val bodyKey = buildString {
+                                append(text)
+                                append('\n')
+                                append(mentions.joinToString(","))
+                            }
+                            if (lastCommentAttemptBody != bodyKey) {
+                                commentRequestId = UUID.randomUUID().toString()
+                                lastCommentAttemptBody = bodyKey
+                            }
+                            ServiceLocator.plazaRepo.addComment(
+                                videoId = cloudVideoId,
+                                content = text,
+                                mentionUserIds = mentions,
+                                clientRequestId = commentRequestId,
+                            )
                                 .onSuccess {
                                     comments = listOf(it) + comments
                                     commentDraft = ""
+                                    commentMentionDraft = V2PublicMentionDraft()
+                                    lastCommentAttemptBody = null
                                 }
                                 .onFailure { commentError = plazaThrowableError("发送失败，请重试", it) }
                         } catch (e: CancellationException) {
@@ -561,7 +657,28 @@ fun V2PlazaPlayerScreen(
                     }
                 }
             },
-            onReload = ::loadComments,
+        )
+    }
+
+    if (showMentionPicker) {
+        V2PublicMentionPickerDialog(
+            people = mentionPeople,
+            loading = mentionPeopleLoading,
+            onDismiss = { showMentionPicker = false },
+            onSelect = { person ->
+                val selection = commentMentionDraft
+                    .updateText(commentDraft)
+                    .select(person.userId, person.name)
+                if (selection.accepted) {
+                    commentMentionDraft = selection.draft
+                    commentDraft = selection.draft.text
+                    commentError = null
+                    showMentionPicker = false
+                } else {
+                    commentError = "一次最多提及 5 位已连接的人"
+                    showMentionPicker = false
+                }
+            },
         )
     }
 
@@ -620,12 +737,15 @@ fun V2PlazaPlayerScreen(
 
     if (showReport) {
         ReportDialog(
+            videoTitle = video.title,
+            selectedTab = feedbackTab,
             reason = reportReason,
             detail = reportDetail,
             claimType = claimType,
             claimContact = claimContact,
             claimPlatformLink = claimPlatformLink,
             result = reportResult,
+            onTabChange = { feedbackTab = it; reportResult = null },
             onReasonChange = { reportReason = it; reportResult = null },
             onDetailChange = { reportDetail = it; reportResult = null },
             onClaimTypeChange = { claimType = it; reportResult = null },
@@ -646,14 +766,15 @@ fun V2PlazaPlayerScreen(
                 } else {
                     scope.launch {
                         if (reportSubmitting) return@launch
-                        if (reportReason == "claim" && claimContact.trim().isBlank()) {
+                        if (feedbackTab == "claim" && (claimType.isBlank() || claimContact.trim().isBlank())) {
                             reportResult = PlazaSubmitResult(success = false, message = "请填写联系方式")
                             return@launch
                         }
+                        if (feedbackTab == "report" && reportReason.isBlank()) return@launch
                         reportResult = null
                         reportSubmitting = true
                         try {
-                            val result = if (reportReason == "claim") {
+                            val result = if (feedbackTab == "claim") {
                                 ServiceLocator.plazaRepo.claimVideo(
                                     videoId = cloudVideoId,
                                     claimType = claimType,
@@ -662,13 +783,20 @@ fun V2PlazaPlayerScreen(
                                     detail = reportDetail.trim(),
                                 )
                             } else {
-                                ServiceLocator.plazaRepo.reportVideo(cloudVideoId, reportReason, reportDetail.trim())
+                                val selected = plazaVideoReportReasons.first { it.value == reportReason }
+                                ServiceLocator.plazaRepo.reportVideo(
+                                    videoId = cloudVideoId,
+                                    reason = selected.value,
+                                    reasonText = selected.label,
+                                    detail = reportDetail.trim(),
+                                    priority = selected.priority,
+                                )
                             }
                             result
                                 .onSuccess {
                                     reportResult = PlazaSubmitResult(
                                         success = true,
-                                        message = if (reportReason == "claim") "认领申请已提交，感谢反馈" else "举报已提交，感谢反馈",
+                                        message = if (feedbackTab == "claim") "认领申请已提交，我们会尽快联系您" else "举报已提交，感谢反馈",
                                     )
                                     reportDetail = ""
                                     claimContact = ""
@@ -706,7 +834,7 @@ private enum class PlazaPlaybackUnavailableReason {
     PlaybackError,
 }
 
-private data class PlazaSubmitResult(
+internal data class PlazaSubmitResult(
     val success: Boolean,
     val message: String,
 )
@@ -829,7 +957,7 @@ private fun PlaybackOverlayAction(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(50))
             .background(if (enabled) background else background.copy(alpha = 0.45f))
             .clickable(enabled = enabled, onClick = onClick),
@@ -925,6 +1053,7 @@ private fun RightSidebar(
     liked: Boolean,
     saved: Boolean,
     saveCount: Int,
+    memoSaved: Boolean,
     memoCreating: Boolean,
     onLike: () -> Unit,
     onSave: () -> Unit,
@@ -963,8 +1092,12 @@ private fun RightSidebar(
         )
         SidebarButton(
             icon = Icons.Filled.VideoLibrary,
-            label = if (memoCreating) "创建中" else "Memo",
-            tint = Color.White,
+            label = when {
+                memoCreating -> "处理中"
+                memoSaved -> "已存 Memo"
+                else -> "存 Memo"
+            },
+            tint = if (memoSaved) Color(0xFFF59E0B) else Color.White,
             enabled = !memoCreating,
             onClick = onCreateMemo,
         )
@@ -1002,77 +1135,276 @@ private data class PlazaMemoResult(
     val created: Boolean,
 )
 
-private fun defaultPlazaMemoTags(video: com.mygolfswing.app.data.model.V2PlazaVideo): List<String> {
-    val category = video.categoryDisplayName?.takeIf { it.isNotBlank() } ?: video.topic.displayName
-    return listOf(category, "广场视频", "在线视频").distinct()
+internal fun findExistingPlazaMemo(
+    memos: List<V2Memo>,
+    video: com.mygolfswing.app.data.model.V2PlazaVideo,
+): V2Memo? = memos.firstOrNull { memo ->
+    memo.plazaVideoId == video.id ||
+        (memo.source == V2MemoSource.PLAZA_SAVE && memo.videoUrl == video.videoUrl && video.videoUrl.isNotBlank())
 }
 
+@kotlin.OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun PlazaSaveMemoDialog(
+internal fun PlazaSaveMemoDialog(
     video: com.mygolfswing.app.data.model.V2PlazaVideo,
-    selectedTags: Set<String>,
+    groups: List<V2CategoryGroup>,
+    selectedGroupId: String?,
+    selectedTagIds: Set<String>,
+    alreadySaved: Boolean,
     saving: Boolean,
+    onGroupSelect: (String) -> Unit,
     onTagToggle: (String) -> Unit,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    val tagOptions = remember(video.id) { defaultPlazaMemoTags(video) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("保存到视频备忘录", color = DSColors.inkGreen, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val selectedGroup = groups.firstOrNull { it.id == selectedGroupId } ?: groups.firstOrNull()
+    val availableTags = selectedGroup?.items.orEmpty()
+    val selectedItems = groups.flatMap(V2CategoryGroup::items).filter { it.id in selectedTagIds }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!saving) onDismiss() },
+        sheetState = sheetState,
+        containerColor = PlazaCommentsBackground,
+        contentColor = Color.White,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = {
+            Box(
+                Modifier.padding(vertical = 10.dp).size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(50)).background(Color(0xFF6B7280)),
+            )
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    video.title.ifBlank { "广场视频" },
-                    color = DSColors.inkGreen,
-                    fontSize = 15.sp,
+                    "保存到视频备忘录",
+                    color = Color.White,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
                 )
-                Text(
-                    "选择要写入 Memo 的标签，保存后可在视频 Memo 中继续慢放、对比和记录练球心得。",
-                    color = DSColors.shadowGray,
-                    fontSize = 12.sp,
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "关闭",
+                    tint = Color(0xFF6B7280),
+                    modifier = Modifier.size(30.dp).clip(CircleShape)
+                        .clickable(enabled = !saving, onClick = onDismiss).padding(4.dp),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    tagOptions.forEach { tag ->
-                        val selected = tag in selectedTags
+            }
+
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp).padding(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1F2937)).padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AsyncImage(
+                        model = video.thumbnailUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.width(100.dp).height(75.dp).clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF374151)),
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            tag,
-                            color = if (selected) Color.White else DSColors.fairway,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(if (selected) DSColors.fairway else DSColors.mistGreen)
-                                .clickable(enabled = !saving) { onTagToggle(tag) }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            video.title.ifBlank { "广场视频" },
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                        )
+                        Text(video.coach.displayName, color = Color(0xFF9CA3AF), fontSize = 12.sp)
+                        Text(
+                            formatPlazaPlaybackTime(video.durationSec.toFloat()),
+                            color = Color(0xFF6B7280),
+                            fontSize = 11.sp,
                         )
                     }
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = !saving, onClick = onConfirm) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (saving) {
-                        CircularProgressIndicator(color = DSColors.fairway, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+
+                Column(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1F2937)).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("选择分类", color = Color(0xFF9CA3AF), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    if (groups.isEmpty()) {
+                        Text("暂无可用分类", color = Color(0xFF6B7280), fontSize = 13.sp)
+                    } else {
+                        groups.chunked(3).forEach { rowGroups ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                rowGroups.forEach { group ->
+                                    val selected = group.id == selectedGroup?.id
+                                    val tint = plazaCategoryColor(group.items.firstOrNull()?.color)
+                                    Column(
+                                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
+                                            .background(if (selected) tint.copy(alpha = 0.15f) else Color(0xFF111827))
+                                            .border(
+                                                if (selected) 2.dp else 1.dp,
+                                                if (selected) tint else Color(0xFF374151),
+                                                RoundedCornerShape(12.dp),
+                                            )
+                                            .clickable(enabled = !saving) { onGroupSelect(group.id) }
+                                            .padding(vertical = 12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.size(44.dp).clip(CircleShape)
+                                                .background(if (selected) tint else Color(0xFF374151)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                group.name.firstOrNull()?.toString().orEmpty().ifBlank { "类" },
+                                                color = if (selected) Color.White else Color(0xFF9CA3AF),
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                        }
+                                        Text(
+                                            group.name,
+                                            color = if (selected) Color.White else Color(0xFF9CA3AF),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                                repeat(3 - rowGroups.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
                     }
-                    Text(if (saving) "保存中..." else "保存", color = DSColors.fairway, fontWeight = FontWeight.Bold)
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1F2937)).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("选择标签", color = Color(0xFF9CA3AF), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text(
+                            "已选 ${selectedTagIds.size}/5",
+                            color = if (selectedTagIds.size >= 5) Color(0xFFF59E0B) else Color(0xFF6B7280),
+                            fontSize = 12.sp,
+                        )
+                    }
+                    if (availableTags.isEmpty()) {
+                        Text(
+                            "该分类下暂无标签",
+                            color = Color(0xFF6B7280),
+                            fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                        )
+                    } else {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            availableTags.forEach { tag ->
+                                val selected = tag.id in selectedTagIds
+                                val tint = plazaCategoryColor(tag.color)
+                                Text(
+                                    tag.name,
+                                    color = if (selected) Color.White else tint,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.clip(RoundedCornerShape(50))
+                                        .background(if (selected) tint else tint.copy(alpha = 0.12f))
+                                        .border(
+                                            1.dp,
+                                            if (selected) Color.Transparent else tint.copy(alpha = 0.30f),
+                                            RoundedCornerShape(50),
+                                        )
+                                        .clickable(
+                                            enabled = !saving && (selected || selectedTagIds.size < 5),
+                                        ) { onTagToggle(tag.id) }
+                                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (selectedItems.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1F2937)).padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("已选标签", color = Color(0xFF9CA3AF), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            selectedItems.forEach { tag ->
+                                Row(
+                                    modifier = Modifier.clip(RoundedCornerShape(50))
+                                        .background(plazaCategoryColor(tag.color))
+                                        .clickable(enabled = !saving) { onTagToggle(tag.id) }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(tag.name, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                    Text("×", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
                 }
             }
-        },
-        dismissButton = {
-            TextButton(enabled = !saving, onClick = onDismiss) {
-                Text("取消", color = DSColors.shadowGray)
+
+            Box(
+                modifier = Modifier.fillMaxWidth().v2NavigationBarPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp).height(40.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (alreadySaved) {
+                            Brush.horizontalGradient(listOf(Color(0xFF6B7280), Color(0xFF4B5563)))
+                        } else {
+                            Brush.horizontalGradient(listOf(Color(0xFF9333EA), Color(0xFF2563EB)))
+                        },
+                    )
+                    .clickable(enabled = !saving, onClick = onConfirm),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (saving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    Text(
+                        when {
+                            saving -> if (alreadySaved) "移除中…" else "保存中…"
+                            alreadySaved -> "从备忘录移除"
+                            else -> "保存到视频备忘录"
+                        },
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
-        },
-        containerColor = DSColors.cardWhite,
-    )
+        }
+    }
 }
+
+private fun plazaCategoryColor(raw: String?): Color = runCatching {
+    val hex = raw?.trim().orEmpty().removePrefix("#").ifBlank { "10B981" }
+    Color(android.graphics.Color.parseColor("#$hex"))
+}.getOrDefault(Color(0xFF10B981))
 
 private suspend fun createOrFindPlazaVideoMemo(
     video: com.mygolfswing.app.data.model.V2PlazaVideo,
-    tags: List<String> = defaultPlazaMemoTags(video),
+    tagIds: List<String> = emptyList(),
+    tags: List<String> = emptyList(),
 ): PlazaMemoResult {
     V2MemoStore.allMemos.value.firstOrNull { memo ->
         memo.plazaVideoId == video.id ||
@@ -1081,7 +1413,8 @@ private suspend fun createOrFindPlazaVideoMemo(
         return PlazaMemoResult(existing.id, created = false)
     }
 
-    val resolvedTags = tags.map { it.trim() }.filter { it.isNotBlank() }.ifEmpty { defaultPlazaMemoTags(video) }.distinct()
+    val resolvedTagIds = tagIds.map(String::trim).filter(String::isNotBlank).distinct().take(5)
+    val resolvedTags = tags.map(String::trim).filter(String::isNotBlank).distinct().take(5)
     val memo = V2Memo.mixedMemo(
         displayTitle = video.title.ifBlank { "广场视频" }.take(36),
         body = "来自${video.coach.displayName}的广场视频，可用于慢放、对比和复盘。",
@@ -1097,6 +1430,7 @@ private suspend fun createOrFindPlazaVideoMemo(
         isOnlineVideo = true
         platform = "广场"
         plazaVideoId = video.id
+        this.tagIds = resolvedTagIds
         thumbnailKind = V2MemoBridge.thumbnailKindFor(video.topic)
     }
     return PlazaMemoResult(V2MemoStore.createAndWait(memo), created = true)
@@ -1140,26 +1474,19 @@ private fun PlazaProgressBar(
                 fontWeight = FontWeight.Medium,
             )
         }
-        Slider(
-            value = value,
-            onValueChange = {
-                if (!isSeeking) {
-                    isSeeking = true
-                    onSeekStart()
-                }
-                seekTime = it
+        VideoPlayerProgressBar(
+            tool = VideoPlayerTool.Playback,
+            progress = value / maxDuration,
+            onScrubStart = {
+                isSeeking = true
+                onSeekStart()
             },
-            onValueChangeFinished = {
-                onSeekFinished(seekTime)
+            onSeekFraction = { fraction -> seekTime = fraction * maxDuration },
+            onScrubEnd = { fraction ->
+                onSeekFinished(fraction * maxDuration)
                 isSeeking = false
             },
-            valueRange = 0f..maxDuration,
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = Color.White,
-                inactiveTrackColor = Color.White.copy(alpha = 0.3f),
-            ),
-            modifier = Modifier.height(24.dp),
+            modifier = Modifier.fillMaxWidth().height(24.dp),
         )
     }
 }
@@ -1206,52 +1533,209 @@ private fun Toast(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+internal data class V2PublicMentionPerson(val userId: String, val name: String)
+
+internal fun publicMentionPeople(
+    connections: List<V2CoachConnection>,
+    currentUserId: String?,
+): List<V2PublicMentionPerson> = connections
+    .asSequence()
+    .filter { it.status == "active" }
+    .mapNotNull { connection ->
+        val person = listOfNotNull(connection.peer, connection.coach, connection.student)
+            .firstOrNull { it.userId != currentUserId }
+            ?: return@mapNotNull null
+        V2PublicMentionPerson(userId = person.userId, name = person.nickname)
+    }
+    .distinctBy(V2PublicMentionPerson::userId)
+    .toList()
+
 @Composable
-private fun CommentsDialog(
+internal fun V2PublicMentionPickerDialog(
+    people: List<V2PublicMentionPerson>,
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (V2PublicMentionPerson) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(people, query) {
+        val term = query.trim()
+        if (term.isEmpty()) people else people.filter { it.name.contains(term, ignoreCase = true) }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        V2RoomPage(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                V2ModalTopBarCentered(title = "@ 提及", onCancel = onDismiss)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .v2NavigationBarPadding()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "提及这个人，不会把私密空间或已有回复开放给他。",
+                        color = DSColors.deepGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DSColors.mistGreen.copy(alpha = 0.7f))
+                            .padding(12.dp),
+                    )
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = DSColors.inkGreen,
+                            fontSize = 14.sp,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(DSLayout.searchFieldHeight)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DSColors.cardWhite)
+                            .padding(horizontal = 12.dp)
+                            .testTag("public-mention-search"),
+                        decorationBox = { innerField ->
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                                if (query.isEmpty()) {
+                                    Text("搜索教练或好友", color = DSColors.shadowGray, fontSize = 14.sp)
+                                }
+                                innerField()
+                            }
+                        },
+                    )
+                    when {
+                        loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = DSColors.fairway)
+                        }
+                        filtered.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                            Text(
+                                text = "还没有可提及的教练或好友",
+                                color = DSColors.shadowGray,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(top = 24.dp),
+                            )
+                        }
+                        else -> LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(filtered, key = V2PublicMentionPerson::userId) { person ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(DSColors.cardWhite)
+                                        .clickable { onSelect(person) }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = person.name,
+                                        color = DSColors.inkGreen,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = "提及",
+                                        color = DSColors.fairway,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun CommentsDialog(
     comments: List<V2PlazaComment>,
     loading: Boolean,
     submitting: Boolean,
     draft: String,
     error: String?,
     currentUserId: String?,
+    isLoggedIn: Boolean,
     reportingCommentId: UUID?,
     onDraftChange: (String) -> Unit,
+    onMention: () -> Unit,
+    onLoginRequest: () -> Unit,
     onDismiss: () -> Unit,
     onReportComment: (V2PlazaComment) -> Unit,
     onSend: () -> Unit,
-    onReload: () -> Unit,
 ) {
-    AlertDialog(
-        modifier = Modifier
-            .imePadding()
-            .v2NavigationBarPadding(),
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("评论 (${comments.size})", color = DSColors.inkGreen, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { if (it.length <= 200) onDraftChange(it) },
-                    placeholder = { Text("写下你的想法…") },
-                    minLines = 2,
-                    modifier = Modifier.fillMaxWidth(),
+        sheetState = sheetState,
+        containerColor = PlazaCommentsBackground,
+        contentColor = Color.White,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = {
+            Box(
+                Modifier.padding(vertical = 10.dp).size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(50)).background(Color(0xFF6B7280)),
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding(),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "评论 (${comments.size})",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
                 )
-                if (loading) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(color = DSColors.fairway, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text("加载中…", color = DSColors.shadowGray, fontSize = 12.sp)
-                    }
-                }
-                if (!error.isNullOrBlank()) {
-                    CommentErrorBanner(message = error)
-                }
-                if (!loading && comments.isEmpty()) {
-                    Text("还没有评论，来写第一条。", color = DSColors.shadowGray, fontSize = 13.sp)
-                } else if (comments.isNotEmpty()) {
-                    LazyColumn(
-                        modifier = Modifier.height(260.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF374151)))
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    loading -> CircularProgressIndicator(
+                        color = Color(0xFFC084FC),
+                        modifier = Modifier.align(Alignment.Center).size(28.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    comments.isEmpty() -> Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        Icon(
+                            Icons.Filled.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = Color(0xFF374151),
+                            modifier = Modifier.size(36.dp),
+                        )
+                        Text("暂无评论", color = Color(0xFF9CA3AF), fontSize = 14.sp)
+                        Text(
+                            if (isLoggedIn) "来发表第一条评论吧" else "登录后可以参与讨论",
+                            color = Color(0xFF6B7280),
+                            fontSize = 12.sp,
+                        )
+                    }
+                    else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(comments, key = { it.id }) { comment ->
                             CommentRow(
                                 comment = comment,
@@ -1259,24 +1743,118 @@ private fun CommentsDialog(
                                 reporting = reportingCommentId == comment.id,
                                 onReport = { onReportComment(comment) },
                             )
+                            Box(
+                                Modifier.fillMaxWidth().padding(start = 58.dp).height(1.dp)
+                                    .background(Color(0xFF1F2937)),
+                            )
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(enabled = !submitting && draft.isNotBlank(), onClick = onSend) {
-                Text(if (submitting) "发送中..." else "发送", color = DSColors.fairway)
+
+            if (!error.isNullOrBlank()) {
+                Text(
+                    text = error,
+                    color = Color(0xFFEF4444),
+                    fontSize = 12.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                )
             }
-        },
-        dismissButton = {
-            Row {
-                TextButton(onClick = onReload) { Text("刷新", color = DSColors.shadowGray) }
-                TextButton(onClick = onDismiss) { Text("关闭", color = DSColors.shadowGray) }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF374151)))
+
+            if (isLoggedIn) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().v2NavigationBarPadding()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier.size(36.dp).clip(CircleShape)
+                            .background(Color(0xFF374151))
+                            .clickable(enabled = !submitting, onClick = onMention),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("@", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Box(
+                        modifier = Modifier.weight(1f).height(40.dp)
+                            .clip(RoundedCornerShape(20.dp)).background(Color(0xFF1F2937))
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        BasicTextField(
+                            value = draft,
+                            onValueChange = { if (it.length <= 200) onDraftChange(it) },
+                            enabled = !submitting,
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                            modifier = Modifier.fillMaxWidth(),
+                            decorationBox = { inner ->
+                                if (draft.isEmpty()) {
+                                    Text("公开评论，所有人可见…", color = Color(0xFF6B7280), fontSize = 14.sp)
+                                }
+                                inner()
+                            },
+                        )
+                    }
+                    if (draft.isNotBlank()) {
+                        Box(
+                            modifier = Modifier.size(36.dp).clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFF9333EA), Color(0xFF2563EB)),
+                                    ),
+                                )
+                                .clickable(enabled = !submitting, onClick = onSend),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (submitting) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "发送评论",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().v2NavigationBarPadding()
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .height(42.dp).clip(RoundedCornerShape(21.dp))
+                        .background(
+                            Brush.horizontalGradient(listOf(Color(0xFF1F2937), Color(0xFF243B32))),
+                        )
+                        .clickable(onClick = onLoginRequest)
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("●", color = Color.White, fontSize = 9.sp)
+                    Text(
+                        "登录后参与讨论",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("›", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
             }
-        },
-    )
+        }
+    }
 }
+
+private val PlazaCommentsBackground = Color(0xFF111111)
 
 @Composable
 private fun CommentRow(
@@ -1294,7 +1872,7 @@ private fun CommentRow(
             modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
-                .background(DSColors.mistGreen),
+                .background(Color(0xFF374151)),
             contentAlignment = Alignment.Center,
         ) {
             if (!comment.userAvatar.isNullOrBlank()) {
@@ -1306,8 +1884,8 @@ private fun CommentRow(
             } else {
                 Text(
                     comment.userName.firstOrNull()?.toString().orEmpty().ifBlank { "用" },
-                    color = DSColors.fairway,
-                    fontSize = 12.sp,
+                    color = Color.White,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -1316,20 +1894,20 @@ private fun CommentRow(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     comment.userName,
-                    color = DSColors.inkGreen,
-                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFFC084FC),
+                    fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
                     formatCommentTime(comment.createdAt),
-                    color = DSColors.shadowGray.copy(alpha = 0.72f),
+                    color = Color(0xFF6B7280),
                     fontSize = 11.sp,
                 )
                 if (canReport) {
                     Text(
                         if (reporting) "提交中..." else "举报",
-                        color = if (reporting) DSColors.shadowGray else DSColors.flagRed,
+                        color = if (reporting) Color(0xFF6B7280) else Color(0xFFEF4444),
                         fontSize = 11.sp,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
@@ -1338,35 +1916,8 @@ private fun CommentRow(
                     )
                 }
             }
-            Text(comment.content, color = DSColors.shadowGray, fontSize = 13.sp)
+            Text(comment.content, color = Color(0xFFD1D5DB), fontSize = 14.sp)
         }
-    }
-}
-
-@Composable
-private fun CommentErrorBanner(message: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(DSColors.flagRed.copy(alpha = 0.10f))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(DSColors.flagRed),
-        )
-        Text(
-            message,
-            color = DSColors.flagRed,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f),
-        )
     }
 }
 
@@ -1382,14 +1933,43 @@ private fun formatCommentTime(createdAt: LocalDateTime): String {
     }
 }
 
+internal data class PlazaVideoReportReason(
+    val value: String,
+    val label: String,
+    val color: Color,
+    val priority: Int,
+)
+
+internal val plazaVideoReportReasons = listOf(
+    PlazaVideoReportReason("copyright", "侵权/虚假信息", Color(0xFFF59E0B), 5),
+    PlazaVideoReportReason("pornography", "色情/裸露", Color(0xFFEF4444), 8),
+    PlazaVideoReportReason("violence", "暴力/危险行为", Color(0xFFDC2626), 7),
+    PlazaVideoReportReason("harassment", "骚扰/仇恨言论", Color(0xFFF97316), 6),
+    PlazaVideoReportReason("child_abuse", "儿童侵害", Color(0xFFB91C1C), 10),
+    PlazaVideoReportReason("spam", "垃圾广告/违规", Color(0xFF6B7280), 3),
+    PlazaVideoReportReason("other", "其他", Color(0xFF9CA3AF), 1),
+)
+
+private data class PlazaClaimOption(val value: String, val label: String, val color: Color)
+
+private val plazaClaimOptions = listOf(
+    PlazaClaimOption("creator", "我是视频创作者", Color(0xFF3B82F6)),
+    PlazaClaimOption("copyright_owner", "我是版权方", Color(0xFFF59E0B)),
+    PlazaClaimOption("coach_self", "我是教练本人", Color(0xFF10B981)),
+)
+
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReportDialog(
+internal fun ReportDialog(
+    videoTitle: String,
+    selectedTab: String,
     reason: String,
     detail: String,
     claimType: String,
     claimContact: String,
     claimPlatformLink: String,
     result: PlazaSubmitResult?,
+    onTabChange: (String) -> Unit,
     onReasonChange: (String) -> Unit,
     onDetailChange: (String) -> Unit,
     onClaimTypeChange: (String) -> Unit,
@@ -1399,129 +1979,206 @@ private fun ReportDialog(
     submitting: Boolean,
     onSubmit: () -> Unit,
 ) {
-    val reasons = listOf(
-        "copyright" to "侵权/虚假信息",
-        "spam" to "垃圾广告",
-        "harassment" to "骚扰/仇恨言论",
-        "violence" to "暴力/危险行为",
-        "claim" to "内容认领",
-        "other" to "其他",
-    )
-    val claimTypes = listOf(
-        "creator" to "我是视频创作者",
-        "copyright_owner" to "我是版权方",
-        "coach_self" to "我是教练本人",
-    )
-    AlertDialog(
-        modifier = Modifier
-            .imePadding()
-            .v2NavigationBarPadding(),
-        onDismissRequest = onDismiss,
-        title = { Text("举报 / 认领", color = DSColors.inkGreen, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                reasons.forEach { (value, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (reason == value) DSColors.mistGreen else Color.Transparent)
-                            .clickable { onReasonChange(value) }
-                            .padding(horizontal = 12.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(if (reason == value) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.35f)),
-                        )
-                        Text(label, color = DSColors.inkGreen, fontSize = 13.sp)
-                    }
-                }
-                if (reason == "claim") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("认领身份", color = DSColors.inkGreen, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        claimTypes.forEach { (value, label) ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (claimType == value) DSColors.mistGreen else Color.Transparent)
-                                    .clickable { onClaimTypeChange(value) }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(if (claimType == value) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.35f)),
-                                )
-                                Text(label, color = DSColors.inkGreen, fontSize = 13.sp)
-                            }
-                        }
-                        OutlinedTextField(
-                            value = claimContact,
-                            onValueChange = { if (it.length <= 120) onClaimContactChange(it) },
-                            label = { Text("联系方式") },
-                            placeholder = { Text("微信、邮箱或手机号") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        OutlinedTextField(
-                            value = claimPlatformLink,
-                            onValueChange = { if (it.length <= 200) onClaimPlatformLinkChange(it) },
-                            label = { Text("平台主页/原视频链接") },
-                            placeholder = { Text("可选，用于加快核验") },
-                            minLines = 1,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-                OutlinedTextField(
-                    value = detail,
-                    onValueChange = { if (it.length <= 300) onDetailChange(it) },
-                    label = { Text(if (reason == "claim") "认领说明" else "补充说明") },
-                    placeholder = { Text(if (reason == "claim") "可补充版权、账号或合作信息" else "可选，帮助我们更快处理") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                result?.let {
-                    ReportResultBanner(result = it)
-                }
-            }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val claimMode = selectedTab == "claim"
+    val canSubmit = if (claimMode) {
+        claimType.isNotBlank() && claimContact.trim().isNotEmpty() && !submitting
+    } else {
+        reason.isNotBlank() && !submitting
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        sheetState = sheetState,
+        containerColor = PlazaCommentsBackground,
+        contentColor = Color.White,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = {
+            Box(
+                Modifier.padding(vertical = 10.dp).size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(50)).background(Color(0xFF6B7280)),
+            )
         },
-        confirmButton = {
-            TextButton(enabled = !submitting, onClick = onSubmit) {
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f).imePadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    when {
-                        submitting -> "提交中..."
-                        reason == "claim" -> "提交认领"
-                        else -> "提交举报"
+                    "取消",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 14.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(50))
+                        .clickable(enabled = !submitting, onClick = onDismiss)
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                )
+                Text(
+                    "反馈",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.width(36.dp))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp)).background(Color(0xFF1F2937)).padding(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                listOf("report" to "举报视频", "claim" to "内容认领").forEach { (value, label) ->
+                    val selected = selectedTab == value
+                    Text(
+                        label,
+                        color = if (selected) Color.White else Color(0xFF9CA3AF),
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                            .background(if (selected) Color(0xFF374151) else Color.Transparent)
+                            .clickable(enabled = !submitting) { onTabChange(value) }
+                            .padding(vertical = 9.dp),
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("「${videoTitle.ifBlank { "广场视频" }}」", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    Text(
+                        if (claimMode) {
+                            "如果您是此视频的原创作者或版权方，可以提交认领申请，我们会尽快与您联系确认合作事宜"
+                        } else {
+                            "请选择举报原因，我们会在24小时内处理"
+                        },
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 13.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+
+                if (claimMode) {
+                    plazaClaimOptions.forEach { option ->
+                        PlazaFeedbackChoiceRow(
+                            label = option.label,
+                            tint = option.color,
+                            selected = claimType == option.value,
+                            enabled = !submitting,
+                            onClick = { onClaimTypeChange(option.value) },
+                        )
+                    }
+                    if (claimType.isNotBlank()) {
+                        PlazaFeedbackField(
+                            label = "联系方式",
+                            required = true,
+                            value = claimContact,
+                            placeholder = "微信号 / 手机号 / 邮箱",
+                            singleLine = true,
+                            maxLength = 120,
+                            onValueChange = onClaimContactChange,
+                        )
+                        PlazaFeedbackField(
+                            label = "平台主页链接（选填，用于验证身份）",
+                            value = claimPlatformLink,
+                            placeholder = "抖音/B站/小红书等平台主页链接",
+                            singleLine = true,
+                            maxLength = 200,
+                            onValueChange = onClaimPlatformLinkChange,
+                        )
+                        PlazaFeedbackField(
+                            label = "补充说明（选填）",
+                            value = detail,
+                            placeholder = "可补充版权、账号或合作信息",
+                            maxLength = 300,
+                            onValueChange = onDetailChange,
+                        )
+                    }
+                } else {
+                    plazaVideoReportReasons.forEach { option ->
+                        PlazaFeedbackChoiceRow(
+                            label = option.label,
+                            tint = option.color,
+                            selected = reason == option.value,
+                            enabled = !submitting,
+                            onClick = { onReasonChange(option.value) },
+                        )
+                    }
+                    if (reason.isNotBlank()) {
+                        PlazaFeedbackField(
+                            label = "补充说明（可选）",
+                            value = detail,
+                            placeholder = "可选，帮助我们更快处理",
+                            maxLength = 300,
+                            onValueChange = onDetailChange,
+                        )
+                    }
+                }
+
+                result?.let { ReportResultBanner(result = it) }
+
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(14.dp))
+                        .background(
+                            when {
+                                !canSubmit -> Color(0xFF374151)
+                                claimMode -> Color(0xFF3B82F6)
+                                else -> Color(0xFFEF4444)
+                            },
+                        )
+                        .clickable(enabled = canSubmit, onClick = onSubmit),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (submitting) {
+                            CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                        } else {
+                            Text(if (claimMode) "✋" else "⚑", color = Color.White, fontSize = 14.sp)
+                        }
+                        Text(
+                            if (claimMode) "提交认领" else "提交举报",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+
+                Text(
+                    if (claimMode) {
+                        "提交后我们会在48小时内与您联系确认。请确保联系方式有效，虚假认领可能导致账号受限。"
+                    } else {
+                        "恶意举报可能导致账号受限。我们将严格保密举报者信息。"
                     },
-                    color = if (reason == "claim") DSColors.fairway else DSColors.flagRed,
+                    color = Color(0xFF6B7280),
+                    fontSize = 11.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 )
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消", color = DSColors.shadowGray) }
-        },
-    )
+        }
+    }
 }
 
 @Composable
 private fun ReportResultBanner(result: PlazaSubmitResult) {
-    val tint = if (result.success) DSColors.fairway else DSColors.flagRed
-    val bg = if (result.success) DSColors.mistGreen else DSColors.flagRed.copy(alpha = 0.10f)
+    val tint = if (result.success) Color(0xFF10B981) else Color(0xFFEF4444)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF1A1A1A))
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1538,6 +2195,78 @@ private fun ReportResultBanner(result: PlazaSubmitResult) {
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
         )
+    }
+}
+
+@Composable
+private fun PlazaFeedbackChoiceRow(
+    label: String,
+    tint: Color,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(if (selected) tint.copy(alpha = 0.10f) else Color(0xFF1A1A1A))
+            .border(
+                1.dp,
+                if (selected) tint.copy(alpha = 0.50f) else Color(0xFF2A2A2A),
+                RoundedCornerShape(12.dp),
+            )
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
+            Text("◆", color = if (selected) tint else Color(0xFF6B7280), fontSize = 16.sp)
+        }
+        Text(label, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        Box(
+            modifier = Modifier.size(20.dp).clip(CircleShape)
+                .border(2.dp, if (selected) tint else Color(0xFF374151), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(tint))
+        }
+    }
+}
+
+@Composable
+private fun PlazaFeedbackField(
+    label: String,
+    value: String,
+    placeholder: String,
+    maxLength: Int,
+    onValueChange: (String) -> Unit,
+    required: Boolean = false,
+    singleLine: Boolean = false,
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, color = Color(0xFF9CA3AF), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            if (required) Text("*", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        Box(
+            modifier = Modifier.fillMaxWidth().height(if (singleLine) 44.dp else 100.dp)
+                .clip(RoundedCornerShape(10.dp)).background(Color(0xFF1A1A1A))
+                .border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(10.dp))
+                .padding(12.dp),
+            contentAlignment = Alignment.TopStart,
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = { if (it.length <= maxLength) onValueChange(it) },
+                singleLine = singleLine,
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 14.sp),
+                modifier = Modifier.fillMaxSize(),
+                decorationBox = { inner ->
+                    if (value.isEmpty()) Text(placeholder, color = Color(0xFF6B7280), fontSize = 14.sp)
+                    inner()
+                },
+            )
+        }
     }
 }
 

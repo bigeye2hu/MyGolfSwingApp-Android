@@ -29,8 +29,27 @@ fun releaseStoreFileOutsideRepo(path: String): File {
 val releaseVersionCode = releaseProperty("MYGOLFSWING_VERSION_CODE")?.let { raw ->
     raw.toIntOrNull()?.takeIf { it > 0 }
         ?: throw GradleException("MYGOLFSWING_VERSION_CODE must be a positive integer, got '$raw'")
-} ?: 2
-val releaseVersionName = releaseProperty("MYGOLFSWING_VERSION_NAME") ?: "2.5"
+} ?: 3
+val releaseVersionName = releaseProperty("MYGOLFSWING_VERSION_NAME") ?: "2.7"
+val debugApplicationIdSuffix = releaseProperty("MYGOLFSWING_DEBUG_APPLICATION_ID_SUFFIX")?.let { raw ->
+    val normalized = if (raw.startsWith(".")) raw else ".$raw"
+    if (!Regex("""\.[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*""").matches(normalized)) {
+        throw GradleException(
+            "MYGOLFSWING_DEBUG_APPLICATION_ID_SUFFIX must be a dot-separated Android package suffix, got '$raw'",
+        )
+    }
+    normalized
+}
+val supportedAndroidAbis = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+val packageAbiFilters = releaseProperty("MYGOLFSWING_ABI_FILTERS")?.let { raw ->
+    val requested = raw.split(',').map(String::trim).filter(String::isNotEmpty).toSet()
+    if (requested.isEmpty() || !supportedAndroidAbis.containsAll(requested)) {
+        throw GradleException(
+            "MYGOLFSWING_ABI_FILTERS must be a comma-separated subset of ${supportedAndroidAbis.sorted()}, got '$raw'",
+        )
+    }
+    requested
+}
 
 val releaseStoreFile = releaseProperty("MYGOLFSWING_RELEASE_STORE_FILE")
 val releaseStorePassword = releaseProperty("MYGOLFSWING_RELEASE_STORE_PASSWORD")
@@ -68,6 +87,9 @@ android {
         versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        packageAbiFilters?.let { selectedAbis ->
+            ndk { abiFilters += selectedAbis }
+        }
     }
 
     signingConfigs {
@@ -82,6 +104,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            debugApplicationIdSuffix?.let { suffix ->
+                applicationIdSuffix = suffix
+                versionNameSuffix = "-parity"
+            }
+        }
         release {
             if (hasReleaseSigningConfig) {
                 signingConfig = signingConfigs.getByName("release")
@@ -130,6 +158,8 @@ dependencies {
     implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.view)
     implementation(libs.google.play.billing)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.tencent.imsdk.plus)
     implementation(libs.google.mlkit.pose.detection)
     implementation(libs.retrofit)
     implementation(libs.retrofit.converter.kotlinx.serialization)

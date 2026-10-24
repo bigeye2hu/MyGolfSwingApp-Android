@@ -8,6 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,16 +33,24 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.zIndex
 import androidx.core.content.edit
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Upgrade
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
@@ -47,26 +58,43 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.mygolfswing.app.data.model.V2Goal
+import com.mygolfswing.app.data.model.V2Memo
+import com.mygolfswing.app.data.model.V2MemoKind
+import com.mygolfswing.app.data.model.V2PlazaCategoryChip
+import com.mygolfswing.app.data.model.V2PlazaVideo
+import com.mygolfswing.app.data.model.V2SwingClip
+import com.mygolfswing.app.data.coach.V2CoachWorkspaceItem
+import com.mygolfswing.app.data.coach.V2StudentUnreadSnapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.R
-import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2SwingClipRetention
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
@@ -74,18 +102,37 @@ import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.headerDisplayName
+import com.mygolfswing.app.ui.common.V2UserAvatar
+import com.mygolfswing.app.ui.common.V2RoomBackground
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.plaza.V2PlazaCoachAvatar
+import com.mygolfswing.app.ui.designsystem.DSLayout
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
+import com.mygolfswing.app.ui.plaza.V2PlazaHeroCard
+import com.mygolfswing.app.ui.plaza.v2PlazaCompactCount
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.launch
+import java.time.LocalDateTime
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.util.UUID
 
 /**
  * V2 首页（对齐 iOS `V2HomeView`）。
  *
- * - 空态：[V2HomeEmptyCard]
- * - 有目标态：Hero 卡 + 列表 + 管理入口
- * - 横滑段：Memo / Plaza
+ * - 最近一次练习优先作为 Hero；没有练习时展示广场精选
+ * - 教练未读反馈直接回到对应教学对话
+ * - 固定高频工具 + 教学视频搜索、分类和双列内容流
  * - 底部装饰页脚
  */
 @Composable
@@ -97,13 +144,22 @@ fun V2HomeScreen(
     onSwitchToMemo: () -> Unit = {},
     onOpenPlazaVideo: (UUID) -> Unit = {},
     onOpenMemo: (UUID) -> Unit = {},
+    onOpenSwingClip: (UUID) -> Unit = {},
     onOpenSwingCalendar: () -> Unit = onSwitchToMemo,
     onOpenGrowthPool: () -> Unit = onOpenSwingCalendar,
     onOpenJustSwing: () -> Unit = onOpenSwingCalendar,
+    onOpenAI: () -> Unit = {},
     onAddTap: () -> Unit = {},
     onOpenTrajectory: () -> Unit = {},
     onOpenAnalysis: () -> Unit = {},
     onOpenOnlineDownload: () -> Unit = {},
+    onRequestLogin: () -> Unit = {},
+    studentUnread: V2StudentUnreadSnapshot = V2StudentUnreadSnapshot(),
+    coachNamesByConnection: Map<String, String> = emptyMap(),
+    coachAvatarsByConnection: Map<String, String?> = emptyMap(),
+    activeCoachConnectionIds: List<String> = emptyList(),
+    onOpenCoachFeedback: (connectionId: String, itemId: String?) -> Unit = { _, _ -> },
+    onRefreshStudentData: suspend () -> Unit = {},
 ) {
     val context = LocalContext.current
     val profile by V2ProfileStore.profile.collectAsState()
@@ -112,10 +168,13 @@ fun V2HomeScreen(
     val memoSyncing by V2MemoStore.isSyncing.collectAsState()
     val swingSessions by V2SwingSessionStore.sessions.collectAsState()
     val plazaVideos by V2PlazaStore.videos.collectAsState()
+    val plazaHero by V2PlazaStore.heroVideo.collectAsState()
+    val plazaCategories by V2PlazaStore.categories.collectAsState()
+    val selectedPlazaCategory by V2PlazaStore.selectedCategoryId.collectAsState()
+    val plazaSearchKeyword by V2PlazaStore.searchKeyword.collectAsState()
+    val plazaSearchActive by V2PlazaStore.isSearchActive.collectAsState()
     val plazaLoading by V2PlazaStore.isLoading.collectAsState()
-    val plazaRecommends = remember(plazaVideos) {
-        plazaVideos.sortedByDescending { it.publishedAtMs }.take(6)
-    }
+    val plazaLoadingMore by V2PlazaStore.isLoadingMore.collectAsState()
 
     LaunchedEffect(Unit) {
         if (V2PlazaStore.videos.value.isEmpty()) V2PlazaStore.refresh()
@@ -128,149 +187,804 @@ fun V2HomeScreen(
         }
     }
 
-    var showDevSwitcher by remember { mutableStateOf(false) }
-    var forceEmptyState by remember { mutableStateOf(readHomeForceEmptyState(context)) }
-    fun updateForceEmptyState(enabled: Boolean) {
-        forceEmptyState = enabled
-        saveHomeForceEmptyState(context, enabled)
-    }
-
-    val activeCount = remember(goals) {
-        goals.count { it.status == V2Goal.Status.ACTIVE }
-    }
-    val showForcedEmptyState = ServiceLocator.isDebuggable && forceEmptyState
-    val isEmpty = activeCount == 0 || showForcedEmptyState
     val headerName = profile.headerDisplayName()
-    val recentMemos = remember(memos) { memos.sortedByDescending { it.createdAt }.take(6) }
-    val promotedSwingClips = remember(swingSessions) {
-        swingSessions
-            .flatMap { it.clips }
-            .filter { it.retention == V2SwingClipRetention.PROMOTED }
-            .sortedByDescending { it.timestamp }
+    var homeSearchText by rememberSaveable { mutableStateOf(plazaSearchKeyword) }
+    // 显式依赖 collectAsState 的列表，确保视频先到、头像随后补全时都会重组首屏。
+    val visiblePlazaVideos = remember(plazaVideos, plazaSearchKeyword) {
+        V2PlazaStore.filterPlazaVideos(plazaVideos, plazaSearchKeyword)
+    }
+    val latestPractice = remember(memos, swingSessions, profile.isLoggedIn) {
+        if (profile.isLoggedIn) latestHomePractice(memos, swingSessions.flatMap { it.clips }) else null
+    }
+    val coachFeedback = remember(
+        studentUnread,
+        coachNamesByConnection,
+        coachAvatarsByConnection,
+        activeCoachConnectionIds,
+        profile.isLoggedIn,
+    ) {
+        if (profile.isLoggedIn) {
+            resolveHomeCoachFeedback(
+                unread = studentUnread,
+                coachNamesByConnection = coachNamesByConnection,
+                coachAvatarsByConnection = coachAvatarsByConnection,
+                activeCoachConnectionIds = activeCoachConnectionIds,
+            )
+        } else null
+    }
+    val refreshScope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
+    val homeScrollState = rememberScrollState()
+    val paginationThresholdPx = with(LocalDensity.current) { 480.dp.roundToPx() }
+
+    LaunchedEffect(homeScrollState, visiblePlazaVideos.lastOrNull()?.id) {
+        snapshotFlow {
+            homeScrollState.maxValue > 0 &&
+                homeScrollState.value >= homeScrollState.maxValue - paginationThresholdPx
+        }
+            .distinctUntilChanged()
+            .filter { it }
+            .collect {
+                visiblePlazaVideos.lastOrNull()?.id?.let(V2PlazaStore::loadMoreIfNeeded)
+            }
     }
 
-    Box(
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            if (!refreshing) {
+                refreshing = true
+                V2PlazaStore.refresh(refreshCoachProfiles = true)
+                refreshScope.launch {
+                    try {
+                        onRefreshStudentData()
+                        delay(250)
+                        while (V2PlazaStore.isLoading.value) delay(50)
+                    } finally {
+                        refreshing = false
+                    }
+                }
+            }
+        },
         modifier = Modifier
             .fillMaxSize()
             .background(DSColors.warmWhite),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(homeScrollState)
                 .padding(top = DSSpacing.sm, bottom = DSSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(DSSpacing.xl),
+            verticalArrangement = Arrangement.spacedBy(DSLayout.homeSectionSpacing),
         ) {
             V2HomeHeader(
-                goalCount = if (isEmpty) 0 else activeCount,
                 displayName = headerName,
+                searchText = homeSearchText,
+                onSearchTextChange = {
+                    homeSearchText = it
+                    val keyword = it.trim()
+                    when {
+                        keyword.isEmpty() && plazaSearchActive -> V2PlazaStore.clearSearch()
+                        keyword.isNotEmpty() && keyword != V2PlazaStore.searchKeyword.value -> {
+                            V2PlazaStore.setSearchKeyword(keyword)
+                        }
+                    }
+                },
                 avatarUrl = profile.avatar,
-                onAddTap = onAddTap,
-                onAvatarLongPress = if (ServiceLocator.isDebuggable) {
-                    { showDevSwitcher = true }
-                } else {
-                    null
+                isGuest = !profile.isLoggedIn,
+                onRecordTap = onOpenJustSwing,
+                onSearchSubmit = {
+                    val keyword = homeSearchText.trim()
+                    if (keyword.isEmpty()) V2PlazaStore.clearSearch()
+                    else V2PlazaStore.setSearchKeyword(keyword)
                 },
             )
 
-            if (isEmpty) {
-                V2HomeEmptyCard(
-                    onCreateGoal = onCreateGoal,
-                    onBrowsePlaza = onSwitchToPlaza,
-                    modifier = Modifier.padding(horizontal = DSSpacing.lg),
+            val homeSearchKeyword = homeSearchText.trim()
+            if (homeSearchKeyword.isEmpty()) {
+                if (latestPractice != null) {
+                    V2HomeContinuePracticeCard(
+                        practice = latestPractice,
+                        onRecord = onOpenJustSwing,
+                        onReview = {
+                            when (val target = latestPractice.review) {
+                                is HomePracticeReview.Clip -> onOpenSwingClip(target.id)
+                                is HomePracticeReview.Memo -> onOpenMemo(target.id)
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = DSSpacing.lg),
+                    )
+                } else if (plazaHero != null && !plazaSearchActive) {
+                    V2PlazaHeroCard(
+                        video = plazaHero!!,
+                        onTap = { onOpenPlazaVideo(plazaHero!!.id) },
+                        modifier = Modifier.padding(horizontal = DSSpacing.lg),
+                    )
+                } else if (plazaLoading && visiblePlazaVideos.isEmpty()) {
+                    V2HomeHeroLoading(modifier = Modifier.padding(horizontal = DSSpacing.lg))
+                }
+
+                coachFeedback?.let { feedback ->
+                    V2HomeCoachFeedbackCard(
+                        feedback = feedback,
+                        onClick = { onOpenCoachFeedback(feedback.connectionId, feedback.itemId) },
+                        modifier = Modifier.padding(horizontal = DSSpacing.lg),
+                    )
+                }
+
+                V2HomeToolShortcutRow(
+                    isGuest = !profile.isLoggedIn,
+                    onRecordTap = onOpenJustSwing,
+                    onHistoryTap = onOpenSwingCalendar,
+                    onTrajectoryTap = onOpenTrajectory,
+                    onAnalysisTap = onOpenAnalysis,
+                    onDownloadTap = onOpenOnlineDownload,
+                    onAITap = onOpenAI,
+                    onGuestMoreTap = onRequestLogin,
+                )
+
+                V2HomeCategoryBar(
+                    categories = plazaCategories,
+                    selectedId = selectedPlazaCategory,
+                    onSelect = V2PlazaStore::selectCategory,
+                )
+
+                V2HomeVideoFeed(
+                    videos = visiblePlazaVideos,
+                    isLoading = plazaLoading,
+                    isLoadingMore = plazaLoadingMore,
+                    isSearchActive = plazaSearchActive,
+                    isGuest = !profile.isLoggedIn,
+                    onRequestLogin = onRequestLogin,
+                    onOpenVideo = onOpenPlazaVideo,
                 )
             } else {
-                GoalsBlock(
-                    onCreateGoal = onCreateGoal,
-                    onOpenAllGoals = onOpenAllGoals,
-                    onOpenGoalDetail = onOpenGoalDetail,
+                V2HomeSearchResults(
+                    keyword = homeSearchKeyword,
+                    videos = visiblePlazaVideos,
+                    memos = memos,
+                    isLoading = plazaLoading,
+                    isLoadingMore = plazaLoadingMore,
+                    isGuest = !profile.isLoggedIn,
+                    onRequestLogin = onRequestLogin,
+                    onOpenVideo = onOpenPlazaVideo,
+                    onOpenMemo = onOpenMemo,
                 )
             }
-
-            V2HomeToolEntryGrid(
-                onRecordTap = onOpenJustSwing,
-                onTrajectoryTap = onOpenTrajectory,
-                onAnalysisTap = onOpenAnalysis,
-                onDownloadTap = onOpenOnlineDownload,
-            )
-
-            if (promotedSwingClips.isNotEmpty()) {
-                V2HomeGrowthPoolSummary(
-                    promotedCount = promotedSwingClips.size,
-                    latestTitle = V2HomeGrowthPoolTitle(promotedSwingClips.first().durationSec),
-                    onTap = onOpenGrowthPool,
-                    modifier = Modifier.padding(horizontal = DSSpacing.lg),
-                )
-            }
-
-            V2HomeMemoSection(
-                memos = recentMemos,
-                isLoading = memoSyncing && recentMemos.isEmpty(),
-                onSeeAll = onSwitchToMemo,
-                onMemoTap = { onOpenMemo(it.id) },
-            )
-
-            V2HomePlazaSection(
-                videos = plazaRecommends,
-                isLoading = plazaLoading,
-                onSeeAll = onSwitchToPlaza,
-                onVideoTap = { onOpenPlazaVideo(it.id) },
-            )
 
             V2HomeDecorativeFooter(modifier = Modifier.padding(horizontal = DSSpacing.lg))
         }
     }
 
-    if (showDevSwitcher && ServiceLocator.isDebuggable) {
-        V2HomeDevSwitcherDialog(
-            forceEmptyState = forceEmptyState,
-            onForceEmptyStateChange = ::updateForceEmptyState,
-            onDismiss = { showDevSwitcher = false },
+    LaunchedEffect(plazaSearchKeyword) {
+        if (plazaSearchKeyword.isEmpty() && homeSearchText.isNotEmpty() && !plazaSearchActive) {
+            homeSearchText = ""
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (V2PlazaStore.isSearchActive.value) V2PlazaStore.clearSearch()
+        }
+    }
+
+}
+
+internal fun homeSearchedMemos(memos: List<V2Memo>, keyword: String): List<V2Memo> {
+    val query = keyword.trim()
+    if (query.isEmpty()) return emptyList()
+    return memos
+        .asSequence()
+        .filter { it.kind == V2MemoKind.MIXED || it.kind == V2MemoKind.TEXT }
+        .filter { memo ->
+            memo.displayTitle.orEmpty().contains(query, ignoreCase = true) ||
+                memo.text.orEmpty().contains(query, ignoreCase = true)
+        }
+        .sortedByDescending(V2Memo::createdAt)
+        .toList()
+}
+
+@Composable
+internal fun V2HomeSearchResults(
+    keyword: String,
+    videos: List<V2PlazaVideo>,
+    memos: List<V2Memo>,
+    isLoading: Boolean,
+    isLoadingMore: Boolean,
+    isGuest: Boolean,
+    onRequestLogin: () -> Unit,
+    onOpenVideo: (UUID) -> Unit,
+    onOpenMemo: (UUID) -> Unit,
+) {
+    val searchedMemos = remember(memos, keyword) { homeSearchedMemos(memos, keyword) }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = "公开视频",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = DSColors.inkGreen,
+            modifier = Modifier.padding(horizontal = 16.dp),
         )
+        V2HomeVideoFeed(
+            videos = videos,
+            isLoading = isLoading,
+            isLoadingMore = isLoadingMore,
+            isSearchActive = true,
+            isGuest = isGuest,
+            onRequestLogin = onRequestLogin,
+            onOpenVideo = onOpenVideo,
+        )
+        Text(
+            text = "我的记录",
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = DSColors.inkGreen,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        if (searchedMemos.isEmpty()) {
+            Text(
+                text = "没有找到我的记录",
+                fontSize = 13.sp,
+                color = DSColors.shadowGray,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        } else {
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                searchedMemos.forEach { memo ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DSColors.cardWhite)
+                            .clickable { onOpenMemo(memo.id) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = memo.displayTitle ?: "我的记录",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DSColors.inkGreen,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = if (memo.kind == V2MemoKind.TEXT) {
+                                    "随手记 · 仅自己可见"
+                                } else {
+                                    "视频笔记 · 仅自己可见"
+                                },
+                                fontSize = 12.sp,
+                                color = DSColors.shadowGray,
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Filled.ChevronRight,
+                            contentDescription = null,
+                            tint = DSColors.shadowGray,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal sealed interface HomePracticeReview {
+    data class Clip(val id: UUID) : HomePracticeReview
+    data class Memo(val id: UUID) : HomePracticeReview
+}
+
+internal data class HomePracticePresentation(
+    val title: String,
+    val timeText: String,
+    val thumbnail: String?,
+    val date: LocalDateTime,
+    val review: HomePracticeReview,
+)
+
+internal fun latestHomePractice(
+    memos: List<V2Memo>,
+    clips: List<V2SwingClip>,
+): HomePracticePresentation? {
+    val clip = clips.maxByOrNull(V2SwingClip::timestamp)?.let {
+        HomePracticePresentation(
+            // iOS 优先使用 SwingClip.notes；sourceLabel 是导入入口，不属于用户标题。
+            title = it.notes?.trim()?.takeIf(String::isNotEmpty) ?: "挥杆练习",
+            timeText = homeRelativeDate(it.timestamp),
+            thumbnail = it.thumbnailPath,
+            date = it.timestamp,
+            review = HomePracticeReview.Clip(it.id),
+        )
+    }
+    // iOS 的 `memoVM.mixedMemos` 是视频备忘录 row，不包含随手记。
+    val memo = memos
+        .filter { it.kind == V2MemoKind.VIDEO || it.kind == V2MemoKind.MIXED }
+        .maxByOrNull(V2Memo::createdAt)
+        ?.let {
+            HomePracticePresentation(
+                title = it.displayTitle?.trim()?.takeIf(String::isNotEmpty)
+                    ?: "练习记录",
+                timeText = homeRelativeDate(it.createdAt),
+                thumbnail = it.thumbnailUrl,
+                date = it.createdAt,
+                review = HomePracticeReview.Memo(it.id),
+            )
+        }
+    return listOfNotNull(clip, memo).maxByOrNull(HomePracticePresentation::date)
+}
+
+internal data class HomeCoachFeedback(
+    val connectionId: String,
+    val itemId: String?,
+    val coachName: String,
+    val headline: String,
+    val detail: String,
+    val avatar: String?,
+)
+
+internal fun resolveHomeCoachFeedback(
+    unread: V2StudentUnreadSnapshot,
+    coachNamesByConnection: Map<String, String>,
+    coachAvatarsByConnection: Map<String, String?> = emptyMap(),
+    activeCoachConnectionIds: List<String> = coachNamesByConnection.keys.toList(),
+): HomeCoachFeedback? {
+    val activeCoachConnectionIdSet = activeCoachConnectionIds.toSet()
+    val candidates = unread.recentItems.filter { item ->
+        item.connectionId in activeCoachConnectionIdSet &&
+            item.parentItemId == null && !item.isRemovedContent &&
+            (unread.unreadItemIdByConnection[item.connectionId] == item.itemId || item.studentHasUnread)
+    }
+    val item = candidates.maxByOrNull { coachItemEpoch(it) }
+    val connectionId = item?.connectionId
+        ?: activeCoachConnectionIds.firstOrNull { (unread.byConnection[it] ?: 0) > 0 }
+        ?: return null
+    val coachName = coachNamesByConnection[connectionId]?.takeIf(String::isNotBlank) ?: "教练"
+    val title = V2CoachWorkspaceItem.visibleCopy(item?.title)
+    val preview = V2CoachWorkspaceItem.visibleCopy(item?.latestReplyText)
+        ?: V2CoachWorkspaceItem.visibleCopy(item?.text)
+        ?: ""
+    val headline = title?.let { "$coachName 对你的《$it》有新反馈" } ?: "$coachName 发来新的反馈"
+    val detail = if (item == null) {
+        "点击查看你们的教学交流"
+    } else {
+        val time = homeRelativeCoachDate(item.latestReplyAt ?: item.latestActivityAt ?: item.createdAt)
+        if (preview.isEmpty()) time else "$time · $preview"
+    }
+    return HomeCoachFeedback(
+        connectionId = connectionId,
+        itemId = item?.itemId ?: unread.unreadItemIdByConnection[connectionId],
+        coachName = coachName,
+        headline = headline,
+        detail = detail,
+        avatar = coachAvatarsByConnection[connectionId],
+    )
+}
+
+private fun coachItemEpoch(item: V2CoachWorkspaceItem): Long {
+    val raw = item.latestReplyAt ?: item.latestActivityAt ?: item.createdAt ?: return Long.MIN_VALUE
+    return runCatching { OffsetDateTime.parse(raw).toInstant().toEpochMilli() }
+        .recoverCatching { java.time.Instant.parse(raw).toEpochMilli() }
+        .getOrDefault(Long.MIN_VALUE)
+}
+
+private fun homeRelativeDate(date: LocalDateTime): String {
+    val now = LocalDateTime.now()
+    val time = date.format(DateTimeFormatter.ofPattern("HH:mm"))
+    return when (date.toLocalDate()) {
+        now.toLocalDate() -> "今天 $time"
+        now.toLocalDate().minusDays(1) -> "昨天 $time"
+        else -> date.format(DateTimeFormatter.ofPattern("M月d日 HH:mm"))
+    }
+}
+
+private fun homeRelativeCoachDate(raw: String?): String {
+    if (raw.isNullOrBlank()) return "刚刚"
+    val local = coachLocalDateTime(raw) ?: return "刚刚"
+    return homeRelativeDate(local)
+}
+
+internal fun coachLocalDateTime(
+    raw: String,
+    zoneId: ZoneId = ZoneId.systemDefault(),
+): LocalDateTime? = runCatching {
+    OffsetDateTime.parse(raw).atZoneSameInstant(zoneId).toLocalDateTime()
+}.recoverCatching {
+    LocalDateTime.parse(raw)
+}.getOrNull()
+
+@Composable
+internal fun V2HomeContinuePracticeCard(
+    practice: HomePracticePresentation,
+    onRecord: () -> Unit,
+    onReview: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(168.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(
+                    androidx.compose.ui.graphics.Brush.linearGradient(
+                        listOf(DSColors.deepGreen, DSColors.fairway),
+                    ),
+                ),
+        ) {
+            practice.thumbnail?.let {
+                AsyncImage(
+                    model = it,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            0.5f to androidx.compose.ui.graphics.Color.Transparent,
+                            1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f),
+                        ),
+                    ),
+            )
+            Column(
+                modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("继续你的练习", color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.9f), style = DSTypography.visualChip)
+                Text(practice.title, color = androidx.compose.ui.graphics.Color.White, style = DSTypography.visualTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("上次记录：${practice.timeText}", color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.86f), style = DSTypography.visualMeta)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HomePillButton("记录练习", true, onRecord, Modifier.weight(1f))
+            HomePillButton("回看上次", false, onReview, Modifier.weight(1f))
+        }
     }
 }
 
 @Composable
-private fun V2HomeDevSwitcherDialog(
-    forceEmptyState: Boolean,
-    onForceEmptyStateChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
+private fun HomePillButton(
+    text: String,
+    filled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("V2 开发者切换", color = DSColors.inkGreen, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    "仅调试包可见，用于核对 iOS 导航图中的隐藏 HOME-004 入口。",
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("强制空状态主页", style = DSTypography.bodyBold, color = DSColors.inkGreen)
-                        Text("隐藏已有目标卡夹，用于检查首页空态视觉。", style = DSTypography.caption, color = DSColors.shadowGray)
+    Row(
+        modifier = modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (filled) DSColors.fairway else DSColors.cardWhite)
+            .border(1.dp, if (filled) DSColors.fairway else DSColors.borderLine, RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        if (filled) {
+            Icon(
+                imageVector = Icons.Filled.Add,
+                contentDescription = null,
+                tint = androidx.compose.ui.graphics.Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(text, color = if (filled) androidx.compose.ui.graphics.Color.White else DSColors.inkGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+internal fun V2HomeCoachFeedbackCard(
+    feedback: HomeCoachFeedback,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(DSColors.cardWhite)
+            .border(1.dp, DSColors.borderLine, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        V2UserAvatar(
+            avatar = feedback.avatar,
+            modifier = Modifier.size(40.dp).clip(CircleShape)
+                .border(1.dp, DSColors.mistGreen, CircleShape),
+            fallbackFontSize = 15.sp,
+            placeholderIconSize = 24.dp,
+            fallbackText = feedback.coachName,
+            fallbackColor = DSColors.sandBeige,
+        )
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(feedback.headline, color = DSColors.inkGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (feedback.detail.isNotEmpty()) {
+                Text(feedback.detail, color = DSColors.shadowGray, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, tint = DSColors.fairway, modifier = Modifier.size(12.dp))
+    }
+}
+
+@Composable
+private fun V2HomeHeroLoading(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(22.dp)).background(DSColors.sandBeige),
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.material3.CircularProgressIndicator(color = DSColors.fairway, modifier = Modifier.size(28.dp))
+    }
+}
+
+@Composable
+internal fun V2HomeCategoryBar(
+    categories: List<V2PlazaCategoryChip>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        categories.forEach { category ->
+            val selected = category.id == selectedId
+            Text(
+                text = if (category.id == "all") "精选" else category.name,
+                color = if (selected) androidx.compose.ui.graphics.Color.White else DSColors.inkGreen.copy(alpha = 0.7f),
+                style = DSTypography.visualChip.copy(
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .shadow(
+                        elevation = if (selected) 3.dp else 0.dp,
+                        shape = RoundedCornerShape(50),
+                        ambientColor = if (selected) DSColors.fairway.copy(alpha = 0.25f) else androidx.compose.ui.graphics.Color.Transparent,
+                        spotColor = if (selected) DSColors.fairway.copy(alpha = 0.25f) else androidx.compose.ui.graphics.Color.Transparent,
+                    )
+                    .clip(RoundedCornerShape(50))
+                    .background(if (selected) DSColors.fairway else DSColors.sandBeige)
+                    .border(
+                        1.dp,
+                        if (selected) androidx.compose.ui.graphics.Color.Transparent else androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.06f),
+                        RoundedCornerShape(50),
+                    )
+                    .clickable { onSelect(category.id) }
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+        }
+    }
+}
+
+@Composable
+internal fun V2HomeVideoFeed(
+    videos: List<V2PlazaVideo>,
+    isLoading: Boolean,
+    isLoadingMore: Boolean,
+    isSearchActive: Boolean,
+    isGuest: Boolean,
+    onRequestLogin: () -> Unit,
+    onOpenVideo: (UUID) -> Unit,
+) {
+    when {
+        isLoading && videos.isEmpty() -> Box(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.material3.CircularProgressIndicator(
+                color = DSColors.fairway,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        videos.isEmpty() -> Text(
+            text = if (isSearchActive) "没有找到相关视频" else "这个分类暂时没有视频",
+            color = DSColors.shadowGray,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
+        )
+        else -> Column(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            videos.chunked(2).forEach { rowVideos ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rowVideos.forEach { video ->
+                        V2HomeVideoCard(
+                            video = video,
+                            isGuest = isGuest,
+                            onTap = { onOpenVideo(video.id) },
+                            onSaveTap = {
+                                if (isGuest) onRequestLogin() else V2PlazaStore.toggleSave(video.id)
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
-                    Switch(checked = forceEmptyState, onCheckedChange = onForceEmptyStateChange)
+                    if (rowVideos.size == 1) Spacer(Modifier.weight(1f))
                 }
-                Text(
-                    "Android 当前上线包只有 V2 主体验，因此不提供 iOS 开发期的「切回 V1」运行时开关。",
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
+            }
+            if (isLoadingMore) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    color = DSColors.fairway,
+                    modifier = Modifier.align(Alignment.CenterHorizontally).size(24.dp),
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** 封面按卡片宽度强制 3:4。普通 height 会被父级最大高度压扁。 */
+private fun Modifier.homeVideoCover(): Modifier = layout { measurable, constraints ->
+    val width = if (constraints.hasBoundedWidth) constraints.maxWidth else constraints.minWidth
+    val safeWidth = width.coerceAtLeast(1)
+    val height = (safeWidth * 4f / 3f).toInt().coerceAtLeast(1)
+    val placeable = measurable.measure(Constraints.fixed(safeWidth, height))
+    layout(safeWidth, height) { placeable.place(0, 0) }
+}
+
+@Composable
+internal fun V2HomeVideoCard(
+    video: V2PlazaVideo,
+    isGuest: Boolean,
+    onTap: () -> Unit,
+    onSaveTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .homeVideoCover()
+                .aspectRatio(3f / 4f)
+                .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(DSColors.deepGreen, DSColors.fairway),
+                        ),
+                    ),
+            ) {
+                video.thumbnailUrl?.takeIf(String::isNotBlank)?.let { thumbnail ->
+                    AsyncImage(
+                        model = thumbnail,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.size(9.dp),
+                    )
+                }
+                video.categoryDisplayName?.takeIf(String::isNotBlank)?.let { tag ->
+                    Text(
+                        text = "# $tag",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                val durationSec = video.durationSec.toInt().coerceAtLeast(0)
+                if (durationSec > 0) {
+                    Text(
+                        text = "%d:%02d".format(durationSec / 60, durationSec % 60),
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    )
+                }
             }
-        },
-        containerColor = DSColors.cardWhite,
-    )
+        Text(
+            text = video.title,
+            color = DSColors.inkGreen,
+            style = DSTypography.visualCardTitle,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            V2PlazaCoachAvatar(coach = video.coach, size = 16.dp, fontSize = 7.sp)
+            Text(
+                text = video.coach.displayName,
+                color = DSColors.shadowGray,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onSaveTap)
+                    .semantics {
+                        contentDescription = homeVideoSaveAccessibilityLabel(
+                            isGuest = isGuest,
+                            isSaved = video.isSaved,
+                        )
+                    }
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Icon(
+                    imageVector = if (video.isSaved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = null,
+                    tint = if (video.isSaved) DSColors.flagRed else DSColors.shadowGray,
+                    modifier = Modifier.size(11.dp),
+                )
+                Text(
+                    text = homeVideoSaveText(video.isSaved, video.saveCount),
+                    color = if (video.isSaved) DSColors.flagRed else DSColors.shadowGray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+}
+
+internal fun homeVideoSaveText(isSaved: Boolean, saveCount: Int): String =
+    if (isSaved && saveCount == 0) "已收藏" else v2PlazaCompactCount(saveCount)
+
+internal fun homeVideoSaveAccessibilityLabel(isGuest: Boolean, isSaved: Boolean): String = when {
+    isGuest -> "登录后收藏"
+    isSaved -> "已收藏"
+    else -> "收藏"
 }
 
 @Composable
@@ -478,44 +1192,103 @@ private fun V2GoalCardDeck(
     }
 }
 
-// ─── 常用工具横滑栏（对齐 iOS V2HomeToolBar）──────────────────────────────────
+// ─── 首页快捷入口（对齐 iOS V2HomeToolShortcutRow）────────────────────────────
 
 private data class ToolEntry(
     val id: String,
     val title: String,
-    val subtitle: String,
-    @param:DrawableRes val iconRes: Int,
+    val subtitle: String?,
+    @param:DrawableRes val iconRes: Int? = null,
+    val iconVector: ImageVector? = null,
     val accent: androidx.compose.ui.graphics.Color,
     val onClick: () -> Unit,
 )
 
-private val defaultHomeToolIds = listOf("record", "analysis", "create", "download")
+internal val defaultHomeToolIds = listOf("record", "history", "analysis", "create", "download", "ai")
 
-private fun readHomeForceEmptyState(context: Context): Boolean =
-    context.getSharedPreferences("v2_home_dev_switcher", Context.MODE_PRIVATE)
-        .getBoolean("force_empty_state", false)
+internal fun resolvedHomeToolOrder(savedOrder: List<String>, migrateHistory: Boolean): List<String> {
+    val validSaved = savedOrder.filter { it in defaultHomeToolIds }
+    val resolved = (validSaved + defaultHomeToolIds).distinct().toMutableList()
+    if (migrateHistory) {
+        resolved.remove("history")
+        val recordIndex = resolved.indexOf("record").coerceAtLeast(0)
+        resolved.add((recordIndex + 1).coerceAtMost(resolved.size), "history")
+    }
+    return resolved
+}
 
-private fun saveHomeForceEmptyState(context: Context, enabled: Boolean) {
-    context.getSharedPreferences("v2_home_dev_switcher", Context.MODE_PRIVATE)
-        .edit {
-            putBoolean("force_empty_state", enabled)
-        }
+internal fun resolvedHomeToolEnabledIds(
+    savedEnabledIds: Set<String>?,
+    migrateHistory: Boolean,
+    migrateAI: Boolean,
+): Set<String> {
+    val enabled = savedEnabledIds
+        ?.filter { it in defaultHomeToolIds }
+        ?.toMutableSet()
+        ?: defaultHomeToolIds.toMutableSet()
+    if (migrateHistory) enabled += "history"
+    if (migrateAI) enabled += "ai"
+    return enabled
+}
+
+internal fun reorderedHomeTools(order: List<String>, id: String, direction: Int): List<String> {
+    val from = order.indexOf(id)
+    if (from < 0 || direction == 0) return order
+    val step = if (direction < 0) -1 else 1
+    val to = (from + step).coerceIn(order.indices)
+    if (from == to) return order
+    return order.toMutableList().also {
+        val item = it.removeAt(from)
+        it.add(to, item)
+    }
+}
+
+internal fun visibleHomeToolIds(order: List<String>, enabledIds: Set<String>): List<String> =
+    order.filter { it in defaultHomeToolIds && it in enabledIds }
+
+private fun ensureHomeToolMigrations(context: Context) {
+    val prefs = context.getSharedPreferences("v2_home_quick_tools", Context.MODE_PRIVATE)
+    val migrateHistory = !prefs.getBoolean("history_migration_v1", false)
+    val migrateAI = !prefs.getBoolean("ai_migration_v1", false)
+    if (!migrateHistory && !migrateAI) return
+
+    val storedOrder = prefs.getString("order", null)
+        ?.split(",")
+        ?.map { it.trim() }
+        .orEmpty()
+    val storedEnabled = prefs.getString("enabled", null)
+        ?.split(",")
+        ?.map { it.trim() }
+        ?.toSet()
+    val order = resolvedHomeToolOrder(storedOrder, migrateHistory)
+    val enabled = resolvedHomeToolEnabledIds(storedEnabled, migrateHistory, migrateAI)
+    prefs.edit {
+        putString("order", order.joinToString(","))
+        putString("enabled", enabled.joinToString(","))
+        putBoolean("history_migration_v1", true)
+        putBoolean("ai_migration_v1", true)
+    }
 }
 
 private fun readHomeToolOrder(context: Context): List<String> {
+    ensureHomeToolMigrations(context)
     val prefs = context.getSharedPreferences("v2_home_quick_tools", Context.MODE_PRIVATE)
     val stored = prefs.getString("order", null)
         ?.split(",")
         ?.map { it.trim() }
-        ?.filter { it in defaultHomeToolIds }
         .orEmpty()
-    return (stored + defaultHomeToolIds).distinct().filter { it in defaultHomeToolIds }
+    return resolvedHomeToolOrder(stored, migrateHistory = false)
 }
 
 private fun readHomeToolEnabledIds(context: Context): Set<String> {
+    ensureHomeToolMigrations(context)
     val prefs = context.getSharedPreferences("v2_home_quick_tools", Context.MODE_PRIVATE)
     val stored = prefs.getString("enabled", null) ?: return defaultHomeToolIds.toSet()
-    return stored.split(",").map { it.trim() }.filter { it in defaultHomeToolIds }.toSet()
+    return resolvedHomeToolEnabledIds(
+        savedEnabledIds = stored.split(",").map { it.trim() }.toSet(),
+        migrateHistory = false,
+        migrateAI = false,
+    )
 }
 
 private fun saveHomeToolConfig(context: Context, order: List<String>, enabledIds: Set<String>) {
@@ -528,11 +1301,15 @@ private fun saveHomeToolConfig(context: Context, order: List<String>, enabledIds
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun V2HomeToolEntryGrid(
+internal fun V2HomeToolShortcutRow(
+    isGuest: Boolean,
     onRecordTap: () -> Unit,
+    onHistoryTap: () -> Unit,
     onTrajectoryTap: () -> Unit,
     onAnalysisTap: () -> Unit,
     onDownloadTap: () -> Unit,
+    onAITap: () -> Unit,
+    onGuestMoreTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -547,74 +1324,39 @@ private fun V2HomeToolEntryGrid(
     }
 
     val entries = listOf(
-        ToolEntry("record", "挥杆记录", "每日练习记录", R.drawable.tool_swing, androidx.compose.ui.graphics.Color(0xFFA855F7), onRecordTap),
-        ToolEntry("analysis", "回看分析", "逐帧分析回看", R.drawable.tool_analyze, androidx.compose.ui.graphics.Color(0xFF3B82F6), onAnalysisTap),
-        ToolEntry("create", "轨迹绘制", "飞行轨迹绘制", R.drawable.tool_path, androidx.compose.ui.graphics.Color(0xFF52B788), onTrajectoryTap),
-        ToolEntry("download", "视频下载", "第三方视频下载", R.drawable.tool_download, androidx.compose.ui.graphics.Color(0xFF22C55E), onDownloadTap),
+        ToolEntry("record", "每日练习", "每日练习记录", R.drawable.tool_swing, accent = androidx.compose.ui.graphics.Color(0xFFA855F7), onClick = onRecordTap),
+        ToolEntry("history", "挥杆记录", null, iconVector = Icons.Filled.CalendarMonth, accent = androidx.compose.ui.graphics.Color(0xFFF59E0B), onClick = onHistoryTap),
+        ToolEntry("analysis", "回看分析", "逐帧分析回看", R.drawable.tool_analyze, accent = androidx.compose.ui.graphics.Color(0xFF3B82F6), onClick = onAnalysisTap),
+        ToolEntry("create", "轨迹绘制", "飞行轨迹绘制", R.drawable.tool_path, accent = androidx.compose.ui.graphics.Color(0xFF52B788), onClick = onTrajectoryTap),
+        ToolEntry("download", "视频下载", "第三方视频下载", R.drawable.tool_download, accent = androidx.compose.ui.graphics.Color(0xFF22C55E), onClick = onDownloadTap),
+        ToolEntry("ai", "AI 教练", null, iconVector = Icons.Filled.AutoAwesome, accent = androidx.compose.ui.graphics.Color(0xFFD4A017), onClick = onAITap),
     )
     val entriesById = entries.associateBy { it.id }
-    val orderedEntries = order.mapNotNull(entriesById::get)
-    val visibleEntries = orderedEntries.filter { it.id in enabledIds }
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    val shortcutEntries = visibleHomeToolIds(order, enabledIds).mapNotNull(entriesById::get).map { entry ->
+        if (entry.id == "record") entry.copy(title = "录挥杆") else entry
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Text(
-                text = "常用工具",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = DSColors.inkGreen,
-                modifier = Modifier.weight(1f),
-            )
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(DSColors.sandBeige)
-                    .clickable { showConfig = true }
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(Icons.Filled.Tune, null, tint = DSColors.shadowGray, modifier = Modifier.size(14.dp))
-                Text(
-                    text = "自定义",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = DSColors.shadowGray,
-                )
-            }
+        shortcutEntries.forEach { entry ->
+            V2HomeToolShortcut(entry = entry, isGuest = isGuest)
         }
-
-        if (visibleEntries.isEmpty()) {
-            Text(
-                text = "点击「自定义」添加常用工具",
-                style = DSTypography.caption,
-                color = DSColors.shadowGray,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 20.dp),
-            )
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                visibleEntries.forEach { entry ->
-                    ToolEntryButton(entry = entry)
-                }
-            }
-        }
+        V2HomeToolShortcut(
+            entry = ToolEntry(
+                id = "more",
+                title = "更多",
+                subtitle = null,
+                iconVector = Icons.Filled.GridView,
+                accent = DSColors.shadowGray,
+                onClick = { if (isGuest) onGuestMoreTap() else showConfig = true },
+            ),
+            isGuest = isGuest,
+        )
     }
 
     if (showConfig) {
@@ -625,74 +1367,74 @@ private fun V2HomeToolEntryGrid(
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             dragHandle = null,
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 12.dp, bottom = 16.dp)
-                        .width(40.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(DSColors.shadowGray.copy(alpha = 0.28f))
-                        .align(Alignment.CenterHorizontally),
-                )
-                Row(
+            V2RoomPage(Modifier.fillMaxWidth()) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp),
                 ) {
-                    Text(
-                        "自定义工具栏",
-                        color = DSColors.inkGreen,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 12.dp, bottom = 16.dp)
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(DSColors.shadowGray.copy(alpha = 0.28f))
+                            .align(Alignment.CenterHorizontally),
                     )
-                    TextButton(onClick = { showConfig = false }) {
-                        Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-                Text(
-                    "打开开关控制首页显示，使用箭头调整顺序。",
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
-                    modifier = Modifier.padding(bottom = 12.dp),
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    order.forEachIndexed { index, id ->
-                        val entry = entriesById[id] ?: return@forEachIndexed
-                        ToolConfigRow(
-                            entry = entry,
-                            enabled = id in enabledIds,
-                            canMoveUp = index > 0,
-                            canMoveDown = index < order.lastIndex,
-                            onEnabledChange = { enabled ->
-                                updateConfig(
-                                    nextEnabledIds = if (enabled) enabledIds + id else enabledIds - id,
-                                )
-                            },
-                            onMoveUp = {
-                                if (index > 0) {
-                                    updateConfig(order.toMutableList().also {
-                                        val item = it.removeAt(index)
-                                        it.add(index - 1, item)
-                                    })
-                                }
-                            },
-                            onMoveDown = {
-                                if (index < order.lastIndex) {
-                                    updateConfig(order.toMutableList().also {
-                                        val item = it.removeAt(index)
-                                        it.add(index + 1, item)
-                                    })
-                                }
-                            },
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                    ) {
+                        Text(
+                            "自定义工具栏",
+                            color = DSColors.inkGreen,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.align(Alignment.Center),
                         )
+                        TextButton(
+                            onClick = { showConfig = false },
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                        ) {
+                            Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Text(
+                        "拖动右侧图标可调整顺序",
+                        style = DSTypography.caption,
+                        color = DSColors.shadowGray,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(DSColors.cardWhite),
+                    ) {
+                        order.forEachIndexed { index, id ->
+                            val entry = entriesById[id] ?: return@forEachIndexed
+                            if (index > 0) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(start = 68.dp),
+                                    color = DSColors.borderLine,
+                                )
+                            }
+                            ToolConfigRow(
+                                entry = entry,
+                                enabled = id in enabledIds,
+                                onEnabledChange = { enabled ->
+                                    updateConfig(
+                                        nextEnabledIds = if (enabled) enabledIds + id else enabledIds - id,
+                                    )
+                                },
+                                onMove = { direction ->
+                                    updateConfig(reorderedHomeTools(order, id, direction))
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -701,53 +1443,48 @@ private fun V2HomeToolEntryGrid(
 }
 
 @Composable
-private fun ToolEntryButton(entry: ToolEntry, modifier: Modifier = Modifier) {
-    var titleFontSize by remember(entry.title) { mutableStateOf(13.sp) }
+private fun V2HomeToolShortcut(
+    entry: ToolEntry,
+    isGuest: Boolean,
+) {
     Column(
-        modifier = modifier
-            .width(90.dp)
-            .height(88.dp)
-            .shadow(
-                elevation = 16.dp,
-                shape = RoundedCornerShape(18.dp),
-                ambientColor = DSColors.deepGreen.copy(alpha = 0.07f),
-                spotColor = DSColors.deepGreen.copy(alpha = 0.07f),
-            )
-            .background(DSColors.cardWhite, shape = RoundedCornerShape(18.dp))
-            .border(
-                width = 1.dp,
-                color = entry.accent.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(18.dp),
-            )
-            .clickable(onClick = entry.onClick)
-            .padding(vertical = 10.dp, horizontal = 8.dp),
+        modifier = Modifier
+            .testTag("home-tool-shortcut-${entry.id}")
+            .width(DSLayout.homeToolWidth)
+            .clickable(onClick = entry.onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(
-            modifier = Modifier
-                .size(46.dp)
-                .background(entry.accent.copy(alpha = 0.14f), shape = CircleShape),
-            contentAlignment = Alignment.Center,
+            modifier = Modifier.size(DSLayout.homeToolCircle),
         ) {
-            Image(
-                painter = painterResource(id = entry.iconRes),
-                contentDescription = null,
-                modifier = Modifier.size(28.dp),
-            )
+            Box(
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                    .background(entry.accent.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                entry.iconVector?.let {
+                    Icon(it, null, tint = entry.accent, modifier = Modifier.size(DSLayout.homeToolIcon))
+                } ?: entry.iconRes?.let {
+                    Image(painterResource(it), null, modifier = Modifier.size(DSLayout.homeToolImage))
+                }
+            }
+            if (isGuest) {
+                Box(
+                    modifier = Modifier.align(Alignment.Center).offset(x = 16.dp, y = 16.dp).size(14.dp)
+                        .clip(CircleShape).background(DSColors.deepGreen.copy(alpha = 0.88f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Lock, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(7.dp))
+                }
+            }
         }
         Text(
-            text = entry.title,
-            fontSize = titleFontSize,
-            fontWeight = FontWeight.Bold,
+            entry.title,
             color = DSColors.inkGreen,
+            style = DSTypography.tab.copy(fontWeight = FontWeight.SemiBold),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            onTextLayout = { result ->
-                if (result.hasVisualOverflow && titleFontSize.value > 11f) {
-                    titleFontSize = (titleFontSize.value - 0.5f).sp
-                }
-            },
         )
     }
 }
@@ -756,17 +1493,16 @@ private fun ToolEntryButton(entry: ToolEntry, modifier: Modifier = Modifier) {
 private fun ToolConfigRow(
     entry: ToolEntry,
     enabled: Boolean,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
     onEnabledChange: (Boolean) -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
+    onMove: (Int) -> Unit,
 ) {
+    val latestOnMove by rememberUpdatedState(onMove)
     Row(
         modifier = Modifier
+            .testTag("home-tool-config-row-${entry.id}")
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.5f)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -776,13 +1512,20 @@ private fun ToolConfigRow(
                 .background(entry.accent.copy(alpha = if (enabled) 0.14f else 0.06f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Image(
-                painter = painterResource(id = entry.iconRes),
-                contentDescription = null,
-                modifier = Modifier
-                    .size(22.dp)
-                    .alpha(if (enabled) 1f else 0.35f),
-            )
+            entry.iconVector?.let { vector ->
+                Icon(
+                    vector,
+                    null,
+                    tint = entry.accent,
+                    modifier = Modifier.size(17.dp).alpha(if (enabled) 1f else 0.35f),
+                )
+            } ?: entry.iconRes?.let { res ->
+                Image(
+                    painter = painterResource(id = res),
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp).alpha(if (enabled) 1f else 0.35f),
+                )
+            }
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
@@ -791,31 +1534,48 @@ private fun ToolConfigRow(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(entry.subtitle, color = DSColors.shadowGray.copy(alpha = 0.72f), fontSize = 12.sp)
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Icon(
-                Icons.Filled.KeyboardArrowUp,
-                null,
-                tint = DSColors.shadowGray.copy(alpha = if (canMoveUp) 1f else 0.24f),
-                modifier = Modifier.size(22.dp).clickable(enabled = canMoveUp, onClick = onMoveUp),
-            )
-            Icon(
-                Icons.Filled.KeyboardArrowDown,
-                null,
-                tint = DSColors.shadowGray.copy(alpha = if (canMoveDown) 1f else 0.24f),
-                modifier = Modifier.size(22.dp).clickable(enabled = canMoveDown, onClick = onMoveDown),
-            )
+            entry.subtitle?.let { subtitle ->
+                Text(subtitle, color = DSColors.shadowGray.copy(alpha = 0.7f), fontSize = 12.sp)
+            }
         }
         Switch(
             checked = enabled,
             onCheckedChange = onEnabledChange,
+            modifier = Modifier.testTag("home-tool-toggle-${entry.id}"),
             colors = SwitchDefaults.colors(
                 checkedThumbColor = androidx.compose.ui.graphics.Color.White,
                 checkedTrackColor = entry.accent,
                 uncheckedThumbColor = androidx.compose.ui.graphics.Color.White,
                 uncheckedTrackColor = DSColors.shadowGray.copy(alpha = 0.38f),
             ),
+        )
+        Icon(
+            Icons.Filled.DragHandle,
+            contentDescription = "拖动${entry.title}排序",
+            tint = DSColors.shadowGray.copy(alpha = 0.72f),
+            modifier = Modifier
+                .size(24.dp)
+                .pointerInput(entry.id) {
+                    var accumulatedY = 0f
+                    val threshold = 44.dp.toPx()
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { accumulatedY = 0f },
+                        onDragEnd = { accumulatedY = 0f },
+                        onDragCancel = { accumulatedY = 0f },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            accumulatedY += amount.y
+                            while (accumulatedY <= -threshold) {
+                                latestOnMove(-1)
+                                accumulatedY += threshold
+                            }
+                            while (accumulatedY >= threshold) {
+                                latestOnMove(1)
+                                accumulatedY -= threshold
+                            }
+                        },
+                    )
+                },
         )
     }
 }

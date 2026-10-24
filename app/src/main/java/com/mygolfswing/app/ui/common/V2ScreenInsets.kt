@@ -6,10 +6,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.activity.compose.BackHandler
 
-/** 全屏子页顶栏/内容需避开状态栏（[enableEdgeToEdge] 后否则返回按钮点不到）。 */
+/**
+ * 全屏子页自己避开状态栏。
+ * 已经放在带顶栏 Insets 的底栏页里时不要再加，否则会重复避让。
+ */
 fun Modifier.v2StatusBarPadding(): Modifier = statusBarsPadding()
 
-/** 底部操作区避开手势导航条。 */
+/**
+ * 底部操作区避开系统导航。
+ * App 底栏自己加这一层；底栏页内容不要再加。
+ */
 fun Modifier.v2NavigationBarPadding(): Modifier = navigationBarsPadding()
 
 fun Modifier.v2FullScreenInsets(): Modifier = statusBarsPadding().navigationBarsPadding()

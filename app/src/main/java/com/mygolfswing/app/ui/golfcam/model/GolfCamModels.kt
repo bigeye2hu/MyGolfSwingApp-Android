@@ -273,7 +273,15 @@ object TrajectoryAlgorithmManager {
 
 // ─── 弧长表（均匀弧长采样，O(1) 反查）──────────────────────────────────────────
 
-class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
+class ArcLengthTable(
+    val bezier: BezierPath,
+    sampleCount: Int = 300,
+    videoWidth: Float = 1f,
+    videoHeight: Float = 1f,
+    val appliesIosApexCorrection: Boolean = false,
+) {
+    val videoWidth: Float = videoWidth.takeIf { it.isFinite() && it > 0f } ?: 1f
+    val videoHeight: Float = videoHeight.takeIf { it.isFinite() && it > 0f } ?: 1f
     private val safeSampleCount = sampleCount.coerceAtLeast(1)
     private val uSamples = FloatArray(safeSampleCount + 1) { it.toFloat() / safeSampleCount }
     val arcLengths = FloatArray(safeSampleCount + 1)
@@ -281,13 +289,33 @@ class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
     val totalLength: Float
 
     init {
-        var prev = bezier.point(0f)
+        val rawArcLengths = FloatArray(safeSampleCount + 1)
+        var prev = bezier.point(0f).toOffset(videoWidth = this.videoWidth, videoHeight = this.videoHeight)
         for (i in 1..safeSampleCount) {
-            val curr = bezier.point(uSamples[i])
+            val curr = bezier.point(uSamples[i]).toOffset(videoWidth = this.videoWidth, videoHeight = this.videoHeight)
             val dx = curr.x - prev.x
             val dy = curr.y - prev.y
-            arcLengths[i] = arcLengths[i - 1] + kotlin.math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+            rawArcLengths[i] = rawArcLengths[i - 1] + kotlin.math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
             prev = curr
+        }
+        val rawTotal = rawArcLengths[safeSampleCount].takeIf { it.isFinite() && it > 0f } ?: 0f
+        if (appliesIosApexCorrection && rawTotal > 0f) {
+            val apexIndex = (apexU() * safeSampleCount).toInt().coerceIn(0, safeSampleCount)
+            val rawApexRatio = (rawArcLengths[apexIndex] / rawTotal).takeIf { it.isFinite() } ?: 0f
+            if (rawApexRatio > 1e-6f && rawApexRatio < 1f - 1e-6f) {
+                val targetApexRatio = rawApexRatio * IOS_APEX_CORRECTION_FACTOR
+                val compressionBefore = targetApexRatio / rawApexRatio
+                val expansionAfter = (1f - targetApexRatio) / (1f - rawApexRatio)
+                for (i in 1..safeSampleCount) {
+                    val rawSegment = rawArcLengths[i] - rawArcLengths[i - 1]
+                    val scale = if (i <= apexIndex) compressionBefore else expansionAfter
+                    arcLengths[i] = arcLengths[i - 1] + rawSegment * scale
+                }
+            } else {
+                rawArcLengths.copyInto(arcLengths)
+            }
+        } else {
+            rawArcLengths.copyInto(arcLengths)
         }
         totalLength = arcLengths[safeSampleCount].takeIf { it.isFinite() } ?: 0f
     }
@@ -318,20 +346,43 @@ class ArcLengthTable(val bezier: BezierPath, sampleCount: Int = 300) {
     }
 
     fun apexU(): Float {
-        var minY = Float.MAX_VALUE; var minU = 0f
-        for (i in uSamples.indices) {
-            val pt = bezier.point(uSamples[i])
-            if (pt.y < minY) { minY = pt.y; minU = uSamples[i] }
-        }
-        return minU
+        val p0 = bezier.p0.y.toDouble() * videoHeight
+        val p1 = bezier.p1.y.toDouble() * videoHeight
+        val p2 = bezier.p2.y.toDouble() * videoHeight
+        val p3 = bezier.p3.y.toDouble() * videoHeight
+        val a = -p0 + 3.0 * p1 - 3.0 * p2 + p3
+        val b = 3.0 * p0 - 6.0 * p1 + 3.0 * p2
+        val c = -3.0 * p0 + 3.0 * p1
+        val quadraticA = 3.0 * a
+        val quadraticB = 2.0 * b
+        val discriminant = quadraticB * quadraticB - 4.0 * quadraticA * c
+        if (kotlin.math.abs(quadraticA) <= 1e-10 || !discriminant.isFinite() || discriminant < 0.0) return 0.5f
+        val root = kotlin.math.sqrt(discriminant)
+        val candidates = listOf(
+            (-quadraticB + root) / (2.0 * quadraticA),
+            (-quadraticB - root) / (2.0 * quadraticA),
+        ).filter { it > 0.0 && it < 1.0 && it.isFinite() }
+        if (candidates.isEmpty()) return 0.5f
+        return candidates.minBy { bezier.point(it.toFloat()).y }.toFloat()
     }
 
     fun apexProgress(): Float {
         if (!totalLength.isFinite() || totalLength <= 0f) return 0.6f
         return (arcLengthAtU(apexU()) / totalLength)
             .takeIf { it.isFinite() }
-            ?.coerceIn(0.05f, 0.95f)
+            ?.coerceIn(0.05f, 0.995f)
             ?: 0.6f
+    }
+
+    private fun NormalizedPoint.toOffset(videoWidth: Float, videoHeight: Float): Offset {
+        return Offset(
+            x = finiteNormalizedCoordinate(x, 0.5f) * videoWidth,
+            y = finiteNormalizedCoordinate(y, 0.5f) * videoHeight,
+        )
+    }
+
+    private companion object {
+        const val IOS_APEX_CORRECTION_FACTOR = 0.915f
     }
 }
 
@@ -342,8 +393,9 @@ class TrajectoryMotionModel(
     val timing: TrajectoryTiming,
     val params: TrajectoryMotionParameters,
     sampleCount: Int = 300,
+    arcTableOverride: ArcLengthTable? = null,
 ) {
-    val arcTable = ArcLengthTable(bezier, sampleCount)
+    val arcTable = arcTableOverride ?: ArcLengthTable(bezier, sampleCount)
 
     private val resolvedApex: Double
     private val sSamples: DoubleArray
@@ -747,10 +799,11 @@ object GolfCamSpeedConfig {
     const val MAX_LEVEL = 0.75
     const val DEFAULT_LEVEL = 0.45
     const val STEP = 0.05
+    private const val TRAJECTORY_MOTION_ALGORITHM_VERSION = "v8.depth-density.2"
 
     fun clamp(v: Double) = v.takeIf { it.isFinite() }?.coerceIn(MIN_LEVEL, MAX_LEVEL) ?: DEFAULT_LEVEL
     fun normalized(v: Double) = (clamp(v) - MIN_LEVEL) / (MAX_LEVEL - MIN_LEVEL)
-    fun percentText(v: Double) = "${(clamp(v) * 100).toInt()}%"
+    fun percentText(v: Double) = "${(clamp(v) * 100).roundToInt()}%"
 
     internal fun golfCamV8StartSpeedLimit(activeDurationSec: Double, speedLevel: Double): Double {
         val activeDuration = max(finiteDouble(activeDurationSec, fallback = 0.0), 0.0)
@@ -930,19 +983,24 @@ object GolfCamSpeedConfig {
     )
 
     private data class GolfCamV8HeadCacheKey(
-        val totalDurationMs: Long,
-        val speedLevelScaled: Int,
-        val apexProgressScaled: Int,
-        val anchorTimeMs: Long,
-        val liftHoldScaled: Int,
-        val arcHeightRatioScaled: Int,
-        val landingSteepnessScaled: Int,
-        val descentArcShareScaled: Int,
-        val progressDensityStrengthScaled: Int,
-        val tailReleaseStrengthScaled: Int,
-        val tailReleaseStartScaled: Int,
-        val startSpeedLimitScaled: Int,
-        val motionAnchorTimeMs: Long?,
+        val totalDuration: Double,
+        val speedLevel: Double,
+        val apexProgress: Double,
+        val anchorTime: Double,
+        val delayTime: Double,
+        val holdWidth: Double,
+        val holdStrength: Double,
+        val endSpeed: Double,
+        val descentPower: Double,
+        val speedValleyProgress: Double,
+        val postApexHoldShare: Double,
+        val releasePower: Double,
+        val progressDensityStrength: Double,
+        val progressDensityPower: Double,
+        val tailReleaseStrength: Double,
+        val tailReleaseStart: Double,
+        val startSpeedLimit: Double,
+        val algorithmVersion: String,
     )
 
     private var golfCamV8HeadCache: Pair<GolfCamV8HeadCacheKey, GolfCamV8HeadMapping>? = null
@@ -1138,19 +1196,24 @@ object GolfCamSpeedConfig {
         val startSpeedLimit = golfCamV8StartSpeedLimit(activeDuration, speedK)
 
         val key = GolfCamV8HeadCacheKey(
-            totalDurationMs = (totalDuration * 1000.0).roundToLong(),
-            speedLevelScaled = (speedK * 10_000.0).roundToInt(),
-            apexProgressScaled = (apex * 10_000.0).roundToInt(),
-            anchorTimeMs = (anchorTime * 1000.0).roundToLong(),
-            liftHoldScaled = (liftHold * 10_000.0).roundToInt(),
-            arcHeightRatioScaled = (metrics.arcHeightRatio * 10_000.0).roundToInt(),
-            landingSteepnessScaled = (metrics.landingSteepness * 10_000.0).roundToInt(),
-            descentArcShareScaled = (metrics.descentArcShare * 10_000.0).roundToInt(),
-            progressDensityStrengthScaled = (progressDensityStrength * 10_000.0).roundToInt(),
-            tailReleaseStrengthScaled = (tailReleaseStrength * 10_000.0).roundToInt(),
-            tailReleaseStartScaled = (tailReleaseStart * 10_000.0).roundToInt(),
-            startSpeedLimitScaled = (startSpeedLimit * 10_000.0).roundToInt(),
-            motionAnchorTimeMs = style.motionAnchorTime?.let { (it * 1000.0).roundToLong() },
+            totalDuration = totalDuration,
+            speedLevel = speedK,
+            apexProgress = apex,
+            anchorTime = anchorTime,
+            delayTime = delayTime,
+            holdWidth = holdWidth,
+            holdStrength = holdStrength,
+            endSpeed = endSpeed,
+            descentPower = pRight,
+            speedValleyProgress = speedValleyProgress,
+            postApexHoldShare = postApexHoldShare,
+            releasePower = releasePower,
+            progressDensityStrength = progressDensityStrength,
+            progressDensityPower = V8DepthDensity.DENSITY_SATURATION_END,
+            tailReleaseStrength = tailReleaseStrength,
+            tailReleaseStart = tailReleaseStart,
+            startSpeedLimit = startSpeedLimit,
+            algorithmVersion = TRAJECTORY_MOTION_ALGORITHM_VERSION,
         )
         golfCamV8HeadCache?.let { (cachedKey, cachedMapping) ->
             if (cachedKey == key) return cachedMapping
@@ -1242,15 +1305,15 @@ object GolfCamSpeedConfig {
         val p3 = bezier.point(1f)
         val apexPathFraction = arcTable.apexProgress().toDouble().coerceIn(0.0, 1.0)
         val apex = bezier.pointAtArcProgress(apexPathFraction.toFloat(), arcTable)
-        val chordDx = (p3.x - p0.x).toDouble()
-        val chordDy = (p3.y - p0.y).toDouble()
+        val chordDx = (p3.x - p0.x).toDouble() * arcTable.videoWidth
+        val chordDy = (p3.y - p0.y).toDouble() * arcTable.videoHeight
         val chordLength = max(sqrt(chordDx * chordDx + chordDy * chordDy), 1e-6)
-        val apexDx = (apex.x - p0.x).toDouble()
-        val apexDy = (apex.y - p0.y).toDouble()
+        val apexDx = (apex.x - p0.x).toDouble() * arcTable.videoWidth
+        val apexDy = (apex.y - p0.y).toDouble() * arcTable.videoHeight
         val signedDistance = (apexDx * chordDy - apexDy * chordDx) / chordLength
         val arcHeightRatio = (abs(signedDistance) / chordLength).coerceIn(0.0, 2.0)
-        val tangentDx = 3.0 * (bezier.p3.x - bezier.p2.x).toDouble()
-        val tangentDy = 3.0 * (bezier.p3.y - bezier.p2.y).toDouble()
+        val tangentDx = 3.0 * (bezier.p3.x - bezier.p2.x).toDouble() * arcTable.videoWidth
+        val tangentDy = 3.0 * (bezier.p3.y - bezier.p2.y).toDouble() * arcTable.videoHeight
         val tangentLength = max(sqrt(tangentDx * tangentDx + tangentDy * tangentDy), 1e-6)
         return GolfCamV8GeometryMetrics(
             arcHeightRatio = arcHeightRatio,
@@ -1833,7 +1896,7 @@ data class ImpactPositionSelection(val normalizedX: Float, val normalizedY: Floa
 data class LandingOutput(
     val normalizedX: Float,
     val normalizedY: Float,
-    val flightTimeSec: Double = 4.5,  // 飞行时间（秒），对应 iOS landingTime
+    val flightTimeSec: Double = 6.0,  // 飞行时间（秒），对应 iOS landingTime
 )
 
 data class FlightCurveSelection(
@@ -1841,6 +1904,7 @@ data class FlightCurveSelection(
     val landingPoint: LandingOutput,
     val controlPoint1: NormalizedPoint,
     val controlPoint2: NormalizedPoint,
+    val currentFrameIndex: Int = 0,
 ) {
     val bezierPath: BezierPath get() = BezierPath(
         p0 = NormalizedPoint(impactPosition.normalizedX, impactPosition.normalizedY),

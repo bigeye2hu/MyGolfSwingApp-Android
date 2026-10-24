@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -47,8 +50,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,6 +69,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -71,6 +79,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.ServiceLocator
@@ -80,6 +92,7 @@ import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.memo.V2MemoThumbnail
@@ -102,47 +115,76 @@ fun V2NewGoalScreen(
     editingGoalId: UUID? = null,
     onClose: () -> Unit = {},
     onDeleted: () -> Unit = {},
+    persistGoal: suspend (goal: V2Goal, isEdit: Boolean) -> Unit = { goal, isEdit ->
+        if (isEdit) V2GoalStore.updateAndWait(goal) else V2GoalStore.createAndWait(goal)
+    },
+    deleteGoalById: suspend (UUID) -> Unit = V2GoalStore::deleteAndWait,
 ) {
-    val existing = editingGoalId?.let { id -> V2GoalStore.goals.value.firstOrNull { it.id == id } }
-    val isEditMode = existing != null
+    val goals by V2GoalStore.goals.collectAsState()
+    val existing = editingGoalId?.let { id -> goals.firstOrNull { it.id == id } }
+    val isEditMode = editingGoalId != null
     val memos by V2MemoStore.allMemos.collectAsState()
 
-    var name by rememberSaveable { mutableStateOf(existing?.title ?: "") }
-    var clubKind by remember { mutableStateOf(existing?.clubKind ?: V2Goal.ClubKind.DRIVER) }
-    var metricKind by remember { mutableStateOf(existing?.metric?.kind ?: V2Goal.Metric.Kind.COUNT) }
-    var countSubKind by remember { mutableStateOf(countSubKindOf(existing?.metric)) }
-    var targetAmount by rememberSaveable {
+    var name by rememberSaveable(editingGoalId) { mutableStateOf(existing?.title ?: "") }
+    var clubKindName by rememberSaveable(editingGoalId) {
+        mutableStateOf((existing?.clubKind ?: V2Goal.ClubKind.DRIVER).name)
+    }
+    var metricKindName by rememberSaveable(editingGoalId) {
+        mutableStateOf((existing?.metric?.kind ?: V2Goal.Metric.Kind.COUNT).name)
+    }
+    var countSubKindName by rememberSaveable(editingGoalId) {
+        mutableStateOf(countSubKindOf(existing?.metric).name)
+    }
+    var targetAmount by rememberSaveable(editingGoalId) {
         mutableDoubleStateOf(
-            existing?.metric?.target ?: defaultTargetFor(V2Goal.Metric.Kind.COUNT, CountSubKind.TIMES),
+            existing?.metric?.target
+                ?.takeIf(Double::isFinite)
+                ?.toInt()
+                ?.coerceAtLeast(1)
+                ?.toDouble()
+                ?: defaultTargetFor(V2Goal.Metric.Kind.COUNT, CountSubKind.TIMES),
         )
     }
-    var cadenceCategory by remember { mutableStateOf(cadenceCategoryOf(existing?.cadence) ?: CadenceCategory.PER_WEEK) }
-    var perCountValue by rememberSaveable {
-        mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.PerWeek)?.times ?: 10)
+    var cadenceCategoryName by rememberSaveable(editingGoalId) {
+        mutableStateOf((cadenceCategoryOf(existing?.cadence) ?: CadenceCategory.PER_WEEK).name)
     }
-    var rangeMonths by rememberSaveable {
-        mutableIntStateOf((existing?.cadence as? V2Goal.Cadence.WithinMonths)?.months ?: 1)
+    var perCountValue by rememberSaveable(editingGoalId) {
+        mutableIntStateOf(perCountValueOf(existing?.cadence))
     }
-    var rangeCustomSelected by rememberSaveable {
-        mutableStateOf(
-            ((existing?.cadence as? V2Goal.Cadence.WithinMonths)?.months ?: 1) !in listOf(1, 3),
-        )
+    var rangeMonths by rememberSaveable(editingGoalId) {
+        mutableIntStateOf(rangeMonthsValueOf(existing?.cadence))
     }
-    var priority by remember { mutableStateOf(existing?.priority ?: V2Goal.Priority.CRITICAL) }
-    var linkedMemoIds by remember {
-        mutableStateOf(existing?.derivedFromMemoIds?.toSet() ?: emptySet())
+    var rangeCustomSelected by rememberSaveable(editingGoalId) { mutableStateOf(false) }
+    var priorityName by rememberSaveable(editingGoalId) {
+        mutableStateOf((existing?.priority ?: V2Goal.Priority.CRITICAL).name)
     }
-    var showMemoPicker by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var showAIRecommendInfo by remember { mutableStateOf(false) }
-    var showAIBanner by rememberSaveable { mutableStateOf(true) }
+    var linkedMemoIdTexts by rememberSaveable(editingGoalId) {
+        mutableStateOf(existing?.derivedFromMemoIds?.map(UUID::toString) ?: emptyList())
+    }
+    var showMemoPicker by rememberSaveable(editingGoalId) { mutableStateOf(false) }
+    var showDeleteConfirm by rememberSaveable(editingGoalId) { mutableStateOf(false) }
+    var showAIRecommendInfo by rememberSaveable(editingGoalId) { mutableStateOf(false) }
+    var showAIBanner by rememberSaveable(editingGoalId) { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    var saveError by remember { mutableStateOf<String?>(null) }
-    var deleteError by remember { mutableStateOf<String?>(null) }
+    var saveError by rememberSaveable(editingGoalId) { mutableStateOf<String?>(null) }
+    var deleteError by rememberSaveable(editingGoalId) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    val canSubmit = name.trim().isNotEmpty() && !saving && !deleting
+    val clubKind = V2Goal.ClubKind.valueOf(clubKindName)
+    val metricKind = V2Goal.Metric.Kind.valueOf(metricKindName)
+    val countSubKind = CountSubKind.valueOf(countSubKindName)
+    val cadenceCategory = CadenceCategory.valueOf(cadenceCategoryName)
+    val priority = V2Goal.Priority.valueOf(priorityName)
+    val linkedMemoIds = remember(linkedMemoIdTexts) {
+        linkedMemoIdTexts.mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }.toSet()
+    }
+
+    val canSubmit = canSubmitGoalForm(
+        name = name,
+        targetAmount = targetAmount,
+        cadenceCategory = cadenceCategory,
+    ) && (!isEditMode || existing != null) && !saving && !deleting
     val memoPool = remember(memos) { memos.sortedByDescending { it.createdAt } }
     val linkedMemos = remember(memoPool, linkedMemoIds) {
         memoPool.filter { it.id in linkedMemoIds }
@@ -166,11 +208,7 @@ fun V2NewGoalScreen(
                     priority = priority,
                     linkedMemoIds = linkedMemos.map { it.id },
                 )
-                if (existing == null) {
-                    V2GoalStore.createAndWait(goal)
-                } else {
-                    V2GoalStore.updateAndWait(goal)
-                }
+                persistGoal(goal, isEditMode)
                 onClose()
             } catch (e: CancellationException) {
                 throw e
@@ -187,7 +225,7 @@ fun V2NewGoalScreen(
             deleting = true
             deleteError = null
             try {
-                V2GoalStore.deleteAndWait(goal.id)
+                deleteGoalById(goal.id)
                 showDeleteConfirm = false
                 onDeleted()
             } catch (e: CancellationException) {
@@ -206,13 +244,14 @@ fun V2NewGoalScreen(
             .fillMaxSize()
             .background(
                 Brush.linearGradient(
-                    0.0f to Color(0xFFE8F4EA),
-                    0.3f to Color(0xFFF1F8F2),
-                    0.65f to Color(0xFFF6F6EF),
+                    0.0f to Color(0xFFE8F5E8),
+                    0.3f to Color(0xFFF2F7F5),
+                    0.65f to Color(0xFFF5F5F0),
                     1.0f to Color(0xFFEDE8E0),
                 ),
             ),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             NewGoalNavBar(
                 title = if (isEditMode) "编辑目标" else "新建目标",
@@ -226,9 +265,12 @@ fun V2NewGoalScreen(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
+                    .testTag("goal-form-scroll")
                     .imePadding()
-                    .padding(horizontal = 20.dp, vertical = DSSpacing.md),
-                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 4.dp, bottom = 60.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
                 if (!isEditMode && showAIBanner) {
                     AIBanner(
@@ -240,7 +282,7 @@ fun V2NewGoalScreen(
                 FormCard {
                     NameField(text = name, onTextChange = { name = it })
                     DividerLine()
-                    ClubChipsField(selection = clubKind, onSelect = { clubKind = it })
+                    ClubChipsField(selection = clubKind, onSelect = { clubKindName = it.name })
                     DividerLine()
                     if (existing != null) {
                         MetricKindField(
@@ -264,7 +306,7 @@ fun V2NewGoalScreen(
                             months = rangeMonths,
                             rangeCustomSelected = rangeCustomSelected,
                             lockCategory = true,
-                            onCategory = { cadenceCategory = it },
+                            onCategory = { cadenceCategoryName = it.name },
                             onPerCount = { perCountValue = it },
                             onMonths = {
                                 rangeMonths = it
@@ -282,13 +324,13 @@ fun V2NewGoalScreen(
                             selection = metricKind,
                             countSubKind = countSubKind,
                             onSelect = {
-                                metricKind = it
-                                if (it != V2Goal.Metric.Kind.COUNT) countSubKind = CountSubKind.TIMES
+                                metricKindName = it.name
+                                if (it != V2Goal.Metric.Kind.COUNT) countSubKindName = CountSubKind.TIMES.name
                                 targetAmount = defaultTargetFor(it, countSubKind)
                             },
                             onCountSubKind = {
-                                countSubKind = it
-                                metricKind = V2Goal.Metric.Kind.COUNT
+                                countSubKindName = it.name
+                                metricKindName = V2Goal.Metric.Kind.COUNT.name
                                 targetAmount = defaultTargetFor(V2Goal.Metric.Kind.COUNT, it)
                             },
                         )
@@ -305,40 +347,43 @@ fun V2NewGoalScreen(
                             perCount = perCountValue,
                             months = rangeMonths,
                             rangeCustomSelected = rangeCustomSelected,
-                            onCategory = { cadenceCategory = it },
+                            onCategory = { cadenceCategoryName = it.name },
                             onPerCount = { perCountValue = it },
                             onMonths = {
                                 rangeMonths = it
                                 rangeCustomSelected = false
                             },
                             onCustomRange = {
-                                cadenceCategory = CadenceCategory.WITHIN_MONTHS
+                                cadenceCategoryName = CadenceCategory.WITHIN_MONTHS.name
                                 if (rangeMonths == 1 || rangeMonths == 3) rangeMonths = 1
                                 rangeCustomSelected = true
                             },
                         )
                     }
                     DividerLine()
-                    PriorityField(selection = priority, onSelect = { priority = it })
+                    PriorityField(selection = priority, onSelect = { priorityName = it.name })
                     DividerLine()
                     MemoLinkSection(
                         linkedMemos = linkedMemos,
                         onTap = { showMemoPicker = true },
-                        onRemove = { id -> linkedMemoIds = linkedMemoIds - id },
+                        onRemove = { id -> linkedMemoIdTexts = linkedMemoIdTexts - id.toString() },
                     )
                 }
 
-                SaveButton(
-                    canSubmit = canSubmit,
-                    saving = saving,
-                    isEditMode = isEditMode,
-                    onSave = ::saveGoal,
-                )
-
-                if (existing != null) {
-                    DeleteButton(
-                        onDelete = { showDeleteConfirm = true },
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    SaveButton(
+                        canSubmit = canSubmit,
+                        saving = saving,
+                        isEditMode = isEditMode,
+                        onSave = ::saveGoal,
                     )
+
+                    if (existing != null) {
+                        DeleteButton(
+                            onDelete = { showDeleteConfirm = true },
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
                 }
             }
         }
@@ -348,7 +393,7 @@ fun V2NewGoalScreen(
                 onDismissRequest = { if (!deleting) showDeleteConfirm = false },
                 title = { Text("删除目标") },
                 text = {
-                    Text("确定要删除「${existing.title}」吗？删除后无法恢复，目标里的打卡进度和 Memo 关联也会一并清除。")
+                    Text("确定要删除「${existing.title}」吗？删除后无法恢复，关联的打卡记录也会一并清除。")
                 },
                 confirmButton = {
                     TextButton(
@@ -415,7 +460,7 @@ fun V2NewGoalScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = { showAIRecommendInfo = false }) {
-                        Text("知道了", color = DSColors.fairway)
+                        Text("好的", color = DSColors.fairway)
                     }
                 },
             )
@@ -425,7 +470,7 @@ fun V2NewGoalScreen(
             V2GoalMemoPickerSheet(
                 selectedIds = linkedMemoIds,
                 onDismiss = { showMemoPicker = false },
-                onConfirm = { linkedMemoIds = it },
+                onConfirm = { linkedMemoIdTexts = it.map(UUID::toString) },
             )
         }
     }
@@ -555,25 +600,49 @@ private val MemoThumbDateFormatter: DateTimeFormatter = DateTimeFormatter.ofPatt
 // 状态分类辅助
 // =================================================================
 
-private enum class CadenceCategory(val displayName: String) {
-    DAYS_STREAK("连续天数"),
+internal enum class CadenceCategory(val displayName: String) {
     PER_WEEK("按次数"),
     WITHIN_MONTHS("按时间段"),
     CONTINUOUS("永久练习"),
 }
 
-private enum class CountSubKind(val displayName: String, val unit: String) {
+internal enum class CountSubKind(val displayName: String, val unit: String) {
     TIMES("次数", "次"),
     BALLS("球数", "球"),
 }
 
+/** Mirrors the validation in both iOS goal view models. */
+internal fun canSubmitGoalForm(
+    name: String,
+    targetAmount: Double,
+    cadenceCategory: CadenceCategory,
+): Boolean {
+    if (name.trim().isEmpty()) return false
+    if (cadenceCategory != CadenceCategory.CONTINUOUS && (!targetAmount.isFinite() || targetAmount <= 0.0)) {
+        return false
+    }
+    return true
+}
+
 private fun cadenceCategoryOf(c: V2Goal.Cadence?): CadenceCategory? = when (c) {
-    is V2Goal.Cadence.DaysStreak -> CadenceCategory.DAYS_STREAK
+    // Current iOS folds the retired consecutive-days cadence into the editable
+    // "按次数" category, then writes it back as PerWeek on save.
+    is V2Goal.Cadence.DaysStreak -> CadenceCategory.PER_WEEK
     is V2Goal.Cadence.PerWeek -> CadenceCategory.PER_WEEK
     is V2Goal.Cadence.WithinMonths -> CadenceCategory.WITHIN_MONTHS
     V2Goal.Cadence.Continuous -> CadenceCategory.CONTINUOUS
     null -> null
 }
+
+private fun perCountValueOf(cadence: V2Goal.Cadence?): Int = when (cadence) {
+    is V2Goal.Cadence.DaysStreak -> cadence.days.coerceIn(1, 30)
+    is V2Goal.Cadence.PerWeek -> cadence.times.coerceIn(1, 30)
+    else -> 10
+}
+
+/** Current iOS maps any legacy month value below 3 to 1 month, otherwise 3 months. */
+private fun rangeMonthsValueOf(cadence: V2Goal.Cadence?): Int =
+    (cadence as? V2Goal.Cadence.WithinMonths)?.months?.let { if (it >= 3) 3 else 1 } ?: 1
 
 private fun countSubKindOf(metric: V2Goal.Metric?): CountSubKind =
     if (metric?.kind == V2Goal.Metric.Kind.COUNT && metric.unit == CountSubKind.BALLS.unit) {
@@ -596,7 +665,7 @@ private fun unitFor(k: V2Goal.Metric.Kind, countSubKind: CountSubKind = CountSub
     V2Goal.Metric.Kind.FREE -> null
 }
 
-private fun buildGoalForSave(
+internal fun buildGoalForSave(
     existing: V2Goal?,
     name: String,
     clubKind: V2Goal.ClubKind,
@@ -610,7 +679,6 @@ private fun buildGoalForSave(
     linkedMemoIds: List<UUID>,
 ): V2Goal {
     val cadence: V2Goal.Cadence = when (cadenceCategory) {
-        CadenceCategory.DAYS_STREAK -> V2Goal.Cadence.DaysStreak(perCountValue)
         CadenceCategory.PER_WEEK -> V2Goal.Cadence.PerWeek(perCountValue)
         CadenceCategory.WITHIN_MONTHS -> V2Goal.Cadence.WithinMonths(rangeMonths)
         CadenceCategory.CONTINUOUS -> V2Goal.Cadence.Continuous
@@ -627,7 +695,6 @@ private fun buildGoalForSave(
         unitFor(actualMetricKind, countSubKind),
     )
     val derivedTargetSessions = when (cadenceCategory) {
-        CadenceCategory.DAYS_STREAK,
         CadenceCategory.PER_WEEK -> perCountValue
         CadenceCategory.WITHIN_MONTHS -> rangeMonths * 4
         CadenceCategory.CONTINUOUS -> null
@@ -647,14 +714,18 @@ private fun buildGoalForSave(
             derivedFromMemoIds = linkedMemoIds,
         )
     } else {
-        val lockedMetric = existing.metric.copy(target = targetAmount)
         existing.copy(
             title = name.trim(),
             iconType = clubKind.iconType,
             topic = clubKind.topic,
-            metric = lockedMetric,
+            // The completion-method control is locked in edit mode, but iOS
+            // still rebuilds the metric from the submitted cadence. In
+            // particular, a legacy count goal switched to continuous must be
+            // normalized to a free metric with a zero target.
+            metric = metric,
             clubKind = clubKind,
             priority = priority,
+            cadence = cadence,
             targetSessions = derivedTargetSessions,
             derivedFromMemoIds = linkedMemoIds,
         )
@@ -704,7 +775,13 @@ private fun NewGoalNavBar(
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        Text(text = title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF111827))
+        Text(
+            text = title,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF111827),
+            letterSpacing = (-0.45).sp,
+        )
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text = "保存",
@@ -814,8 +891,7 @@ private fun FormCard(content: @Composable () -> Unit) {
             )
             .clip(RoundedCornerShape(24.dp))
             .background(DSColors.cardWhite.copy(alpha = 0.88f))
-            .border(width = 1.dp, color = Color.White.copy(alpha = 0.75f), shape = RoundedCornerShape(24.dp))
-            .padding(vertical = 4.dp),
+            .border(width = 1.dp, color = Color.White.copy(alpha = 0.75f), shape = RoundedCornerShape(24.dp)),
     ) {
         content()
     }
@@ -840,7 +916,6 @@ private fun SaveButton(
     onSave: () -> Unit,
 ) {
     Column(
-        modifier = Modifier.navigationBarsPadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -852,7 +927,7 @@ private fun SaveButton(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
+                .height(40.dp)
                 .shadow(
                     elevation = if (canSubmit) 11.dp else 0.dp,
                     shape = RoundedCornerShape(16.dp),
@@ -869,7 +944,8 @@ private fun SaveButton(
                     ),
                 )
                 .alpha(if (canSubmit) 1f else 0.4f)
-                .clickable(enabled = canSubmit, onClick = onSave),
+                .clickable(enabled = canSubmit, onClick = onSave)
+                .testTag("goal-save-action"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
@@ -896,16 +972,17 @@ private fun SaveButton(
 }
 
 @Composable
-private fun DeleteButton(onDelete: () -> Unit) {
+private fun DeleteButton(onDelete: () -> Unit, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(DSColors.flagRed.copy(alpha = 0.08f))
             .border(width = 1.dp, color = DSColors.flagRed.copy(alpha = 0.30f), shape = RoundedCornerShape(14.dp))
             .clickable { onDelete() }
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp)
+            .testTag("goal-delete-action"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
     ) {
@@ -1122,25 +1199,11 @@ private fun TargetStepperField(
     amount: Double,
     onAmountChange: (Double) -> Unit,
 ) {
-    if (kind == V2Goal.Metric.Kind.FREE) {
-        Column {
-            SectionLabel("目标数量")
-            Text(
-                text = "自由练习：无单次量约束",
-                fontSize = 13.sp,
-                color = DSColors.shadowGray,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-        return
-    }
-
     val presets = targetPresetsFor(kind, countSubKind)
     val range = targetRangeFor(kind, countSubKind)
     val step = targetStepFor(kind, countSubKind)
     val unit = unitFor(kind, countSubKind) ?: ""
-    var showPicker by remember { mutableStateOf(false) }
+    var showPicker by rememberSaveable { mutableStateOf(false) }
 
     Column {
         SectionLabel("目标数量")
@@ -1308,6 +1371,7 @@ private fun TargetAmountDisplay(
 ) {
     Row(
         modifier = modifier
+            .testTag("goal-target-amount")
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 2.dp),
@@ -1345,14 +1409,14 @@ private fun TargetAmountDisplay(
     }
 }
 
-private enum class GoalTargetPickerMode {
+internal enum class GoalTargetPickerMode {
     SINGLE_INT,
     TIME_HM,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GoalTargetValuePickerSheet(
+internal fun GoalTargetValuePickerSheet(
     value: Int,
     range: IntRange,
     mode: GoalTargetPickerMode,
@@ -1362,11 +1426,11 @@ private fun GoalTargetValuePickerSheet(
     onConfirm: (Int) -> Unit,
 ) {
     val clampedValue = value.coerceIn(range.first, range.last)
-    var draftInt by remember(value, range) { mutableIntStateOf(clampedValue) }
-    var draftHours by remember(value, range) { mutableIntStateOf(clampedValue / 60) }
-    var draftMinutes by remember(value, range) { mutableIntStateOf(clampedValue % 60) }
-    var useKeyboard by remember { mutableStateOf(false) }
-    var keyboardText by remember(value, range) { mutableStateOf(clampedValue.toString()) }
+    var draftInt by rememberSaveable(value, range.first, range.last) { mutableIntStateOf(clampedValue) }
+    var draftHours by rememberSaveable(value, range.first, range.last) { mutableIntStateOf(clampedValue / 60) }
+    var draftMinutes by rememberSaveable(value, range.first, range.last) { mutableIntStateOf(clampedValue % 60) }
+    var useKeyboard by rememberSaveable { mutableStateOf(false) }
+    var keyboardText by rememberSaveable(value, range.first, range.last) { mutableStateOf(clampedValue.toString()) }
 
     fun currentDraftAsInt(): Int = when (mode) {
         GoalTargetPickerMode.SINGLE_INT -> draftInt
@@ -1394,36 +1458,43 @@ private fun GoalTargetValuePickerSheet(
     } else {
         currentDraftAsInt()
     }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val focusRequester = remember { FocusRequester() }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = DSColors.warmWhite,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(DSColors.warmWhite)
-                .padding(horizontal = 16.dp)
                 .imePadding()
                 .navigationBarsPadding()
                 .padding(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .height(48.dp)
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                TextButton(onClick = onDismiss) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                ) {
                     Text("取消", color = DSColors.shadowGray, fontWeight = FontWeight.Medium)
                 }
                 Text(
                     text = title,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = DSColors.inkGreen,
-                    modifier = Modifier.weight(1f),
+                    color = Color(0xFF121726),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
-                TextButton(
+                androidx.compose.material3.IconButton(
                     onClick = {
                         if (useKeyboard) {
                             writeKeyboardBackToDraft()
@@ -1433,71 +1504,95 @@ private fun GoalTargetValuePickerSheet(
                             useKeyboard = true
                         }
                     },
-                    modifier = Modifier.width(72.dp),
+                    modifier = Modifier.align(Alignment.CenterEnd).size(44.dp),
                 ) {
-                    Text(
-                        text = if (useKeyboard) "滚轮" else "键盘",
-                        color = DSColors.fairway,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                    Icon(
+                        imageVector = if (useKeyboard) Icons.Filled.GridView else Icons.Filled.Keyboard,
+                        contentDescription = if (useKeyboard) "切换为滚轮" else "切换为键盘",
+                        tint = DSColors.fairway,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
 
-            if (useKeyboard) {
-                GoalTargetKeyboardInput(
-                    value = keyboardText,
-                    range = range,
-                    unit = if (mode == GoalTargetPickerMode.TIME_HM) "分钟" else unit,
-                    onValueChange = {
-                        keyboardText = it.filter(Char::isDigit).take(range.last.toString().length)
-                    },
-                )
-            } else {
-                if (mode == GoalTargetPickerMode.TIME_HM) {
-                    TimeHmPicker(
-                        hours = draftHours,
-                        minutes = draftMinutes,
-                        range = range,
-                        onHours = { draftHours = it },
-                        onMinutes = { draftMinutes = it },
-                    )
-                } else {
-                    SingleIntPicker(
-                        value = draftInt,
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 16.dp),
+            ) {
+                if (useKeyboard) {
+                    GoalTargetKeyboardInput(
+                        value = keyboardText,
                         range = range,
                         unit = unit,
-                        onValue = { draftInt = it },
+                        focusRequester = focusRequester,
+                        onValueChange = {
+                            keyboardText = it.filter(Char::isDigit).take(range.last.toString().length)
+                        },
                     )
+                } else {
+                    if (mode == GoalTargetPickerMode.TIME_HM) {
+                        TimeHmPicker(
+                            hours = draftHours,
+                            minutes = draftMinutes,
+                            range = range,
+                            onHours = { draftHours = it },
+                            onMinutes = { draftMinutes = it },
+                        )
+                    } else {
+                        SingleIntPicker(
+                            value = draftInt,
+                            range = range,
+                            unit = unit,
+                            onValue = { draftInt = it },
+                        )
+                    }
                 }
             }
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 2.dp),
+                    .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Button(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.05f)),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).height(48.dp),
                 ) {
-                    Text("取消", color = DSColors.shadowGray, fontWeight = FontWeight.SemiBold)
+                    Text("取消", color = DSColors.shadowGray, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
                 Button(
                     onClick = {
                         if (useKeyboard) writeKeyboardBackToDraft()
                         onConfirm(selectedValue)
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = DSColors.fairway),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("goal-target-confirm")
+                        .background(
+                            Brush.linearGradient(listOf(DSColors.fairway, Color(0xFF40916B))),
+                            RoundedCornerShape(12.dp),
+                        ),
                 ) {
-                    Text("确定", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("确定", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+        }
+    }
+
+    LaunchedEffect(useKeyboard) {
+        if (useKeyboard) {
+            delay(100)
+            focusRequester.requestFocus()
+        } else {
+            writeKeyboardBackToDraft()
         }
     }
 }
@@ -1507,6 +1602,7 @@ private fun GoalTargetKeyboardInput(
     value: String,
     range: IntRange,
     unit: String,
+    focusRequester: FocusRequester,
     onValueChange: (String) -> Unit,
 ) {
     Column(
@@ -1535,6 +1631,8 @@ private fun GoalTargetKeyboardInput(
                 modifier = Modifier
                     .width(140.dp)
                     .height(60.dp)
+                    .testTag("goal-target-keyboard-input")
+                    .focusRequester(focusRequester)
                     .clip(RoundedCornerShape(12.dp))
                     .background(DSColors.cardWhite)
                     .border(1.5.dp, DSColors.fairway, RoundedCornerShape(12.dp))
@@ -1550,7 +1648,7 @@ private fun GoalTargetKeyboardInput(
             }
         }
         Text(
-            text = "范围 ${range.first}-${range.last}${unit}",
+            text = "范围 ${range.first}–${range.last}${unit}",
             fontSize = 12.sp,
             color = DSColors.shadowGray,
             modifier = Modifier.padding(top = 8.dp),
@@ -1566,22 +1664,28 @@ private fun SingleIntPicker(
     onValue: (Int) -> Unit,
 ) {
     val values = remember(range) { range.toList() }
-    val initialIndex = remember(values, value) { values.indexOf(value).coerceAtLeast(0) }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (initialIndex - 2).coerceAtLeast(0))
-    LazyColumn(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(180.dp),
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .height(180.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(values, key = { it }) { item ->
-            PickerNumberRow(
-                selected = item == value,
-                label = if (unit.isBlank()) item.toString() else "$item $unit",
-                onClick = { onValue(item) },
+        GoalPickerWheel(
+            values = values,
+            selected = value,
+            onSelect = onValue,
+            testTag = "goal-single-wheel",
+            modifier = Modifier.weight(1f),
+        )
+        if (unit.isNotBlank()) {
+            Text(
+                text = unit,
+                color = Color(0xFF4B5563),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(end = 4.dp),
             )
         }
     }
@@ -1599,82 +1703,97 @@ private fun TimeHmPicker(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(180.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .height(180.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        PickerNumberColumn(
+        GoalPickerWheel(
             modifier = Modifier.weight(1f),
             values = (0..maxHours).toList(),
             selected = hours.coerceIn(0, maxHours),
-            suffix = "小时",
             onSelect = onHours,
+            testTag = "goal-hours-wheel",
         )
-        PickerNumberColumn(
+        Text("小时", color = Color(0xFF4B5563), fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(end = 8.dp))
+        GoalPickerWheel(
             modifier = Modifier.weight(1f),
             values = (0..59).toList(),
             selected = minutes.coerceIn(0, 59),
-            suffix = "分钟",
             onSelect = onMinutes,
+            testTag = "goal-minutes-wheel",
         )
+        Text("分钟", color = Color(0xFF4B5563), fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
-private fun PickerNumberColumn(
+private fun GoalPickerWheel(
     values: List<Int>,
     selected: Int,
-    suffix: String,
     onSelect: (Int) -> Unit,
+    testTag: String,
     modifier: Modifier = Modifier,
 ) {
     val initialIndex = remember(values, selected) { values.indexOf(selected).coerceAtLeast(0) }
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (initialIndex - 2).coerceAtLeast(0))
-    LazyColumn(
-        modifier = modifier,
-        state = listState,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        items(values, key = { it }) { value ->
-            PickerNumberRow(
-                selected = value == selected,
-                label = "$value $suffix",
-                onClick = { onSelect(value) },
-            )
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val snapFlingBehavior = rememberSnapFlingBehavior(listState)
+    val scope = rememberCoroutineScope()
+    val centeredIndex by remember(listState, values) {
+        derivedStateOf {
+            val layout = listState.layoutInfo
+            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+            layout.visibleItemsInfo.minByOrNull { item ->
+                kotlin.math.abs(item.offset + item.size / 2 - center)
+            }?.index ?: initialIndex
+        }
+    }
+
+    LaunchedEffect(centeredIndex, values) {
+        values.getOrNull(centeredIndex)?.let(onSelect)
+    }
+
+    Box(modifier = modifier.height(180.dp), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(DSColors.mistGreen.copy(alpha = 0.7f))
+                .border(1.dp, DSColors.fairway.copy(alpha = 0.16f), RoundedCornerShape(10.dp)),
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().testTag(testTag),
+            state = listState,
+            flingBehavior = snapFlingBehavior,
+            contentPadding = PaddingValues(vertical = 68.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            items(values, key = { it }) { item ->
+                val isSelected = item == selected
+                Text(
+                    text = item.toString(),
+                    color = if (isSelected) Color(0xFF121726) else DSColors.shadowGray,
+                    fontSize = if (isSelected) 21.sp else 16.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .alpha(if (isSelected) 1f else 0.52f)
+                        .clickable {
+                            scope.launch { listState.animateScrollToItem(values.indexOf(item)) }
+                        }
+                        .padding(top = if (isSelected) 8.dp else 11.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun PickerNumberRow(
-    selected: Boolean,
-    label: String,
-    onClick: () -> Unit,
-) {
-    Text(
-        text = label,
-        fontSize = if (selected) 20.sp else 16.sp,
-        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-        color = if (selected) DSColors.inkGreen else DSColors.shadowGray,
-        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) DSColors.fairway.copy(alpha = 0.10f) else Color.Transparent)
-            .border(
-                width = if (selected) 1.dp else 0.dp,
-                color = if (selected) DSColors.fairway.copy(alpha = 0.22f) else Color.Transparent,
-                shape = RoundedCornerShape(14.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    )
-}
-
-@Composable
 private fun StepperButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     onClick: () -> Unit,
     onFastClick: () -> Unit,
 ) {
@@ -1691,6 +1810,13 @@ private fun StepperButton(
             )
             .clip(CircleShape)
             .background(Brush.linearGradient(listOf(DSColors.fairway, Color(0xFF40916B))))
+            .semantics {
+                this.contentDescription = contentDescription
+                onClick {
+                    currentOnClick()
+                    true
+                }
+            }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onPress = {
@@ -1740,12 +1866,12 @@ private fun CadenceField(
     onMonths: (Int) -> Unit,
     onCustomRange: () -> Unit,
 ) {
-    var showPerCountPicker by remember { mutableStateOf(false) }
-    val perCountSelected = category == CadenceCategory.PER_WEEK || category == CadenceCategory.DAYS_STREAK
+    var showPerCountPicker by rememberSaveable { mutableStateOf(false) }
+    val perCountSelected = category == CadenceCategory.PER_WEEK
     val timeRangeSelected = category == CadenceCategory.WITHIN_MONTHS
     val continuousSelected = category == CadenceCategory.CONTINUOUS
     fun canEdit(target: CadenceCategory): Boolean = !lockCategory || when (target) {
-        CadenceCategory.PER_WEEK, CadenceCategory.DAYS_STREAK -> perCountSelected
+        CadenceCategory.PER_WEEK -> perCountSelected
         CadenceCategory.WITHIN_MONTHS -> timeRangeSelected
         CadenceCategory.CONTINUOUS -> continuousSelected
     }
@@ -1778,6 +1904,7 @@ private fun CadenceField(
                     ) {
                         StepperButton(
                             icon = Icons.Filled.Remove,
+                            contentDescription = "减少次数",
                             onClick = { onPerCount((perCount - 1).coerceAtLeast(1)) },
                             onFastClick = { onPerCount((perCount - 5).coerceAtLeast(1)) },
                         )
@@ -1788,6 +1915,7 @@ private fun CadenceField(
                         )
                         StepperButton(
                             icon = Icons.Filled.Add,
+                            contentDescription = "增加次数",
                             onClick = { onPerCount((perCount + 1).coerceAtMost(30)) },
                             onFastClick = { onPerCount((perCount + 5).coerceAtMost(30)) },
                         )
@@ -1893,6 +2021,7 @@ private fun CadenceCountDisplay(
 ) {
     Box(
         modifier = modifier
+            .testTag("goal-cadence-count")
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 2.dp),

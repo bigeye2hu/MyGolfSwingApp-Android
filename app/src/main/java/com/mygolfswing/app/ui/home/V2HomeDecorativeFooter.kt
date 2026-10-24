@@ -42,8 +42,8 @@ fun V2HomeDecorativeFooter(modifier: Modifier = Modifier) {
             contentDescription = null,
             tint = DSColors.deepGreen.copy(alpha = 0.55f),
             modifier = Modifier
-                .size(18.dp)
-                .padding(bottom = 4.dp),
+                .padding(bottom = 4.dp)
+                .size(18.dp),
         )
         Text("\u201C每一杆都值得被记住。\u201D", style = DSTypography.titleMedium, color = DSColors.inkGreen)
         Text("Every Swing Worth Remembering.", style = DSTypography.caption, color = DSColors.shadowGray)

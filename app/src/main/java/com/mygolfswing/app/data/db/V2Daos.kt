@@ -144,11 +144,24 @@ interface PlazaSavedDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun save(saved: PlazaSavedEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveAll(saved: List<PlazaSavedEntity>)
+
     @Query("DELETE FROM v2_plaza_saved WHERE videoId = :videoId AND userId = :userId")
     suspend fun remove(videoId: String, userId: String)
 
     @Query("DELETE FROM v2_plaza_saved WHERE userId = :userId")
     suspend fun clear(userId: String)
+
+    @Transaction
+    suspend fun reconcileRemotePage(
+        userId: String,
+        saved: List<PlazaSavedEntity>,
+        isCompleteFirstPage: Boolean,
+    ) {
+        if (isCompleteFirstPage) clear(userId)
+        if (saved.isNotEmpty()) saveAll(saved)
+    }
 }
 
 @Dao

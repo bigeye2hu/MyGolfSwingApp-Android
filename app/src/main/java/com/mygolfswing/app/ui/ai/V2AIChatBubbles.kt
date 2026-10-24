@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +62,7 @@ fun V2AIChatBubbleAssistant(message: V2ChatMessage, modifier: Modifier = Modifie
                             ),
                         )
                         .border(width = 0.5.dp, color = DSColors.goldBright.copy(alpha = 0.08f), shape = RoundedCornerShape(16.dp))
+                        .testTag("ai-assistant-text-bubble")
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
                     val display = if (message.text.isEmpty() && message.isStreaming) "…" else message.text
@@ -135,6 +137,7 @@ private fun V2AIChatVideoRefCard(payload: V2ChatAttachment.VideoRef) {
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFFFAF7F0))
             .border(0.5.dp, DSColors.borderLine, RoundedCornerShape(12.dp))
+            .testTag("ai-attachment-video-ref")
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -146,12 +149,12 @@ private fun V2AIChatVideoRefCard(payload: V2ChatAttachment.VideoRef) {
                 .background(thumbnailBrush(payload.thumbnailKind)),
             contentAlignment = Alignment.Center,
         ) {
-            androidx.compose.material3.Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            androidx.compose.material3.Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(13.dp))
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(payload.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen, maxLines = 1)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                androidx.compose.material3.Icon(Icons.Filled.Schedule, null, tint = DSColors.shadowGray, modifier = Modifier.size(11.dp))
+                androidx.compose.material3.Icon(Icons.Filled.Schedule, null, tint = DSColors.shadowGray, modifier = Modifier.size(9.dp))
                 Text(durationString(payload.durationSec), fontSize = 10.sp, fontWeight = FontWeight.Medium, color = DSColors.shadowGray)
                 Text("·", fontSize = 10.sp, color = DSColors.shadowGray)
                 Text(payload.statusLabel, fontSize = 10.sp, fontWeight = FontWeight.Medium, color = DSColors.shadowGray)
@@ -165,14 +168,21 @@ private fun V2AIChatMemoSavedCard(payload: V2ChatAttachment.MemoSaved) {
     Column(
         modifier = Modifier
             .widthIn(max = 300.dp)
+            .shadow(
+                elevation = 6.dp,
+                shape = RoundedCornerShape(14.dp),
+                ambientColor = DSColors.goldBright.copy(alpha = 0.08f),
+                spotColor = DSColors.goldBright.copy(alpha = 0.08f),
+            )
             .clip(RoundedCornerShape(14.dp))
             .background(DSColors.cardWhite)
             .border(1.dp, DSColors.goldBright.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+            .testTag("ai-attachment-memo-saved")
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            androidx.compose.material3.Icon(Icons.Filled.CheckCircle, null, tint = DSColors.goldBright, modifier = Modifier.size(14.dp))
+            androidx.compose.material3.Icon(Icons.Filled.CheckCircle, null, tint = DSColors.goldBright, modifier = Modifier.size(13.dp))
             Text("心得已记录", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen)
             Spacer(modifier = Modifier.weight(1f))
             if (payload.isImportant) {
@@ -192,7 +202,7 @@ private fun V2AIChatMemoSavedCard(payload: V2ChatAttachment.MemoSaved) {
         Text(payload.summary, fontSize = 12.sp, color = Color(0xFF6C757D), maxLines = 3, lineHeight = 17.sp)
         if (payload.tags.isNotEmpty()) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                payload.tags.take(3).forEach { tag ->
+                payload.tags.forEach { tag ->
                     Text(
                         "# $tag",
                         fontSize = 10.sp,
@@ -214,9 +224,16 @@ private fun V2AIChatPlazaCard(payload: V2ChatAttachment.PlazaRecommend) {
     Column(
         modifier = Modifier
             .widthIn(max = 300.dp)
+            .shadow(
+                elevation = 6.dp,
+                shape = RoundedCornerShape(14.dp),
+                ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.06f),
+            )
             .clip(RoundedCornerShape(14.dp))
             .background(DSColors.cardWhite)
             .border(0.5.dp, DSColors.borderLine, RoundedCornerShape(14.dp))
+            .testTag("ai-attachment-plaza-recommend")
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -228,7 +245,7 @@ private fun V2AIChatPlazaCard(payload: V2ChatAttachment.PlazaRecommend) {
                     .background(DSColors.fairway),
                 contentAlignment = Alignment.Center,
             ) {
-                androidx.compose.material3.Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(11.dp))
+                androidx.compose.material3.Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(9.dp))
             }
             Text("相关视频", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen)
             Spacer(modifier = Modifier.weight(1f))
@@ -247,7 +264,7 @@ private fun V2AIChatPlazaCard(payload: V2ChatAttachment.PlazaRecommend) {
         Text(payload.summary, fontSize = 12.sp, color = Color(0xFF6C757D), maxLines = 2, lineHeight = 17.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                androidx.compose.material3.Icon(Icons.Filled.Schedule, null, tint = DSColors.shadowGray, modifier = Modifier.size(11.dp))
+                androidx.compose.material3.Icon(Icons.Filled.Schedule, null, tint = DSColors.shadowGray, modifier = Modifier.size(9.dp))
                 Text(durationString(payload.durationSec), fontSize = 11.sp, fontWeight = FontWeight.Medium, color = DSColors.shadowGray)
             }
             Spacer(modifier = Modifier.weight(1f))

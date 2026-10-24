@@ -18,3 +18,6 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 -renamesourcefileattribute SourceFile
+
+# Tencent Cloud Chat SDK uses reflection for parts of its Android bridge.
+-keep class com.tencent.imsdk.** { *; }

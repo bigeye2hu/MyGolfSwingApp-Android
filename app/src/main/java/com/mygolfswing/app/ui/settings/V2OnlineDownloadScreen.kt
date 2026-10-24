@@ -1,8 +1,12 @@
 package com.mygolfswing.app.ui.settings
 
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,14 +14,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -26,16 +33,27 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SportsGolf
+import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,21 +75,32 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.edit
+import androidx.core.content.ContextCompat
 import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.data.download.V2AsyncDownloadStatus
+import com.mygolfswing.app.data.download.V2AsyncDownloadTask
+import com.mygolfswing.app.data.download.V2DownloadStatisticsSnapshot
+import com.mygolfswing.app.data.download.V2DownloadStatisticsStore
+import com.mygolfswing.app.data.download.V2LegacyDownloadRecord
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoSource
@@ -81,14 +110,19 @@ import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.data.video.V2VideoFileStore
-import com.mygolfswing.app.ui.common.V2NavTopBar
+import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
+import com.mygolfswing.app.data.video.publishDownloadedVideoToGallery
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
@@ -101,7 +135,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import java.io.File
 import java.util.UUID
 
 @Composable
@@ -111,14 +145,15 @@ fun V2OnlineDownloadScreen(
     initialUrl: String = "",
     allowDirectUrlDownload: Boolean = false,
     onRequestLogin: () -> Unit = {},
-    onOpenOnlineMemo: (String) -> Unit = {},
-    onRequestLoginForOnlineMemo: (String) -> Unit = { onRequestLogin() },
     onOpenHistory: () -> Unit = {},
-    onOpenCreditsReset: () -> Unit = {},
     onOpenCreditsPurchase: () -> Unit = {},
+    readClipboardText: (() -> String?)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
     val profile by V2ProfileStore.profile.collectAsState()
     var urlInput by rememberSaveable(initialUrl) { mutableStateOf(initialUrl) }
     var startResult by remember { mutableStateOf<V2DownloadStartResult?>(null) }
@@ -131,27 +166,47 @@ fun V2OnlineDownloadScreen(
     var createdMemoId by remember { mutableStateOf<UUID?>(null) }
     var showSuccessDialog by remember { mutableStateOf(false) }
     var showAsyncDownloadTip by remember { mutableStateOf(false) }
+    var showNonDouyinTip by remember { mutableStateOf(false) }
+    var nonDouyinPlatform by remember { mutableStateOf("") }
+    var connectionState by remember { mutableStateOf(DownloadServiceConnectionState.CHECKING) }
     var asyncTipAcceptedJobId by rememberSaveable { mutableStateOf<String?>(null) }
     var creditMessage by remember { mutableStateOf<String?>(null) }
-    var refreshingCredits by remember { mutableStateOf(false) }
     val memos by V2MemoStore.allMemos.collectAsState()
-    val downloadStats = remember(memos) { DownloadStats.from(memos) }
+    val downloadStats by V2DownloadStatisticsStore.stats.collectAsState()
     val canAffordDownload = profile.isLoggedIn && profile.credits >= DOWNLOAD_COST_CREDITS
     val cleanedUrl = remember(urlInput) { V2OnlineVideoMetadataFetcher.cleanVideoUrl(urlInput) }
-    val detectedPlatform = remember(cleanedUrl) {
-        if (cleanedUrl.isBlank()) "" else V2OnlineVideoMetadataFetcher.detectPlatform(cleanedUrl)
-    }
-    val isDouyinDownloadUrl = detectedPlatform == "抖音"
-    val isDirectDownloadUrl = allowDirectUrlDownload && cleanedUrl.isHttpUrl()
-    val canCreateOnlineMemo = !allowDirectUrlDownload && cleanedUrl.isHttpUrl() && detectedPlatform in ONLINE_MEMO_PLATFORMS
-    val canCreateDirectOnlineMemo = allowDirectUrlDownload && cleanedUrl.isHttpUrl() && phase == DownloadPhase.IDLE
-    val hasDownloadableUrl = urlInput.isNotBlank() && (isDouyinDownloadUrl || isDirectDownloadUrl)
-    val canStartDownload = hasDownloadableUrl
+    val canStartDownload = urlInput.isNotBlank()
     val draftScopeKey = remember(profile.userId, allowDirectUrlDownload) {
         downloadDraftKey(profile.userId, allowDirectUrlDownload)
     }
     val anonymousDraftKey = remember(allowDirectUrlDownload) {
         downloadDraftKey(userId = null, directMode = allowDirectUrlDownload)
+    }
+
+    LaunchedEffect(Unit) {
+        connectionState = if (ServiceLocator.videoDownloadRepo.checkServiceConnection()) {
+            DownloadServiceConnectionState.ONLINE
+        } else {
+            DownloadServiceConnectionState.WAITING
+        }
+    }
+
+    LaunchedEffect(memos) {
+        val legacyRecords = withContext(Dispatchers.IO) {
+            memos.filter(V2Memo::isOnlineDownloadMemo).map { memo ->
+                V2LegacyDownloadRecord(
+                    date = memo.createdAt.toLocalDate(),
+                    fileSizeBytes = memo.videoUrl
+                        ?.takeIf { it.startsWith("file://") }
+                        ?.removePrefix("file://")
+                        ?.let(::File)
+                        ?.takeIf(File::isFile)
+                        ?.length()
+                        ?: 0L,
+                )
+            }
+        }
+        V2DownloadStatisticsStore.migrateLegacyMemosIfNeeded(context, legacyRecords)
     }
 
     fun resetForNewUrl() {
@@ -182,6 +237,18 @@ fun V2OnlineDownloadScreen(
         phase = DownloadPhase.IDLE
     }
 
+    fun preserveDraftBeforeHandoff() {
+        persistDownloadDraftForHandoff(
+            context = context,
+            userId = profile.userId.takeIf { profile.isLoggedIn },
+            directMode = allowDirectUrlDownload,
+            url = urlInput,
+            phase = phase,
+            startResult = startResult,
+            createdMemoId = createdMemoId,
+        )
+    }
+
     LaunchedEffect(phase) {
         if (phase !in timedDownloadPhases) return@LaunchedEffect
         while (true) {
@@ -206,19 +273,11 @@ fun V2OnlineDownloadScreen(
 
     LaunchedEffect(draftScopeKey, anonymousDraftKey, profile.isLoggedIn, initialUrl, phase) {
         if (initialUrl.isNotBlank() || urlInput.isNotBlank() || phase != DownloadPhase.IDLE) return@LaunchedEffect
-        val restored = restoreDownloadDraftUrl(context, draftScopeKey)
-            ?: if (profile.isLoggedIn && draftScopeKey != anonymousDraftKey) {
-                restoreDownloadDraftUrl(context, anonymousDraftKey)
-            } else {
-                null
-            }
-        restored?.let {
-            urlInput = it
-            if (draftScopeKey != anonymousDraftKey) {
-                persistDownloadDraftUrl(context, draftScopeKey, it)
-                clearDownloadDraftUrl(context, anonymousDraftKey)
-            }
-        }
+        restoreDownloadDraftForScope(
+            context = context,
+            userId = profile.userId.takeIf { profile.isLoggedIn },
+            directMode = allowDirectUrlDownload,
+        )?.let { urlInput = it }
     }
 
     LaunchedEffect(draftScopeKey, cleanedUrl, phase, startResult, createdMemoId) {
@@ -227,18 +286,76 @@ fun V2OnlineDownloadScreen(
         }
     }
 
-    fun refreshCredits() {
+    fun startDirectPlazaDownload(cleaned: String) {
         scope.launch {
-            refreshingCredits = true
+            error = null
             creditMessage = null
-            val balance = ServiceLocator.creditsRepo.fetchBalance(force = true)
-            V2ProfileStore.refresh(force = true)
-            creditMessage = if (balance == null) {
-                "积分刷新失败，请稍后重试"
-            } else {
-                "已刷新：当前 $balance 积分"
+            phaseNote = null
+            elapsedSeconds = 0
+            progress = 0.0
+            phase = DownloadPhase.DOWNLOADING
+            try {
+                val imported = V2VideoFileStore.downloadRemoteVideo(context, cleaned) { value ->
+                    if (value >= 0.0) progress = value
+                }
+                if (imported == null) {
+                    error = "下载失败，请检查视频地址后重试"
+                    phase = DownloadPhase.IDLE
+                    return@launch
+                }
+
+                val info = DownloadVideoInfo(
+                    title = "广场视频",
+                    author = null,
+                    thumbnailUrl = imported.thumbnailPath?.let { "file://$it" },
+                    durationSec = imported.durationSec.takeIf { it > 0.0 },
+                    fileSizeBytes = imported.sizeBytes,
+                    downloadUrl = cleaned,
+                    playUrl = cleaned,
+                    platform = "视频广场",
+                )
+                val galleryResult = try {
+                    publishDownloadedVideoToGallery(
+                        context = context,
+                        source = File(imported.absolutePath),
+                        displayBase = info.title,
+                    )
+                } finally {
+                    deleteFileCountingFreedBytes(File(imported.absolutePath))
+                    imported.thumbnailPath?.let { deleteFileCountingFreedBytes(File(it)) }
+                }
+
+                if (!galleryResult.saved) {
+                    error = galleryResult.message
+                    phaseNote = null
+                    phase = DownloadPhase.IDLE
+                    return@launch
+                }
+
+                ServiceLocator.session.updateCredits((profile.credits - DOWNLOAD_COST_CREDITS).coerceAtLeast(0))
+                try {
+                    ServiceLocator.creditsRepo.fetchBalance(force = true)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    // Match iOS: the local balance update succeeds even if the follow-up refresh cannot complete.
+                }
+                V2ProfileStore.refresh(force = true)
+
+                videoInfo = info
+                progress = 1.0
+                phaseNote = galleryResult.message
+                clearDownloadDraftUrl(context, draftScopeKey)
+                phase = DownloadPhase.COMPLETED
+                showSuccessDialog = true
+            } catch (cancelled: CancellationException) {
+                phase = downloadPhaseAfterCancellation(phase, hasActiveTask = false)
+                phaseNote = null
+                throw cancelled
+            } catch (throwable: Throwable) {
+                error = downloadThrowableError("下载失败，请检查视频地址后重试", throwable)
+                phase = DownloadPhase.IDLE
             }
-            refreshingCredits = false
         }
     }
 
@@ -249,16 +366,14 @@ fun V2OnlineDownloadScreen(
             return
         }
         if (!profile.isLoggedIn) {
+            preserveDraftBeforeHandoff()
             onRequestLogin()
             return
         }
         val platform = V2OnlineVideoMetadataFetcher.detectPlatform(cleaned)
         if (platform != "抖音" && !allowDirectUrlDownload) {
-            error = if (platform in ONLINE_MEMO_PLATFORMS) {
-                "${platform}链接暂不支持下载，可改为添加在线视频 Memo"
-            } else {
-                "当前仅支持抖音视频下载"
-            }
+            nonDouyinPlatform = platform.takeIf { it.isNotBlank() } ?: "当前平台"
+            showNonDouyinTip = true
             return
         }
         if (!canAffordDownload) {
@@ -267,6 +382,10 @@ fun V2OnlineDownloadScreen(
         }
         urlInput = cleaned
         clearDownloadDraftUrl(context, draftScopeKey)
+        if (onlineDownloadStartStrategy(allowDirectUrlDownload) == OnlineDownloadStartStrategy.DIRECT_PLAZA_GALLERY) {
+            startDirectPlazaDownload(cleaned)
+            return
+        }
         scope.launch {
             error = null
             phaseNote = null
@@ -344,9 +463,18 @@ fun V2OnlineDownloadScreen(
         }
     }
 
-    fun confirmDownload() {
+    fun requestAsyncDownloadNotificationPermission() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    fun confirmDownload(asyncMode: Boolean = false) {
         val start = startResult ?: return
-        if (shouldSuggestAsyncDownload(videoInfo, start.jobId, asyncTipAcceptedJobId)) {
+        if (!asyncMode && shouldSuggestAsyncDownload(videoInfo, start.jobId, asyncTipAcceptedJobId)) {
             showAsyncDownloadTip = true
             return
         }
@@ -369,28 +497,96 @@ fun V2OnlineDownloadScreen(
                     videoInfo = effective
                     val downloadUrl = effective.downloadUrl
                     if (!downloadUrl.isNullOrBlank()) {
+                        if (asyncMode) {
+                            val ownerUserId = profile.userId?.takeIf(String::isNotBlank)
+                            if (ownerUserId == null) {
+                                error = "登录状态已失效，请重新登录后再试"
+                                phase = DownloadPhase.READY
+                                return@onSuccess
+                            }
+                            ServiceLocator.asyncDownloadQueue.addTask(
+                                ownerUserId = ownerUserId,
+                                title = effective.title,
+                                originalUrl = urlInput,
+                                downloadUrl = downloadUrl,
+                                fileSizeBytes = effective.fileSizeBytes ?: 0L,
+                                durationSeconds = effective.durationSec?.toInt(),
+                            )
+                            requestAsyncDownloadNotificationPermission()
+                            clearPendingDownloadTask(context, profile.userId)
+                            clearDownloadDraftUrl(context, draftScopeKey)
+                            urlInput = ""
+                            startResult = null
+                            videoInfo = null
+                            progress = 0.0
+                            elapsedSeconds = 0
+                            phase = DownloadPhase.IDLE
+                            creditMessage = "已加入异步下载，可在右上角查看进度"
+                            return@onSuccess
+                        }
                         phase = DownloadPhase.DOWNLOADING
                         val imported = V2VideoFileStore.downloadRemoteVideo(context, downloadUrl) { p ->
                             if (p >= 0.0) progress = p
                         }
                         if (imported == null) {
-                            createOnlineMemo(effective)?.let {
-                                phaseNote = "本地下载失败，已改为在线视频 Memo，可继续播放和复盘。"
-                                createdMemoId = it
+                            if (allowDirectUrlDownload) {
+                                error = "视频下载失败，未能保存到系统相册，请稍后重试"
+                                phase = DownloadPhase.READY
+                            } else {
+                                createOnlineMemo(effective)?.let {
+                                    phaseNote = "本地下载失败，已改为在线视频 Memo，可继续播放和复盘。"
+                                    createdMemoId = it
+                                    showSuccessDialog = true
+                                    clearPendingDownloadTask(context, profile.userId)
+                                    phase = DownloadPhase.COMPLETED
+                                } ?: run {
+                                    error = "未能保存视频，也没有可播放的在线地址"
+                                    phase = DownloadPhase.READY
+                                }
+                            }
+                        } else if (allowDirectUrlDownload) {
+                            val galleryResult = publishDownloadedVideoToGallery(
+                                context = context,
+                                source = File(imported.absolutePath),
+                                displayBase = effective.title.ifBlank { "广场视频" },
+                            )
+                            deleteFileCountingFreedBytes(File(imported.absolutePath))
+                            imported.thumbnailPath?.let { deleteFileCountingFreedBytes(File(it)) }
+                            if (galleryResult.saved) {
+                                progress = 1.0
+                                createdMemoId = null
+                                phaseNote = galleryResult.message
                                 showSuccessDialog = true
                                 clearPendingDownloadTask(context, profile.userId)
+                                clearDownloadDraftUrl(context, draftScopeKey)
                                 phase = DownloadPhase.COMPLETED
-                            } ?: run {
-                                error = "未能保存视频，也没有可播放的在线地址"
+                            } else {
+                                error = galleryResult.message
+                                phaseNote = "积分已完成结算；请确认相册存储空间后重试。"
                                 phase = DownloadPhase.READY
                             }
                         } else {
                             progress = 1.0
                             createdMemoId = createLocalMemo(imported, effective)
+                            val galleryResult = publishDownloadedVideoToGallery(
+                                context = context,
+                                source = File(imported.absolutePath),
+                                displayBase = effective.title.ifBlank { "下载视频" },
+                            )
+                            V2DownloadStatisticsStore.recordDownload(context, imported.sizeBytes)
+                            if (!galleryResult.saved) {
+                                phaseNote = "Memo 已创建；系统相册保存失败，可在 Memo 中继续使用。"
+                            }
                             showSuccessDialog = true
                             clearPendingDownloadTask(context, profile.userId)
                             phase = DownloadPhase.COMPLETED
                         }
+                    } else if (asyncMode) {
+                        error = "异步下载创建失败：无法获取视频直链"
+                        phase = DownloadPhase.READY
+                    } else if (allowDirectUrlDownload) {
+                        error = "下载服务暂时没有返回可保存的视频地址，请稍后重试"
+                        phase = DownloadPhase.READY
                     } else {
                         createOnlineMemo(effective)?.let {
                             phaseNote = "下载服务未返回本地下载地址，已创建在线视频 Memo。"
@@ -418,230 +614,155 @@ fun V2OnlineDownloadScreen(
         }
     }
 
-    fun createDirectOnlineMemoFallback() {
-        if (!profile.isLoggedIn) {
-            onRequestLogin()
-            return
-        }
-        val url = cleanedUrl
-        if (!url.isHttpUrl()) {
-            error = "需要有效的视频播放地址"
-            return
-        }
-        scope.launch {
-            error = null
-            phaseNote = "正在改存为在线视频 Memo..."
-            val info = DownloadVideoInfo(
-                title = videoInfo?.title?.takeIf { it.isNotBlank() } ?: "广场视频",
-                author = videoInfo?.author,
-                thumbnailUrl = videoInfo?.thumbnailUrl,
-                durationSec = videoInfo?.durationSec,
-                downloadUrl = null,
-                playUrl = url,
-                platform = "视频广场",
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            OnlineDownloadTopBar(
+                isDirectUrlMode = allowDirectUrlDownload,
+                onBack = onBack,
+                onOpenHistory = {
+                    preserveDraftBeforeHandoff()
+                    onOpenHistory()
+                },
             )
-            val memoId = try {
-                createOnlineMemo(info)
-            } catch (e: CancellationException) {
-                phaseNote = null
-                throw e
-            } catch (e: Throwable) {
-                null
-            }
-            if (memoId == null) {
-                error = "无法创建在线视频 Memo，请检查视频地址后重试"
-                phaseNote = null
-            } else {
-                createdMemoId = memoId
-                showSuccessDialog = true
-                phaseNote = "下载服务暂不可用时，已先保存为在线视频 Memo，可继续播放和复盘。"
-                phase = DownloadPhase.COMPLETED
-            }
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite),
-    ) {
-        V2NavTopBar(
-            title = "视频下载",
-            onBack = onBack,
-            trailing = {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(DSColors.cardWhite)
-                        .clickable(onClick = onOpenHistory),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.History, contentDescription = "下载记录", tint = DSColors.fairway, modifier = Modifier.size(20.dp))
-                }
-            },
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
-            verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
-        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+            ) {
             DownloadHero(isDirectUrlMode = allowDirectUrlDownload)
             CreditCard(
-                balance = profile.credits,
                 isLoggedIn = profile.isLoggedIn,
-                refreshing = refreshingCredits,
-                message = creditMessage,
-                onLogin = onRequestLogin,
-                onRefresh = ::refreshCredits,
-                onOpenCreditsReset = onOpenCreditsReset,
-                onOpenCreditsPurchase = onOpenCreditsPurchase,
+                onLogin = {
+                    preserveDraftBeforeHandoff()
+                    onRequestLogin()
+                },
+                onOpenCreditsPurchase = {
+                    preserveDraftBeforeHandoff()
+                    onOpenCreditsPurchase()
+                },
             )
             UrlCard(
                 url = urlInput,
                 enabled = phase == DownloadPhase.IDLE || phase == DownloadPhase.READY,
-                placeholder = if (allowDirectUrlDownload) "粘贴广场视频播放地址..." else "粘贴抖音视频分享链接...",
+                isDirectUrlMode = allowDirectUrlDownload,
+                connectionState = connectionState,
+                placeholder = if (allowDirectUrlDownload) "粘贴广场视频播放地址..." else "粘贴抖音分享文案或视频链接...",
+                actionText = when {
+                    phase == DownloadPhase.FETCHING -> "识别中"
+                    phase == DownloadPhase.DOWNLOADING || phase == DownloadPhase.CONFIRMING -> "下载中"
+                    !profile.isLoggedIn && urlInput.isNotBlank() -> "登录后下载"
+                    profile.isLoggedIn && !canAffordDownload && urlInput.isNotBlank() -> "去充值后下载"
+                    allowDirectUrlDownload -> "保存到本地"
+                    else -> "开始下载"
+                },
+                actionEnabled = canStartDownload && phase == DownloadPhase.IDLE,
                 onUrlChange = {
                     urlInput = it
                     resetForNewUrl()
                 },
                 onPaste = {
-                    val pasted = context.readClipboardText()
-                    if (pasted == null) {
-                        error = "剪贴板没有可用链接，请手动粘贴"
-                        phaseNote = null
+                    val pasted = if (readClipboardText != null) {
+                        readClipboardText()
                     } else {
+                        context.readClipboardText()
+                    }
+                    if (pasted != null) {
                         urlInput = pasted
                         resetForNewUrl()
                         phaseNote = "已从剪贴板粘贴链接"
                     }
                 },
-                onCopy = {
-                    if (urlInput.isBlank()) {
-                        error = "请先输入视频链接"
-                        phaseNote = null
-                    } else if (context.copyTextToClipboard("video-url", urlInput)) {
-                        error = null
-                        phaseNote = "链接已复制"
-                    } else {
-                        error = "复制失败，请稍后重试"
-                        phaseNote = null
-                    }
-                },
-            )
-            if (canCreateOnlineMemo) {
-                OnlineMemoFallbackCard(
-                    platform = detectedPlatform,
-                    onOpenOnlineMemo = {
-                        if (profile.isLoggedIn) onOpenOnlineMemo(cleanedUrl) else onRequestLoginForOnlineMemo(cleanedUrl)
-                    },
-                )
-            }
-            if (allowDirectUrlDownload) {
-                DirectDownloadSourceSection()
-            } else {
-                PlatformSupportSection()
-            }
-            if (canCreateDirectOnlineMemo) {
-                DirectOnlineMemoFallbackCard(
-                    hasError = error != null,
-                    onOpenOnlineMemo = ::createDirectOnlineMemoFallback,
-                )
-            }
-            startResult?.let { start ->
-                VideoInfoCard(
-                    info = videoInfo,
-                    costCredits = start.costCredits,
-                    platform = start.platform,
-                )
-            }
-            PhaseCard(phase = phase, progress = progress, elapsedSeconds = elapsedSeconds, error = error, note = phaseNote)
-            TodaySummaryCard(stats = downloadStats)
-            SupportedDownloadCard(isDirectUrlMode = allowDirectUrlDownload)
-            ActionRow(
-                phase = phase,
-                canStart = canStartDownload,
-                startActionText = when {
-                    !profile.isLoggedIn && hasDownloadableUrl -> "登录后下载"
-                    profile.isLoggedIn && !canAffordDownload && hasDownloadableUrl -> "去充值后下载"
-                    else -> "获取视频信息"
-                },
-                onlineMemoActionText = if (canCreateOnlineMemo && phase == DownloadPhase.IDLE) {
-                    if (profile.isLoggedIn) "添加在线视频 Memo" else "登录后添加在线视频 Memo"
-                } else {
-                    null
-                },
-                startDisabledReason = when {
-                    !profile.isLoggedIn && canCreateOnlineMemo -> "登录后可添加在线视频 Memo"
-                    !profile.isLoggedIn -> "登录后可下载"
-                    urlInput.isBlank() -> "先粘贴视频链接"
-                    allowDirectUrlDownload && !cleanedUrl.isHttpUrl() -> "需要有效的视频播放地址"
-                    !isDouyinDownloadUrl && canCreateOnlineMemo -> "${detectedPlatform}链接可改为添加在线视频 Memo"
-                    !isDouyinDownloadUrl && !allowDirectUrlDownload -> "当前仅支持抖音视频下载"
-                    !canAffordDownload -> "积分不足，先去充值；余额异常再刷新或校准"
-                    else -> null
-                },
-                canConfirm = startResult != null,
-                createdMemoId = createdMemoId,
                 onStart = {
-                    if (profile.isLoggedIn && !canAffordDownload && hasDownloadableUrl) {
-                        persistDownloadDraftUrl(context, draftScopeKey, cleanedUrl)
+                    if (profile.isLoggedIn && !canAffordDownload && urlInput.isNotBlank()) {
+                        preserveDraftBeforeHandoff()
                         onOpenCreditsPurchase()
                     } else {
                         startDownload()
                     }
                 },
-                onCancel = ::cancelDownload,
-                onConfirm = ::confirmDownload,
-                onOpenMemo = { createdMemoId?.let(onMemoCreated) },
-                onOpenOnlineMemo = {
-                    if (profile.isLoggedIn) onOpenOnlineMemo(cleanedUrl) else onRequestLoginForOnlineMemo(cleanedUrl)
-                },
             )
+            PhaseCard(
+                phase = phase,
+                progress = progress,
+                elapsedSeconds = elapsedSeconds,
+                error = error,
+                note = phaseNote ?: creditMessage,
+                isDirectUrlMode = allowDirectUrlDownload,
+                displayedUrl = cleanedUrl,
+            )
+            TodaySummaryCard(stats = downloadStats)
+            SupportedDownloadCard()
             FooterNote()
         }
     }
+    }
 
-    error?.takeIf { phase == DownloadPhase.IDLE && !allowDirectUrlDownload }?.let { message ->
-        AlertDialog(
-            onDismissRequest = { error = null },
-            title = { Text("下载失败") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { error = null }) { Text("知道了") }
-            },
+    error?.let { message ->
+        DownloadFailureDialog(message = message, onDismiss = { error = null })
+    }
+
+    if (phase == DownloadPhase.FETCHING) {
+        VideoFetchingOverlay(
+            statusText = "正在提取视频信息...",
+            url = cleanedUrl.ifBlank { urlInput },
         )
     }
 
-    if (showSuccessDialog && createdMemoId != null) {
+    if (showNonDouyinTip) {
+        NonDouyinTipDialog(
+            platformName = nonDouyinPlatform,
+            onDismiss = { showNonDouyinTip = false },
+        )
+    }
+
+    if (showSuccessDialog) {
         DownloadSuccessDialog(
             platform = videoInfo?.platform?.takeIf { it.isNotBlank() } ?: if (allowDirectUrlDownload) "视频广场" else "在线视频",
-            costCredits = startResult?.costCredits,
+            costCredits = if (allowDirectUrlDownload) DOWNLOAD_COST_CREDITS else startResult?.costCredits,
             isOnlineMemo = videoInfo?.downloadUrl.isNullOrBlank() || phaseNote?.contains("在线") == true,
+            showCreateMemoButton = !allowDirectUrlDownload,
             onOpenMemo = {
                 showSuccessDialog = false
                 createdMemoId?.let(onMemoCreated)
             },
-            onContinue = ::resetAfterSuccess,
-            onDismiss = { showSuccessDialog = false },
+            onContinue = {
+                if (allowDirectUrlDownload) {
+                    showSuccessDialog = false
+                    onBack()
+                } else {
+                    resetAfterSuccess()
+                }
+            },
         )
     }
 
     startResult?.let { start ->
+        if (phase == DownloadPhase.READY && !showAsyncDownloadTip && error == null) {
+            VideoInfoConfirmDialog(
+                platform = start.platform?.takeIf(String::isNotBlank) ?: videoInfo?.platform.orEmpty(),
+                info = videoInfo,
+                creditsCost = start.costCredits,
+                onConfirm = {
+                    asyncTipAcceptedJobId = start.jobId
+                    confirmDownload(asyncMode = false)
+                },
+                onAsyncDownload = { confirmDownload(asyncMode = true) },
+                onCancel = ::cancelDownload,
+            )
+        }
         if (showAsyncDownloadTip) {
             AsyncDownloadTipDialog(
                 info = videoInfo,
-                onLater = {
+                onAsyncDownload = {
                     showAsyncDownloadTip = false
-                    phaseNote = "已保留待确认任务，再次进入视频下载会自动恢复。"
-                    onBack()
+                    confirmDownload(asyncMode = true)
                 },
-                onContinue = {
+                onContinueDownload = {
                     asyncTipAcceptedJobId = start.jobId
                     showAsyncDownloadTip = false
-                    confirmDownload()
+                    confirmDownload(asyncMode = false)
                 },
                 onCancel = { showAsyncDownloadTip = false },
             )
@@ -650,58 +771,61 @@ fun V2OnlineDownloadScreen(
 }
 
 @Composable
-fun V2DownloadHistoryScreen(
-    onBack: () -> Unit,
-    onOpenMemo: (UUID) -> Unit,
-    onStartDownload: () -> Unit,
-    isLoggedIn: Boolean = true,
-    onRequestLogin: () -> Unit = {},
+internal fun VideoFetchingOverlay(
+    statusText: String,
+    url: String,
 ) {
-    val context = LocalContext.current
-    val profile by V2ProfileStore.profile.collectAsState()
-    val memos by V2MemoStore.allMemos.collectAsState()
-    val items = remember(memos) {
-        memos.filter { it.isOnlineDownloadMemo() }.sortedByDescending { it.createdAt }
-    }
-    val pendingTask = remember(profile.userId, isLoggedIn) {
-        profile.userId
-            ?.takeIf { isLoggedIn && it.isNotBlank() }
-            ?.let { restorePendingDownloadTask(context, it) }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite),
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        V2NavTopBar(title = "下载记录", onBack = onBack)
-        if (!isLoggedIn) {
-            DownloadHistoryLoginRequired(onLogin = onRequestLogin)
-        } else if (items.isEmpty() && pendingTask == null) {
-            DownloadHistoryEmpty(onStartDownload = onStartDownload)
-        } else {
-            LazyColumn(
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.28f))
+                .padding(horizontal = DSSpacing.lg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .v2NavigationBarPadding(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = DSSpacing.lg,
-                    end = DSSpacing.lg,
-                    top = DSSpacing.md,
-                    bottom = DSSpacing.xxl,
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                    .testTag("video-fetching-overlay")
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.24f),
+                        spotColor = Color.Black.copy(alpha = 0.24f),
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DSColors.cardWhite)
+                    .border(1.dp, DSColors.borderLine, RoundedCornerShape(24.dp))
+                    .padding(DSSpacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
             ) {
-                pendingTask?.let { task ->
-                    item {
-                        PendingDownloadTaskCard(task = task, onContinue = onStartDownload)
-                    }
-                }
-                item {
-                    DownloadHistorySummary(items = items)
-                }
-                items(items, key = { it.id }) { memo ->
-                    DownloadHistoryRow(memo = memo, onClick = { onOpenMemo(memo.id) })
+                CircularProgressIndicator(
+                    color = DSColors.fairway,
+                    strokeWidth = 3.dp,
+                    modifier = Modifier.size(30.dp),
+                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+                ) {
+                    Text(
+                        statusText.ifBlank { "正在识别视频" },
+                        style = DSTypography.titleMedium,
+                        color = DSColors.inkGreen,
+                    )
+                    Text(
+                        url,
+                        style = DSTypography.caption,
+                        color = DSColors.shadowGray,
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
@@ -709,49 +833,403 @@ fun V2DownloadHistoryScreen(
 }
 
 @Composable
-private fun PendingDownloadTaskCard(task: PendingDownloadTask, onContinue: () -> Unit) {
+internal fun NonDouyinTipDialog(
+    platformName: String,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.28f))
+                .padding(horizontal = DSSpacing.lg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .testTag("non-douyin-tip-dialog")
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .shadow(18.dp, RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DSColors.cardWhite)
+                    .border(1.dp, DSColors.borderLine, RoundedCornerShape(24.dp))
+                    .padding(DSSpacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+            ) {
+                Box(
+                    modifier = Modifier.size(64.dp).clip(CircleShape).background(DSColors.sandBeige),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.ErrorOutline, null, tint = DSColors.trophyGold, modifier = Modifier.size(30.dp))
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+                ) {
+                    Text("暂不支持直接下载", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+                    Text(
+                        "当前识别为 $platformName。请先使用第三方方式保存，再回到挥呗创建练球 Memo。",
+                        style = DSTypography.body,
+                        color = DSColors.shadowGray,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().testTag("non-douyin-tip-confirm")) {
+                    PrimaryAction("知道了", enabled = true, onClick = onDismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun OnlineDownloadTopBar(
+    isDirectUrlMode: Boolean,
+    onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().background(DSColors.warmWhite),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .v2StatusBarPadding()
+                .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(DSColors.mistGreen)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "返回",
+                    tint = DSColors.fairway,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Column(
+                modifier = Modifier.testTag("online-download-top-bar"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    if (isDirectUrlMode) "保存广场视频" else "抖音视频下载",
+                    style = DSTypography.titleMedium,
+                    color = DSColors.inkGreen,
+                )
+                Text(
+                    if (isDirectUrlMode) "下载到本地并保存相册" else "粘贴链接，下载练球素材",
+                    style = DSTypography.label,
+                    color = DSColors.shadowGray,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(DSColors.cardWhite)
+                    .border(1.dp, DSColors.borderLine, CircleShape)
+                    .clickable(onClick = onOpenHistory),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.History,
+                    contentDescription = "异步下载",
+                    tint = DSColors.deepGreen,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+        Spacer(Modifier.fillMaxWidth().height(1.dp).background(DSColors.borderLine))
+    }
+}
+
+@Composable
+fun V2DownloadHistoryScreen(
+    onBack: () -> Unit,
+    isLoggedIn: Boolean = true,
+    onRequestLogin: () -> Unit = {},
+) {
+    val profile by V2ProfileStore.profile.collectAsState()
+    val allTasks by ServiceLocator.asyncDownloadQueue.tasks.collectAsState()
+    val ownerUserId = profile.userId?.takeIf { isLoggedIn && it.isNotBlank() }
+    val tasks = remember(allTasks, ownerUserId) {
+        if (ownerUserId == null) emptyList() else allTasks.filter { it.ownerUserId == ownerUserId }
+    }
+
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (!isLoggedIn) {
+                AsyncDownloadManagerTopBar(
+                    completedCount = 0,
+                    onClose = onBack,
+                    onClearCompleted = {},
+                )
+                DownloadHistoryLoginRequired(onLogin = onRequestLogin)
+            } else {
+                V2AsyncDownloadManagerContent(
+                    tasks = tasks,
+                    onClose = onBack,
+                    onClearCompleted = { ownerUserId?.let(ServiceLocator.asyncDownloadQueue::clearCompleted) },
+                    onPause = { taskId -> ownerUserId?.let { ServiceLocator.asyncDownloadQueue.pauseTask(it, taskId) } },
+                    onResume = { taskId -> ownerUserId?.let { ServiceLocator.asyncDownloadQueue.resumeTask(it, taskId) } },
+                    onRemove = { taskId -> ownerUserId?.let { ServiceLocator.asyncDownloadQueue.removeTask(it, taskId) } },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun V2AsyncDownloadManagerContent(
+    tasks: List<V2AsyncDownloadTask>,
+    onClose: () -> Unit,
+    onClearCompleted: () -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    val activeCount = tasks.count {
+        it.status == V2AsyncDownloadStatus.PENDING || it.status == V2AsyncDownloadStatus.DOWNLOADING
+    }
+    val completedCount = tasks.count { it.status == V2AsyncDownloadStatus.COMPLETED }
+    val failedCount = tasks.count { it.status == V2AsyncDownloadStatus.FAILED }
+    Column(
+        modifier = Modifier.fillMaxSize().testTag("async-download-manager"),
+    ) {
+        AsyncDownloadManagerTopBar(
+            completedCount = completedCount,
+            onClose = onClose,
+            onClearCompleted = onClearCompleted,
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().v2NavigationBarPadding(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = DSSpacing.lg,
+                end = DSSpacing.lg,
+                top = DSSpacing.md,
+                bottom = DSSpacing.xxl,
+            ),
+            verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+        ) {
+            item {
+                AsyncDownloadSummaryCard(
+                    activeCount = activeCount,
+                    completedCount = completedCount,
+                    failedCount = failedCount,
+                )
+            }
+            item {
+                AsyncDownloadTaskListCard(
+                    tasks = tasks,
+                    onPause = onPause,
+                    onResume = onResume,
+                    onRemove = onRemove,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AsyncDownloadManagerTopBar(
+    completedCount: Int,
+    onClose: () -> Unit,
+    onClearCompleted: () -> Unit,
+) {
+    Box(
+        modifier = Modifier.fillMaxWidth().v2StatusBarPadding().height(44.dp)
+            .testTag("async-download-top-bar"),
+    ) {
+        Text(
+            "异步下载",
+            style = DSTypography.titleMedium,
+            color = DSColors.inkGreen,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        Text(
+            "关闭",
+            style = DSTypography.body,
+            color = DSColors.fairway,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .clickable(onClick = onClose)
+                .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.sm)
+                .testTag("async-download-close"),
+        )
+        Text(
+            "清空完成",
+            style = DSTypography.body,
+            color = if (completedCount > 0) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.45f),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .clickable(enabled = completedCount > 0, onClick = onClearCompleted)
+                .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.sm)
+                .testTag("async-download-clear"),
+        )
+    }
+}
+
+@Composable
+private fun AsyncDownloadSummaryCard(activeCount: Int, completedCount: Int, failedCount: Int) {
+    AsyncDownloadCard {
+        Text("任务概览", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(DSSpacing.lg)) {
+            AsyncDownloadMetric("进行中", activeCount, Modifier.weight(1f))
+            AsyncDownloadMetric("已完成", completedCount, Modifier.weight(1f))
+            AsyncDownloadMetric("失败", failedCount, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun AsyncDownloadMetric(label: String, value: Int, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value.toString(), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
+        Text(label, style = DSTypography.caption, color = DSColors.shadowGray)
+    }
+}
+
+@Composable
+private fun AsyncDownloadTaskListCard(
+    tasks: List<V2AsyncDownloadTask>,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    AsyncDownloadCard {
+        Text("下载任务", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+        if (tasks.isEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = DSSpacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+            ) {
+                Icon(
+                    Icons.Outlined.Inbox,
+                    contentDescription = null,
+                    tint = DSColors.shadowGray,
+                    modifier = Modifier.size(32.dp).testTag("async-download-empty-tray"),
+                )
+                Text("暂无异步任务", style = DSTypography.bodyBold, color = DSColors.inkGreen)
+                Text("大文件视频可在确认时加入异步下载。", style = DSTypography.caption, color = DSColors.shadowGray)
+            }
+        } else {
+            tasks.forEach { task ->
+                AsyncDownloadTaskRow(
+                    task = task,
+                    onPause = { onPause(task.id) },
+                    onResume = { onResume(task.id) },
+                    onRemove = { onRemove(task.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AsyncDownloadCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(DSColors.cardWhite)
             .border(1.dp, DSColors.borderLine, RoundedCornerShape(20.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(DSSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+        content = content,
+    )
+}
+
+@Composable
+private fun AsyncDownloadTaskRow(
+    task: V2AsyncDownloadTask,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(DSColors.listMutedBg)
+            .padding(DSSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(DSColors.mistGreen),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.CloudDownload, null, tint = DSColors.fairway, modifier = Modifier.size(21.dp))
-            }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("待处理下载任务", style = DSTypography.bodyBold, color = DSColors.inkGreen)
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    "${task.start.platform ?: task.info.platform ?: "视频平台"} · ${task.start.costCredits} 积分 · 待确认",
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
+                    task.title,
+                    style = DSTypography.bodyBold,
+                    color = DSColors.inkGreen,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(task.status.displayName, style = DSTypography.caption, color = DSColors.shadowGray)
+            }
+            Text(task.fileSizeText, style = DSTypography.label, color = DSColors.shadowGray)
+        }
+        if (task.status == V2AsyncDownloadStatus.DOWNLOADING) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(4.dp)
+                    .clip(RoundedCornerShape(50)).background(DSColors.mistGreen),
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(task.progress.toFloat().coerceIn(0f, 1f))
+                        .height(4.dp).background(DSColors.fairway),
                 )
             }
         }
-        Text(
-            task.info.title,
-            style = DSTypography.body,
-            color = DSColors.inkGreen,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            "任务已保留在本机。继续处理会回到下载页，用户可确认下载或取消返还积分。",
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
-        )
-        PrimaryAction("继续处理", enabled = true, onClick = onContinue)
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            when (task.status) {
+                V2AsyncDownloadStatus.DOWNLOADING -> {
+                    AsyncTaskAction(label = "暂停", primary = false, onClick = onPause)
+                }
+                V2AsyncDownloadStatus.PAUSED, V2AsyncDownloadStatus.FAILED -> {
+                    AsyncTaskAction(label = "继续", primary = true, onClick = onResume)
+                }
+                else -> Unit
+            }
+            Spacer(Modifier.weight(1f))
+            if (task.status != V2AsyncDownloadStatus.DOWNLOADING) {
+                AsyncTaskAction(label = "删除", primary = false, destructive = true, onClick = onRemove)
+            }
+        }
     }
+}
+
+@Composable
+private fun AsyncTaskAction(
+    label: String,
+    primary: Boolean,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val tint = if (destructive) DSColors.flagRed else DSColors.fairway
+    Text(
+        label,
+        style = DSTypography.caption.copy(fontWeight = FontWeight.Bold),
+        color = if (primary) Color.White else tint,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (primary) DSColors.fairway else Color.Transparent)
+            .border(1.dp, tint, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    )
 }
 
 @Composable
@@ -783,9 +1261,9 @@ private fun DownloadHistoryLoginRequired(onLogin: () -> Unit) {
             ) {
                 Icon(Icons.AutoMirrored.Filled.Login, null, tint = DSColors.fairway, modifier = Modifier.size(26.dp))
             }
-            Text("登录后查看下载记录", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+            Text("登录后查看异步下载", style = DSTypography.titleMedium, color = DSColors.inkGreen)
             Text(
-                "下载任务和在线视频 Memo 会跟随账号同步，登录后再继续查看。",
+                "后台下载任务按账号隔离保存，登录后再继续查看。",
                 style = DSTypography.caption,
                 color = DSColors.shadowGray,
             )
@@ -798,6 +1276,18 @@ internal enum class DownloadPhase {
     IDLE, FETCHING, READY, CONFIRMING, DOWNLOADING, CANCELLING, COMPLETED
 }
 
+internal enum class OnlineDownloadStartStrategy {
+    VIDEO_INFO_CONFIRMATION,
+    DIRECT_PLAZA_GALLERY,
+}
+
+internal fun onlineDownloadStartStrategy(allowDirectUrlDownload: Boolean): OnlineDownloadStartStrategy =
+    if (allowDirectUrlDownload) {
+        OnlineDownloadStartStrategy.DIRECT_PLAZA_GALLERY
+    } else {
+        OnlineDownloadStartStrategy.VIDEO_INFO_CONFIRMATION
+    }
+
 private val timedDownloadPhases = setOf(
     DownloadPhase.FETCHING,
     DownloadPhase.CONFIRMING,
@@ -808,7 +1298,6 @@ private val timedDownloadPhases = setOf(
 private const val DOWNLOAD_COST_CREDITS = 10
 private const val PENDING_DOWNLOAD_PREFS = "v2_pending_video_download"
 private const val DOWNLOAD_DRAFT_PREFIX = "draft"
-private val ONLINE_MEMO_PLATFORMS = setOf("哔哩哔哩", "YouTube", "小红书")
 
 internal data class PendingDownloadTask(
     val url: String,
@@ -875,7 +1364,7 @@ private fun clearPendingDownloadTask(context: Context, userId: String?) {
 
 private fun pendingDownloadKey(userId: String): String = "pending_$userId"
 
-private fun downloadDraftKey(userId: String?, directMode: Boolean): String =
+internal fun downloadDraftKey(userId: String?, directMode: Boolean): String =
     "$DOWNLOAD_DRAFT_PREFIX:${userId?.takeIf { it.isNotBlank() } ?: "anonymous"}:${if (directMode) "direct" else "normal"}"
 
 internal fun shouldPersistDownloadDraft(
@@ -890,7 +1379,7 @@ internal fun downloadPhaseAfterCancellation(currentPhase: DownloadPhase, hasActi
     return if (hasActiveTask) DownloadPhase.READY else DownloadPhase.IDLE
 }
 
-private fun persistDownloadDraftUrl(context: Context, key: String, url: String) {
+internal fun persistDownloadDraftUrl(context: Context, key: String, url: String) {
     val cleaned = V2OnlineVideoMetadataFetcher.cleanVideoUrl(url)
     context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE).edit {
         if (cleaned.isBlank()) {
@@ -901,16 +1390,47 @@ private fun persistDownloadDraftUrl(context: Context, key: String, url: String) 
     }
 }
 
-private fun restoreDownloadDraftUrl(context: Context, key: String): String? =
+internal fun restoreDownloadDraftUrl(context: Context, key: String): String? =
     context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
         .getString(key, null)
         ?.takeIf { it.isNotBlank() }
 
-private fun clearDownloadDraftUrl(context: Context, key: String) {
+internal fun clearDownloadDraftUrl(context: Context, key: String) {
     context.getSharedPreferences(PENDING_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
         .edit {
             remove(key)
         }
+}
+
+internal fun persistDownloadDraftForHandoff(
+    context: Context,
+    userId: String?,
+    directMode: Boolean,
+    url: String,
+    phase: DownloadPhase,
+    startResult: V2DownloadStartResult?,
+    createdMemoId: UUID?,
+): Boolean {
+    if (!shouldPersistDownloadDraft(phase, startResult, createdMemoId)) return false
+    val cleaned = V2OnlineVideoMetadataFetcher.cleanVideoUrl(url)
+    if (cleaned.isBlank()) return false
+    persistDownloadDraftUrl(context, downloadDraftKey(userId, directMode), cleaned)
+    return true
+}
+
+internal fun restoreDownloadDraftForScope(
+    context: Context,
+    userId: String?,
+    directMode: Boolean,
+): String? {
+    val scopedKey = downloadDraftKey(userId, directMode)
+    restoreDownloadDraftUrl(context, scopedKey)?.let { return it }
+    val accountId = userId?.takeIf { it.isNotBlank() } ?: return null
+    val anonymousKey = downloadDraftKey(userId = null, directMode = directMode)
+    val anonymousDraft = restoreDownloadDraftUrl(context, anonymousKey) ?: return null
+    persistDownloadDraftUrl(context, downloadDraftKey(accountId, directMode), anonymousDraft)
+    clearDownloadDraftUrl(context, anonymousKey)
+    return anonymousDraft
 }
 
 private fun jsonStringOrNull(value: String?): JsonElement =
@@ -921,6 +1441,7 @@ internal data class DownloadVideoInfo(
     val author: String?,
     val thumbnailUrl: String?,
     val durationSec: Double?,
+    val fileSizeBytes: Long?,
     val downloadUrl: String?,
     val playUrl: String?,
     val platform: String?,
@@ -930,6 +1451,7 @@ internal data class DownloadVideoInfo(
         author = author ?: old?.author,
         thumbnailUrl = thumbnailUrl ?: old?.thumbnailUrl,
         durationSec = durationSec ?: old?.durationSec,
+        fileSizeBytes = fileSizeBytes ?: old?.fileSizeBytes,
         downloadUrl = downloadUrl ?: old?.downloadUrl,
         playUrl = playUrl ?: old?.playUrl,
         platform = platform ?: old?.platform,
@@ -955,174 +1477,18 @@ internal data class DownloadVideoInfo(
             )
             val play = findUrl(element, "play_url", "playURL", "onlinePlayURL", "url", "share_url") ?: originalUrl
             val duration = findDuration(element)
+            val fileSize = findNumber(element, "file_size", "fileSize", "filesize", "size_bytes", "content_length")
+                ?.takeIf { it.isFinite() && it >= 0.0 }
+                ?.toLong()
             return DownloadVideoInfo(
                 title = title,
                 author = author,
                 thumbnailUrl = thumb,
                 durationSec = duration,
+                fileSizeBytes = fileSize,
                 downloadUrl = download,
                 playUrl = play,
                 platform = platform,
-            )
-        }
-    }
-}
-
-private data class DownloadStats(
-    val todayCount: Int,
-    val last30DaysCount: Int,
-    val localSavedCount: Int,
-) {
-    companion object {
-        fun from(memos: List<V2Memo>): DownloadStats {
-            val today = LocalDate.now()
-            val windowStart = today.minusDays(29)
-            val downloaded = memos.filter { it.isOnlineDownloadMemo() }
-            return DownloadStats(
-                todayCount = downloaded.count { it.createdAt.toLocalDate() == today },
-                last30DaysCount = downloaded.count {
-                    val date = it.createdAt.toLocalDate()
-                    !date.isBefore(windowStart) && !date.isAfter(today)
-                },
-                localSavedCount = downloaded.count { it.videoUrl?.startsWith("file://") == true },
-            )
-        }
-    }
-}
-
-@Composable
-private fun DownloadHistoryEmpty(onStartDownload: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .v2NavigationBarPadding()
-            .padding(horizontal = DSSpacing.lg)
-            .padding(top = 80.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(22.dp))
-                .background(DSColors.cardWhite)
-                .border(1.dp, DSColors.borderLine, RoundedCornerShape(22.dp))
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(58.dp)
-                    .clip(CircleShape)
-                    .background(DSColors.mistGreen),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.History, null, tint = DSColors.fairway, modifier = Modifier.size(26.dp))
-            }
-            Text("还没有下载记录", style = DSTypography.titleMedium, color = DSColors.inkGreen)
-            Text(
-                "下载完成或添加在线视频后，会在这里集中管理。",
-                style = DSTypography.caption,
-                color = DSColors.shadowGray,
-            )
-            PrimaryAction("去下载视频", enabled = true, onClick = onStartDownload)
-        }
-    }
-}
-
-@Composable
-private fun DownloadHistorySummary(items: List<V2Memo>) {
-    val localCount = items.count { it.videoUrl?.startsWith("file://") == true }
-    val onlineCount = items.size - localCount
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF111827))
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(0.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        DownloadHistoryMetric("全部", items.size.toString(), DSColors.trophyGold, Modifier.weight(1f))
-        CreditDivider()
-        DownloadHistoryMetric("本地", localCount.toString(), Color(0xFF10B981), Modifier.weight(1f))
-        CreditDivider()
-        DownloadHistoryMetric("在线", onlineCount.toString(), Color(0xFF60A5FA), Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun DownloadHistoryMetric(
-    label: String,
-    value: String,
-    tint: Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(value, color = tint, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text(label, color = Color(0xFFCBD5E1), fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun DownloadHistoryRow(memo: V2Memo, onClick: () -> Unit) {
-    val timeFmt = remember { DateTimeFormatter.ofPattern("M月d日 HH:mm") }
-    val source = memo.platform?.takeIf { it.isNotBlank() }
-        ?: memo.trainingMethod?.takeIf { it.isNotBlank() }
-        ?: "在线视频"
-    val isLocal = memo.videoUrl?.startsWith("file://") == true
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(DSColors.cardWhite)
-            .border(1.dp, DSColors.borderLine, RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(width = 88.dp, height = 62.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Brush.linearGradient(listOf(DSColors.deepGreen, DSColors.fairway))),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (!memo.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = memo.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Icon(Icons.Filled.VideoLibrary, null, tint = Color.White.copy(alpha = 0.84f), modifier = Modifier.size(28.dp))
-            }
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(
-                memo.displayTitle ?: memo.title ?: "下载视频",
-                style = DSTypography.bodyBold,
-                color = DSColors.inkGreen,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "$source · ${timeFmt.format(memo.createdAt)}",
-                style = DSTypography.caption,
-                color = DSColors.shadowGray,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                if (isLocal) "本地视频 · 可离线复盘" else "在线视频 · 可直接播放",
-                style = DSTypography.caption,
-                color = if (isLocal) DSColors.fairway else Color(0xFF2563EB),
             )
         }
     }
@@ -1183,11 +1549,18 @@ private suspend fun createOnlineMemo(info: DownloadVideoInfo): UUID? {
 }
 
 @Composable
-private fun DownloadHero(isDirectUrlMode: Boolean) {
+internal fun DownloadHero(isDirectUrlMode: Boolean) {
+    val heroShape = RoundedCornerShape(20.dp)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .shadow(
+                elevation = 20.dp,
+                shape = heroShape,
+                ambientColor = Color.Black.copy(alpha = 0.18f),
+                spotColor = Color.Black.copy(alpha = 0.18f),
+            )
+            .clip(heroShape)
             .height(214.dp),
     ) {
         Image(
@@ -1203,9 +1576,9 @@ private fun DownloadHero(isDirectUrlMode: Boolean) {
                 .background(
                     Brush.linearGradient(
                         listOf(
-                            DSColors.deepGreen.copy(alpha = 0.92f),
-                            DSColors.deepGreen.copy(alpha = 0.58f),
-                            DSColors.fairway.copy(alpha = 0.30f),
+                            DSColors.deepGreen.copy(alpha = 0.88f),
+                            DSColors.deepGreen.copy(alpha = 0.54f),
+                            DSColors.fairway.copy(alpha = 0.34f),
                         ),
                     ),
                 ),
@@ -1216,59 +1589,64 @@ private fun DownloadHero(isDirectUrlMode: Boolean) {
                 .background(
                     Brush.verticalGradient(
                         listOf(
-                            Color.Black.copy(alpha = 0.42f),
+                            Color.Black.copy(alpha = 0.48f),
                             Color.Black.copy(alpha = 0.08f),
-                            Color.Black.copy(alpha = 0.34f),
+                            Color.Black.copy(alpha = 0.36f),
                         ),
                     ),
                 ),
         )
         Icon(
-            Icons.Filled.CloudDownload,
+            Icons.Filled.SportsGolf,
             contentDescription = null,
-            tint = Color.White.copy(alpha = 0.10f),
+            tint = Color.White.copy(alpha = 0.08f),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 10.dp, bottom = 4.dp)
-                .size(92.dp),
+                .offset(x = 10.dp, y = 16.dp)
+                .size(86.dp),
         )
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
+                .padding(DSSpacing.lg),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.26f))
-                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Color.Black),
-                    contentAlignment = Alignment.Center,
+            Row(verticalAlignment = Alignment.Top) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
                 ) {
-                    if (isDirectUrlMode) {
-                        Icon(Icons.Filled.VideoLibrary, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-                    } else {
-                        Text("抖", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.26f))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        if (isDirectUrlMode) {
+                            Icon(
+                                Icons.Filled.Download,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(R.drawable.online_download_douyin_logo),
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
+                                contentScale = ContentScale.Fit,
+                            )
+                        }
+                        Text(
+                            if (isDirectUrlMode) "广场视频保存" else "抖音视频下载",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
-                }
-                Text(
-                    if (isDirectUrlMode) "广场视频保存" else "抖音视频下载",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(
                         if (isDirectUrlMode) "把广场视频留在本地" else "把好内容变成练球笔记素材",
                         color = Color.White,
@@ -1278,7 +1656,7 @@ private fun DownloadHero(isDirectUrlMode: Boolean) {
                     )
                     Text(
                         if (isDirectUrlMode) {
-                            "用于慢放、对比和复盘，确认积分后会自动生成视频 Memo。"
+                            "用于慢放、对比和复盘，下载后会消耗积分。"
                         } else {
                             "支持抖音分享文案、短链和视频页链接，下载后可以直接创建 Memo。"
                         },
@@ -1286,11 +1664,33 @@ private fun DownloadHero(isDirectUrlMode: Boolean) {
                         style = DSTypography.caption,
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    DownloadMetricPill(Icons.Filled.Download, "10 积分/次")
-                    DownloadMetricPill(Icons.Filled.CheckCircle, "确认后扣除")
-                    DownloadMetricPill(Icons.Filled.VideoLibrary, "可建 Memo")
+                Spacer(Modifier.width(16.dp))
+                Box(
+                    modifier = Modifier.size(58.dp).clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isDirectUrlMode) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    } else {
+                        Image(
+                            painter = painterResource(R.drawable.online_download_douyin_logo),
+                            contentDescription = "抖音",
+                            modifier = Modifier.size(30.dp).clip(RoundedCornerShape(7.dp)),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
                 }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                DownloadMetricPill(Icons.Filled.Bolt, "10 积分/次")
+                DownloadMetricPill(Icons.Filled.PhotoLibrary, "保存相册")
+                DownloadMetricPill(Icons.Filled.Description, "可建 Memo")
             }
         }
     }
@@ -1303,240 +1703,96 @@ private fun DownloadMetricPill(
 ) {
     Row(
         modifier = Modifier
-            .height(30.dp)
             .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.24f))
-            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
-            .padding(horizontal = 10.dp),
+            .background(Color.White.copy(alpha = 0.14f))
+            .padding(horizontal = DSSpacing.sm, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-        Text(text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
 @Composable
-private fun CreditCard(
-    balance: Int,
+internal fun CreditCard(
     isLoggedIn: Boolean,
-    refreshing: Boolean,
-    message: String?,
     onLogin: () -> Unit,
-    onRefresh: () -> Unit,
-    onOpenCreditsReset: () -> Unit,
     onOpenCreditsPurchase: () -> Unit,
 ) {
-    val downloads = if (isLoggedIn) balance.coerceAtLeast(0) / DOWNLOAD_COST_CREDITS else 0
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF111827))
-            .border(1.dp, Color(0xFFA855F7).copy(alpha = 0.22f), RoundedCornerShape(18.dp))
+            .downloadCardSurface()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(Icons.Filled.AccountBalanceWallet, null, tint = DSColors.trophyGold, modifier = Modifier.size(22.dp))
-            Text("积分费用", style = DSTypography.bodyBold, color = Color.White)
-            Spacer(modifier = Modifier.weight(1f))
-            Text("确认前可取消返还", style = DSTypography.caption, color = Color(0xFF9CA3AF))
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CreditMetric(value = DOWNLOAD_COST_CREDITS.toString(), label = "积分/次", tint = DSColors.trophyGold, modifier = Modifier.weight(1f))
-            CreditDivider()
-            CreditMetric(
-                value = if (isLoggedIn) balance.toString() else "--",
-                label = if (isLoggedIn) "当前积分" else "未登录",
-                tint = if (balance >= DOWNLOAD_COST_CREDITS) Color(0xFFA855F7) else DSColors.flagRed,
-                modifier = Modifier.weight(1f),
-            )
-            CreditDivider()
-            CreditMetric(
-                value = "约${downloads}个",
-                label = "可下载",
-                tint = if (downloads > 0) Color(0xFF10B981) else DSColors.flagRed,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        when {
-            !isLoggedIn -> CreditActionPanel(
-                title = "登录后使用下载积分",
-                subtitle = "积分冻结、扣除和取消返还都需要账号态。",
-                primaryText = "去登录",
-                secondaryText = null,
-                primaryIcon = Icons.AutoMirrored.Filled.Login,
-                secondaryIcon = Icons.Filled.Refresh,
-                primaryEnabled = true,
-                secondaryEnabled = false,
-                onPrimary = onLogin,
-                onSecondary = {},
-            )
-            balance < DOWNLOAD_COST_CREDITS -> CreditActionPanel(
-                title = "积分不足",
-                subtitle = "当前余额不足 $DOWNLOAD_COST_CREDITS 积分。可先充值；若余额显示异常，再校准本地缓存。",
-                primaryText = "去充值",
-                secondaryText = "校准余额",
-                primaryIcon = Icons.Filled.AccountBalanceWallet,
-                secondaryIcon = Icons.Filled.AccountBalanceWallet,
-                primaryEnabled = true,
-                secondaryEnabled = !refreshing,
-                onPrimary = onOpenCreditsPurchase,
-                onSecondary = onOpenCreditsReset,
-            )
-            else -> CreditActionPanel(
-                title = "积分可用",
-                subtitle = "确认下载前会先冻结积分，取消后自动返还并刷新余额。",
-                primaryText = if (refreshing) "刷新中..." else "刷新积分",
-                secondaryText = null,
-                primaryIcon = Icons.Filled.Refresh,
-                secondaryIcon = Icons.Filled.AccountBalanceWallet,
-                primaryEnabled = !refreshing,
-                secondaryEnabled = false,
-                onPrimary = onRefresh,
-                onSecondary = {},
-            )
-        }
-        message?.let {
-            Text(
-                it,
-                style = DSTypography.caption,
-                color = if (it.contains("失败")) DSColors.flagRed else Color(0xFF10B981),
-            )
-        }
-    }
-}
-
-@Composable
-private fun CreditActionPanel(
-    title: String,
-    subtitle: String,
-    primaryText: String,
-    secondaryText: String?,
-    primaryIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    secondaryIcon: androidx.compose.ui.graphics.vector.ImageVector,
-    primaryEnabled: Boolean,
-    secondaryEnabled: Boolean,
-    onPrimary: () -> Unit,
-    onSecondary: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.08f))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = Color(0xFFCBD5E1), style = DSTypography.caption)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            CreditPillAction(
-                text = primaryText,
-                icon = primaryIcon,
-                enabled = primaryEnabled,
-                prominent = true,
-                onClick = onPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            secondaryText?.let {
-                CreditPillAction(
-                    text = it,
-                    icon = secondaryIcon,
-                    enabled = secondaryEnabled,
-                    prominent = false,
-                    onClick = onSecondary,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CreditPillAction(
-    text: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    enabled: Boolean,
-    prominent: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .height(38.dp)
-            .clip(RoundedCornerShape(50))
-            .background(
-                when {
-                    !enabled -> Color.White.copy(alpha = 0.08f)
-                    prominent -> DSColors.fairway
-                    else -> Color.White.copy(alpha = 0.14f)
-                },
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            icon,
-            null,
-            tint = if (enabled) Color.White else Color(0xFF94A3B8),
-            modifier = Modifier.size(14.dp),
-        )
-        Spacer(Modifier.width(5.dp))
-        Text(
-            text,
-            color = if (enabled) Color.White else Color(0xFF94A3B8),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun PlatformStatusPill() {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color(0xFF10B981).copy(alpha = 0.12f))
-            .border(1.dp, Color(0xFF10B981).copy(alpha = 0.32f), RoundedCornerShape(50))
-            .padding(horizontal = 14.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(6.dp)
+                .size(42.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF10B981)),
-        )
-        Text("目前优先支持抖音平台", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                .background(DSColors.sandBeige),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.CreditCard,
+                contentDescription = null,
+                tint = DSColors.trophyGold,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text("下载积分", style = DSTypography.bodyBold, color = DSColors.inkGreen)
+            Text(
+                "抖音与广场下载均会在确认后扣除积分",
+                style = DSTypography.caption,
+                color = DSColors.shadowGray,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .height(34.dp)
+                .clip(RoundedCornerShape(50))
+                .background(DSColors.fairway)
+                .clickable(onClick = if (isLoggedIn) onOpenCreditsPurchase else onLogin)
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("充值", style = DSTypography.caption, color = Color.White)
+        }
     }
 }
 
+internal enum class DownloadServiceConnectionState {
+    CHECKING,
+    ONLINE,
+    WAITING,
+}
+
 @Composable
-private fun CreditMetric(value: String, label: String, tint: Color, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+internal fun DownloadConnectionBadge(state: DownloadServiceConnectionState) {
+    val online = state == DownloadServiceConnectionState.ONLINE
+    val tint = if (online) DSColors.fairway else DSColors.trophyGold
+    val background = if (online) DSColors.mistGreen else DSColors.sandBeige
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(background)
+            .padding(horizontal = DSSpacing.sm, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Text(value, color = tint, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text(label, color = Color(0xFF9CA3AF), fontSize = 11.sp)
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (online) DSColors.leafGreen else DSColors.trophyGold),
+        )
+        Text(if (online) "服务在线" else "等待检测", color = tint, style = DSTypography.label)
     }
 }
 
@@ -1545,441 +1801,332 @@ private fun CreditDivider() {
     Box(
         modifier = Modifier
             .width(1.dp)
-            .height(36.dp)
-            .background(Color(0xFF374151)),
+            .height(42.dp)
+            .background(DSColors.borderLine),
     )
 }
 
 @Composable
-private fun UrlCard(
+internal fun UrlCard(
     url: String,
     enabled: Boolean,
+    isDirectUrlMode: Boolean,
+    connectionState: DownloadServiceConnectionState = DownloadServiceConnectionState.ONLINE,
     placeholder: String,
+    actionText: String,
+    actionEnabled: Boolean,
     onUrlChange: (String) -> Unit,
     onPaste: () -> Unit,
-    onCopy: () -> Unit,
+    onStart: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(DSColors.cardWhite)
+            .downloadCardSurface()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(Icons.Filled.Link, null, tint = DSColors.fairway, modifier = Modifier.size(18.dp))
-            Text("视频链接", style = DSTypography.bodyBold, color = DSColors.inkGreen)
-        }
-        BasicTextField(
-            value = url,
-            onValueChange = onUrlChange,
-            enabled = enabled,
-            textStyle = DSTypography.body.copy(color = DSColors.inkGreen),
-            cursorBrush = SolidColor(DSColors.fairway),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(88.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(DSColors.sandBeige.copy(alpha = 0.55f))
-                .padding(12.dp),
-            decorationBox = { inner ->
-                if (url.isBlank()) Text(placeholder, style = DSTypography.body, color = DSColors.shadowGray)
-                inner()
-            },
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SmallActionButton("粘贴", Icons.Filled.ContentPaste, onPaste)
-            SmallActionButton("复制", Icons.Filled.Link, onCopy)
-        }
-    }
-}
-
-@Composable
-private fun DirectDownloadSourceSection() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(DSColors.cardWhite)
-            .border(1.dp, DSColors.borderLine, RoundedCornerShape(20.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text("广场视频保存", style = DSTypography.bodyBold, color = DSColors.inkGreen)
-        SupportedDownloadRow(
-            icon = Icons.Filled.VideoLibrary,
-            title = "来自视频广场",
-            subtitle = "使用当前播放地址进入本地保存流程",
-        )
-        SupportedDownloadRow(
-            icon = Icons.Filled.CheckCircle,
-            title = "确认后扣除积分",
-            subtitle = "保存前仍会先识别信息并等待确认",
-        )
-    }
-}
-
-@Composable
-private fun PlatformSupportSection() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(DSColors.cardWhite)
-            .border(1.dp, DSColors.borderLine, RoundedCornerShape(20.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text("平台支持状态", style = DSTypography.bodyBold, color = DSColors.inkGreen)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            PlatformSupportBadge("抖音", "可下载", Color(0xFF111827), active = true)
-            PlatformSupportBadge("哔哩哔哩", "在线 Memo", Color(0xFF00A1D6))
-            PlatformSupportBadge("小红书", "在线 Memo", Color(0xFFFF2442))
-            PlatformSupportBadge("YouTube", "在线 Memo", Color(0xFFFF0000))
-        }
-        Text(
-            "抖音支持下载到本地并生成 Memo；其他平台可先添加为在线视频 Memo，无需扣下载积分。",
-            style = DSTypography.caption,
-            color = DSColors.shadowGray,
-        )
-    }
-}
-
-@Composable
-private fun OnlineMemoFallbackCard(
-    platform: String,
-    onOpenOnlineMemo: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFEFF6FF))
-            .border(1.dp, Color(0xFFBFDBFE), RoundedCornerShape(18.dp))
-            .clickable(onClick = onOpenOnlineMemo)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF2563EB).copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.VideoLibrary, null, tint = Color(0xFF2563EB), modifier = Modifier.size(21.dp))
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text("$platform 链接建议添加为在线视频", style = DSTypography.bodyBold, color = DSColors.inkGreen)
-            Text("无需扣下载积分，进入 Memo 后可直接观看和复盘。", style = DSTypography.caption, color = DSColors.shadowGray)
-        }
-        Text(
-            "去添加",
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(Color(0xFF2563EB))
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-        )
-    }
-}
-
-@Composable
-private fun PlatformSupportBadge(
-    name: String,
-    label: String,
-    color: Color,
-    active: Boolean = false,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(color.copy(alpha = 0.12f))
-                .border(1.dp, color.copy(alpha = 0.25f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(name.first().toString(), color = color.copy(alpha = 0.65f), fontWeight = FontWeight.Bold)
-        }
-        Text(name, style = DSTypography.caption, color = DSColors.shadowGray)
-        Text(
-            label,
-            color = if (active) Color.White else Color(0xFF2563EB),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(if (active) DSColors.fairway else Color(0xFFEFF6FF))
-                .padding(horizontal = 8.dp, vertical = 3.dp),
-        )
-    }
-}
-
-@Composable
-private fun DirectOnlineMemoFallbackCard(
-    hasError: Boolean,
-    onOpenOnlineMemo: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (hasError) Color(0xFFFFFBEB) else Color(0xFFEFF6FF))
-            .border(
-                1.dp,
-                if (hasError) Color(0xFFFDE68A) else Color(0xFFBFDBFE),
-                RoundedCornerShape(18.dp),
-            )
-            .clickable(onClick = onOpenOnlineMemo)
-            .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background((if (hasError) DSColors.trophyGold else Color(0xFF2563EB)).copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Filled.VideoLibrary,
-                null,
-                tint = if (hasError) DSColors.trophyGold else Color(0xFF2563EB),
-                modifier = Modifier.size(21.dp),
-            )
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                if (hasError) "下载失败时先存为在线视频" else "也可先存为在线视频 Memo",
+                if (isDirectUrlMode) "视频地址" else "抖音链接",
                 style = DSTypography.bodyBold,
                 color = DSColors.inkGreen,
             )
-            Text(
-                "不扣下载积分，仍可进入视频 Memo 播放、复盘和关联目标。",
-                style = DSTypography.caption,
-                color = DSColors.shadowGray,
+            Spacer(Modifier.weight(1f))
+            DownloadConnectionBadge(connectionState)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("online-download-url-input")
+                .height(116.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(DSColors.listMutedBg),
+        ) {
+            BasicTextField(
+                value = url,
+                onValueChange = onUrlChange,
+                enabled = enabled,
+                textStyle = DSTypography.body.copy(color = DSColors.inkGreen),
+                cursorBrush = SolidColor(DSColors.fairway),
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                decorationBox = { inner ->
+                    if (url.isBlank()) Text(placeholder, style = DSTypography.body, color = DSColors.shadowGray)
+                    inner()
+                },
             )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+        ) {
+            DownloadInputAction(
+                text = "粘贴",
+                icon = Icons.Filled.ContentPaste,
+                prominent = false,
+                enabled = enabled,
+                onClick = onPaste,
+                modifier = Modifier.weight(1f),
+            )
+            DownloadInputAction(
+                text = actionText,
+                icon = Icons.Filled.DownloadForOffline,
+                prominent = true,
+                enabled = actionEnabled,
+                onClick = onStart,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadInputAction(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    prominent: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .height(46.dp)
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (prominent) {
+                    Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen))
+                } else {
+                    Brush.linearGradient(listOf(DSColors.mistGreen, DSColors.mistGreen))
+                },
+            )
+            .alpha(if (enabled) 1f else 0.55f)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (prominent) Color.White else DSColors.fairway,
+            modifier = Modifier.size(17.dp),
+        )
+        Spacer(Modifier.width(6.dp))
         Text(
-            "去保存",
-            color = Color.White,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(if (hasError) DSColors.trophyGold else Color(0xFF2563EB))
-                .padding(horizontal = 12.dp, vertical = 7.dp),
+            text,
+            color = if (prominent) Color.White else DSColors.fairway,
+            style = DSTypography.bodyBold,
+            maxLines = 1,
         )
     }
 }
 
 @Composable
-private fun VideoInfoCard(info: DownloadVideoInfo?, costCredits: Int, platform: String?) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(DSColors.cardWhite)
-            .padding(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+internal fun DownloadSuccessDialog(
+    platform: String,
+    costCredits: Int?,
+    isOnlineMemo: Boolean,
+    showCreateMemoButton: Boolean,
+    onOpenMemo: () -> Unit,
+    onContinue: () -> Unit,
+) {
+    val costText = costCredits?.takeIf { it > 0 }?.let { "，并消耗 $it 积分" }.orEmpty()
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Box(
             modifier = Modifier
-                .size(width = 112.dp, height = 78.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Brush.linearGradient(listOf(DSColors.deepGreen, DSColors.fairway))),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.28f))
+                .padding(horizontal = DSSpacing.lg),
             contentAlignment = Alignment.Center,
         ) {
-            if (!info?.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = info?.thumbnailUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Icon(Icons.Filled.VideoLibrary, null, tint = Color.White.copy(alpha = 0.82f), modifier = Modifier.size(30.dp))
+            Column(
+                modifier = Modifier
+                    .testTag("download-success-dialog")
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.24f),
+                        spotColor = Color.Black.copy(alpha = 0.24f),
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DSColors.cardWhite)
+                    .border(1.dp, DSColors.borderLine, RoundedCornerShape(24.dp))
+                    .padding(DSSpacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(DSColors.leafGreen.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = DSColors.leafGreen,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+                ) {
+                    Text("下载完成", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+                    val savedObject = if (isOnlineMemo) "保存为在线视频 Memo" else "保存视频"
+                    Text(
+                        "已从 $platform $savedObject$costText。",
+                        style = DSTypography.body,
+                        color = DSColors.shadowGray,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
+                    if (showCreateMemoButton) {
+                        Box(Modifier.fillMaxWidth().testTag("download-success-create-memo")) {
+                            PrimaryAction("创建练球 Memo", enabled = true, onClick = onOpenMemo)
+                        }
+                        Box(Modifier.fillMaxWidth().testTag("download-success-continue")) {
+                            VideoInfoConfirmSecondaryAction("继续下载", onContinue)
+                        }
+                    } else {
+                        Box(Modifier.fillMaxWidth().testTag("download-success-complete")) {
+                            PrimaryAction("完成", enabled = true, onClick = onContinue)
+                        }
+                    }
+                }
             }
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(info?.title ?: "已识别视频", style = DSTypography.bodyBold, color = DSColors.inkGreen, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${platform ?: info?.platform ?: "视频平台"} · $costCredits 积分", style = DSTypography.caption, color = DSColors.shadowGray)
-            Text("确认后开始下载，完成后自动写入 Memo。", style = DSTypography.caption, color = DSColors.fairway)
         }
     }
 }
 
 @Composable
-private fun DownloadSuccessDialog(
-    platform: String,
-    costCredits: Int?,
-    isOnlineMemo: Boolean,
-    onOpenMemo: () -> Unit,
-    onContinue: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val costText = costCredits?.takeIf { it > 0 }?.let { "，消耗 $it 积分" }.orEmpty()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(DSColors.mistGreen),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(24.dp))
-                }
-                Text("已创建视频 Memo", color = DSColors.inkGreen, fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "已从 $platform ${if (isOnlineMemo) "保存为在线视频 Memo" else "保存视频"}$costText。",
-                    style = DSTypography.body,
-                    color = DSColors.inkGreen,
-                )
-                Text(
-                    "现在可以先补充标题、备注、标签和目标，再进入 Memo 慢放和对比；也可以继续粘贴下一个视频链接。",
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onOpenMemo) {
-                Text("补充 Memo", color = DSColors.fairway, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onContinue) {
-                Text("继续下载", color = DSColors.shadowGray, fontWeight = FontWeight.Medium)
-            }
-        },
-    )
-}
-
-@Composable
-private fun PhaseCard(
+internal fun PhaseCard(
     phase: DownloadPhase,
     progress: Double,
     elapsedSeconds: Int,
     error: String?,
     note: String?,
+    isDirectUrlMode: Boolean,
+    displayedUrl: String = "",
 ) {
-    val (icon, title, subtitle, tint) = when (phase) {
-        DownloadPhase.IDLE -> arrayOf(Icons.Filled.Download, "等待链接", "先获取视频信息，再确认下载。", DSColors.shadowGray)
-        DownloadPhase.FETCHING -> arrayOf(Icons.Filled.CloudDownload, "正在获取信息", "正在请求下载服务...", DSColors.fairway)
-        DownloadPhase.READY -> arrayOf(Icons.Filled.CheckCircle, "可确认下载", "积分已冻结，取消会返还。", DSColors.fairway)
-        DownloadPhase.CONFIRMING -> arrayOf(Icons.Filled.CloudDownload, "正在确认", "确认扣除积分并获取下载链接。", DSColors.fairway)
-        DownloadPhase.DOWNLOADING -> arrayOf(Icons.Filled.Download, "正在下载", "请保持页面打开。", DSColors.fairway)
-        DownloadPhase.CANCELLING -> arrayOf(Icons.Filled.CloudDownload, "正在取消", "正在返还冻结积分。", DSColors.shadowGray)
-        DownloadPhase.COMPLETED -> arrayOf(Icons.Filled.CheckCircle, "已创建 Memo", "视频素材已经进入视频笔记。", DSColors.fairway)
+    if (phase == DownloadPhase.IDLE && error == null && note == null) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .downloadCardSurface()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(DSColors.sandBeige),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.AutoAwesome, null, tint = DSColors.trophyGold, modifier = Modifier.size(18.dp))
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("开始前会先识别视频信息", style = DSTypography.bodyBold, color = DSColors.inkGreen)
+                Text("确认标题、大小和积分后再下载，避免误扣。", style = DSTypography.caption, color = DSColors.shadowGray)
+            }
+        }
+        return
     }
-    Row(
+    val (title, subtitle, tint) = when (phase) {
+        DownloadPhase.IDLE -> arrayOf("操作失败", error ?: note ?: "请检查后重试。", DSColors.flagRed)
+        DownloadPhase.FETCHING -> arrayOf("正在获取信息", "正在请求下载服务...", DSColors.fairway)
+        DownloadPhase.READY -> arrayOf("可确认下载", "积分已冻结，取消会返还。", DSColors.fairway)
+        DownloadPhase.CONFIRMING -> arrayOf("正在确认", "确认扣除积分并获取下载链接。", DSColors.fairway)
+        DownloadPhase.DOWNLOADING -> arrayOf("正在下载", "请保持页面打开。", DSColors.fairway)
+        DownloadPhase.CANCELLING -> arrayOf("正在取消", "正在返还冻结积分。", DSColors.shadowGray)
+        DownloadPhase.COMPLETED -> if (isDirectUrlMode) {
+            arrayOf("已保存到相册", "视频已经保存到系统相册。", DSColors.fairway)
+        } else {
+            arrayOf("已创建 Memo", "视频素材已经进入视频笔记。", DSColors.fairway)
+        }
+    }
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(DSColors.cardWhite)
+            .downloadCardSurface()
             .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(if (error == null) icon as androidx.compose.ui.graphics.vector.ImageVector else Icons.Filled.ErrorOutline, null, tint = if (error == null) tint as Color else DSColors.flagRed)
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(if (error == null) title as String else "操作失败", style = DSTypography.bodyBold, color = DSColors.inkGreen)
-            Text(
-                error ?: note ?: subtitle as String,
-                style = DSTypography.caption,
-                color = when {
-                    error != null -> DSColors.flagRed
-                    note != null -> DSColors.fairway
-                    else -> DSColors.shadowGray
-                },
-            )
-            if (phase == DownloadPhase.DOWNLOADING) {
-                LinearProgressIndicator(
-                    progress = { progress.toFloat().coerceIn(0f, 1f) },
-                    color = DSColors.fairway,
-                    trackColor = DSColors.mistGreen,
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)),
-                )
-            }
-            if (phase in timedDownloadPhases) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (error == null) title as String else "操作失败", style = DSTypography.bodyBold, color = DSColors.inkGreen)
                 Text(
-                    activeDownloadStatusText(phase, progress, elapsedSeconds),
+                    error ?: displayedUrl.takeIf {
+                        it.isNotBlank() && phase != DownloadPhase.IDLE && phase != DownloadPhase.COMPLETED
+                    } ?: note ?: subtitle as String,
                     style = DSTypography.caption,
-                    color = DSColors.fairway,
-                    maxLines = 1,
+                    color = if (error != null) DSColors.flagRed else DSColors.shadowGray,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            Text(
+                "${(progress * 100).toInt().coerceIn(0, 100)}%",
+                color = if (error == null) tint as Color else DSColors.flagRed,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
-        if (phase == DownloadPhase.FETCHING || phase == DownloadPhase.CONFIRMING || phase == DownloadPhase.CANCELLING) {
-            CircularProgressIndicator(color = DSColors.fairway, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+        LinearProgressIndicator(
+            progress = { progress.toFloat().coerceIn(0f, 1f) },
+            color = DSColors.fairway,
+            trackColor = DSColors.mistGreen,
+            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)),
+        )
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("◷ ${elapsedSeconds.coerceAtLeast(0)}s", style = DSTypography.label, color = DSColors.shadowGray)
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (phase == DownloadPhase.CANCELLING) "正在取消" else if (error != null) "需要处理" else "进行中",
+                style = DSTypography.label,
+                color = DSColors.shadowGray,
+            )
         }
-    }
-}
-
-private fun activeDownloadStatusText(phase: DownloadPhase, progress: Double, elapsedSeconds: Int): String {
-    val time = "${elapsedSeconds.coerceAtLeast(0)}s"
-    return when (phase) {
-        DownloadPhase.DOWNLOADING -> "下载进度 ${(progress * 100).toInt().coerceIn(0, 100)}% · $time · 进行中"
-        DownloadPhase.FETCHING -> "已用 $time · 正在识别"
-        DownloadPhase.CONFIRMING -> "已用 $time · 正在确认"
-        DownloadPhase.CANCELLING -> "已用 $time · 正在取消"
-        else -> ""
     }
 }
 
 @Composable
-private fun TodaySummaryCard(stats: DownloadStats) {
+internal fun TodaySummaryCard(stats: V2DownloadStatisticsSnapshot) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(DSColors.cardWhite)
-            .border(1.dp, DSColors.borderLine, RoundedCornerShape(18.dp))
+            .downloadCardSurface()
             .padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         DownloadStatCell(
             title = "今日下载",
-            value = stats.todayCount.toString(),
+            value = stats.todayDownloadCount.toString(),
             subtitle = "次",
             modifier = Modifier.weight(1f),
         )
         CreditDivider()
         DownloadStatCell(
             title = "近 30 天",
-            value = stats.last30DaysCount.toString(),
+            value = stats.last30DaysDownloadCount.toString(),
             subtitle = "次",
             modifier = Modifier.weight(1f),
         )
         CreditDivider()
         DownloadStatCell(
-            title = "本地保存",
-            value = stats.localSavedCount.toString(),
-            subtitle = "条",
+            title = "累计大小",
+            value = stats.formattedTotalSize,
+            subtitle = "",
             modifier = Modifier.weight(1f),
         )
     }
@@ -2012,40 +2159,34 @@ private fun DownloadStatCell(
 }
 
 @Composable
-private fun SupportedDownloadCard(isDirectUrlMode: Boolean) {
+internal fun SupportedDownloadCard() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(DSColors.cardWhite)
-            .border(1.dp, DSColors.borderLine, RoundedCornerShape(18.dp))
+            .downloadCardSurface()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("当前可用能力", style = DSTypography.bodyBold, color = DSColors.inkGreen)
+        Text("可接触页面", style = DSTypography.bodyBold, color = DSColors.inkGreen)
         SupportedDownloadRow(
-            icon = Icons.Filled.CloudDownload,
-            title = if (isDirectUrlMode) "广场视频保存" else "抖音视频下载",
-            subtitle = if (isDirectUrlMode) {
-                "从广场播放页进入本地保存和 Memo 创建流程"
-            } else {
-                "主流程支持识别、确认、下载和创建 Memo"
-            },
+            icon = Icons.Filled.MusicNote,
+            title = "抖音视频下载",
+            subtitle = "主流程支持直接下载",
+        )
+        SupportedDownloadRow(
+            icon = Icons.Filled.History,
+            title = "异步下载管理",
+            subtitle = "大文件可放到后台队列",
         )
         SupportedDownloadRow(
             icon = Icons.Filled.CheckCircle,
             title = "视频信息确认",
-            subtitle = "确认标题、积分和视频源后再扣除积分",
+            subtitle = "确认大小、积分和标题后再下载",
         )
         SupportedDownloadRow(
-            icon = Icons.Filled.VideoLibrary,
-            title = "素材复盘",
-            subtitle = "完成后进入视频 Memo，可继续慢放和记录",
-        )
-        SupportedDownloadRow(
-            icon = Icons.Filled.AccountBalanceWallet,
-            title = "积分保护",
-            subtitle = "确认前冻结，取消后刷新余额并恢复状态",
+            icon = Icons.Filled.ShoppingBag,
+            title = "积分充值",
+            subtitle = "仍沿用现有充值页",
         )
     }
 }
@@ -2083,52 +2224,36 @@ private fun FooterNote() {
         text = "下载内容仅用于个人学习与练球复盘，请尊重原作者权益。",
         style = DSTypography.caption,
         color = DSColors.shadowGray,
+        textAlign = TextAlign.Center,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 2.dp, bottom = 16.dp),
+            .padding(top = DSSpacing.sm, bottom = 16.dp),
     )
 }
 
+private fun Modifier.downloadCardSurface(): Modifier {
+    val shape = RoundedCornerShape(14.dp)
+    return shadow(
+        elevation = 8.dp,
+        shape = shape,
+        ambientColor = Color.Black.copy(alpha = 0.06f),
+        spotColor = Color.Black.copy(alpha = 0.06f),
+    )
+        .clip(shape)
+        .background(DSColors.cardWhite)
+        .border(1.dp, DSColors.borderLine, shape)
+}
+
 @Composable
-private fun ActionRow(
-    phase: DownloadPhase,
-    canStart: Boolean,
-    startActionText: String,
-    onlineMemoActionText: String?,
-    startDisabledReason: String?,
-    canConfirm: Boolean,
-    createdMemoId: UUID?,
-    onStart: () -> Unit,
-    onCancel: () -> Unit,
-    onConfirm: () -> Unit,
-    onOpenMemo: () -> Unit,
-    onOpenOnlineMemo: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        when (phase) {
-            DownloadPhase.IDLE -> {
-                if (onlineMemoActionText != null) {
-                    PrimaryAction(onlineMemoActionText, enabled = true, onClick = onOpenOnlineMemo)
-                } else {
-                    PrimaryAction(startActionText, enabled = canStart, onClick = onStart)
-                }
-                startDisabledReason?.let {
-                    Text(
-                        it,
-                        style = DSTypography.caption,
-                        color = if (it.contains("积分") || it.contains("登录")) DSColors.flagRed else DSColors.shadowGray,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-            DownloadPhase.READY -> {
-                PrimaryAction("确认下载并创建 Memo", enabled = canConfirm, onClick = onConfirm)
-                SecondaryAction("取消并返还冻结积分", onClick = onCancel)
-            }
-            DownloadPhase.COMPLETED -> PrimaryAction("补充刚创建的 Memo", enabled = createdMemoId != null, onClick = onOpenMemo)
-            else -> PrimaryAction("处理中...", enabled = false)
-        }
-    }
+internal fun DownloadFailureDialog(message: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("提示") },
+        text = { Text(message) },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("知道了") }
+        },
+    )
 }
 
 @Composable
@@ -2159,22 +2284,6 @@ private fun SecondaryAction(text: String, onClick: () -> Unit) {
     }
 }
 
-@Composable
-private fun SmallActionButton(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(DSColors.mistGreen)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        Icon(icon, null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
-        Text(label, style = DSTypography.caption, color = DSColors.fairway)
-    }
-}
-
 internal fun downloadErrorMessage(base: String, debugDetail: String?): String {
     return downloadErrorMessage(base, debugDetail, ServiceLocator.isDebuggable)
 }
@@ -2194,58 +2303,222 @@ internal fun <T> downloadResultFailure(error: Throwable): Result<T> {
     return Result.failure(error)
 }
 
-private const val ASYNC_DOWNLOAD_TIP_MIN_DURATION_SEC = 180.0
+private const val ASYNC_DOWNLOAD_TIP_MIN_FILE_SIZE_BYTES = 10L * 1024L * 1024L
 
-private fun shouldSuggestAsyncDownload(
+internal fun shouldSuggestAsyncDownload(
     info: DownloadVideoInfo?,
     jobId: String,
     acceptedJobId: String?,
 ): Boolean =
-    acceptedJobId != jobId && (info?.durationSec ?: 0.0) >= ASYNC_DOWNLOAD_TIP_MIN_DURATION_SEC
+    acceptedJobId != jobId && (info?.fileSizeBytes ?: 0L) >= ASYNC_DOWNLOAD_TIP_MIN_FILE_SIZE_BYTES
 
-private fun formatDownloadDuration(durationSec: Double?): String {
-    val total = durationSec?.toInt()?.coerceAtLeast(0) ?: return "时长较长"
-    val minutes = total / 60
-    val seconds = total % 60
-    return if (minutes > 0) "${minutes}分${seconds.toString().padStart(2, '0')}秒" else "${seconds}秒"
+internal fun formatAsyncDownloadFileSize(fileSizeBytes: Long?): String =
+    "${((fileSizeBytes ?: 0L).coerceAtLeast(1L) / (1024L * 1024L)).coerceAtLeast(1L)}MB"
+
+internal fun formatVideoInfoConfirmSize(fileSizeBytes: Long?): String {
+    val bytes = fileSizeBytes ?: 0L
+    return if (bytes <= 0L) "待确认" else String.format("%.1fMB", bytes.toDouble() / 1024.0 / 1024.0)
+}
+
+internal fun formatVideoInfoConfirmDuration(durationSeconds: Double?): String {
+    val total = durationSeconds?.toInt() ?: 0
+    return if (total <= 0) "待确认" else "%d:%02d".format(total / 60, total % 60)
 }
 
 @Composable
-private fun AsyncDownloadTipDialog(
+internal fun VideoInfoConfirmDialog(
+    platform: String,
     info: DownloadVideoInfo?,
-    onLater: () -> Unit,
-    onContinue: () -> Unit,
+    creditsCost: Int,
+    onConfirm: () -> Unit,
+    onAsyncDownload: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("异步下载建议", color = DSColors.inkGreen, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "这个视频${formatDownloadDuration(info?.durationSec)}，下载可能需要更久。",
-                    style = DSTypography.body,
-                    color = DSColors.inkGreen,
-                )
-                Text(
-                    "Android 会保留当前待确认任务；你可以稍后回到视频下载继续确认，或留在当前页直接开始下载。",
-                    style = DSTypography.caption,
-                    color = DSColors.shadowGray,
-                )
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.28f))
+                .padding(horizontal = DSSpacing.lg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .testTag("video-info-confirm-dialog")
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.24f),
+                        spotColor = Color.Black.copy(alpha = 0.24f),
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DSColors.cardWhite)
+                    .border(1.dp, DSColors.borderLine, RoundedCornerShape(24.dp))
+                    .padding(DSSpacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(DSColors.fairway.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = DSColors.fairway,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+                ) {
+                    Text("确认下载", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+                    Text(
+                        info?.title?.takeIf(String::isNotBlank) ?: "未命名视频",
+                        style = DSTypography.bodyBold,
+                        color = DSColors.inkGreen,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
+                    VideoInfoConfirmRow("平台", platform.ifBlank { "待确认" })
+                    VideoInfoConfirmRow("大小", formatVideoInfoConfirmSize(info?.fileSizeBytes))
+                    VideoInfoConfirmRow("时长", formatVideoInfoConfirmDuration(info?.durationSec))
+                    VideoInfoConfirmRow("积分", "$creditsCost 积分")
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
+                    Box(Modifier.fillMaxWidth().testTag("video-info-confirm-primary")) {
+                        PrimaryAction("确认下载", enabled = true, onClick = onConfirm)
+                    }
+                    Box(Modifier.fillMaxWidth().testTag("video-info-confirm-async")) {
+                        VideoInfoConfirmSecondaryAction("异步下载", onAsyncDownload)
+                    }
+                    Box(Modifier.fillMaxWidth().testTag("video-info-confirm-cancel")) {
+                        SecondaryAction("取消", onCancel)
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onContinue) {
-                Text("继续当前下载", color = DSColors.fairway, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun VideoInfoConfirmRow(title: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(DSColors.listMutedBg)
+            .padding(horizontal = DSSpacing.md, vertical = DSSpacing.sm),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = DSTypography.caption, color = DSColors.shadowGray)
+        Text(value, style = DSTypography.bodyBold, color = DSColors.inkGreen)
+    }
+}
+
+@Composable
+private fun VideoInfoConfirmSecondaryAction(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(50))
+            .background(DSColors.mistGreen)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = DSColors.fairway, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+internal fun AsyncDownloadTipDialog(
+    info: DownloadVideoInfo?,
+    onAsyncDownload: () -> Unit,
+    onContinueDownload: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = {},
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.28f))
+                .padding(horizontal = DSSpacing.lg),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .testTag("async-download-tip-dialog")
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 18.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.24f),
+                        spotColor = Color.Black.copy(alpha = 0.24f),
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DSColors.cardWhite)
+                    .border(1.dp, DSColors.borderLine, RoundedCornerShape(24.dp))
+                    .padding(DSSpacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.lg),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(DSColors.fairway.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.CloudDownload,
+                        contentDescription = null,
+                        tint = DSColors.fairway,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
+                ) {
+                    Text("检测到大文件", style = DSTypography.titleMedium, color = DSColors.inkGreen)
+                    Text(
+                        "视频约 ${formatAsyncDownloadFileSize(info?.fileSizeBytes)}。可以放入后台任务，也可以继续等待当前下载完成。",
+                        style = DSTypography.body,
+                        color = DSColors.shadowGray,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
+                    Box(Modifier.fillMaxWidth().testTag("async-download-tip-background")) {
+                        PrimaryAction("异步下载", enabled = true, onClick = onAsyncDownload)
+                    }
+                    Box(Modifier.fillMaxWidth().testTag("async-download-tip-foreground")) {
+                        VideoInfoConfirmSecondaryAction("继续当前下载", onContinueDownload)
+                    }
+                    Box(Modifier.fillMaxWidth().testTag("async-download-tip-cancel")) {
+                        SecondaryAction("取消", onCancel)
+                    }
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onLater) {
-                Text("稍后处理", color = DSColors.shadowGray, fontWeight = FontWeight.Medium)
-            }
-        },
-        containerColor = DSColors.cardWhite,
-    )
+        }
+    }
 }
 
 private fun Context.readClipboardText(): String? = runCatching {
@@ -2258,11 +2531,6 @@ private fun Context.readClipboardText(): String? = runCatching {
         ?.trim()
         ?.takeIf { it.isNotBlank() }
 }.getOrNull()
-
-private fun Context.copyTextToClipboard(label: String, text: String): Boolean = runCatching {
-    val clip = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clip.setPrimaryClip(ClipData.newPlainText(label, text))
-}.isSuccess
 
 private fun findDuration(element: JsonElement?): Double? {
     val raw = findNumber(element, "duration", "duration_ms", "durationMs", "video_duration")
@@ -2287,9 +2555,6 @@ private fun findNumber(element: JsonElement?, vararg keys: String): Double? {
 
 private fun findUrl(element: JsonElement?, vararg keys: String): String? =
     findString(element, *keys)?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-
-private fun String.isHttpUrl(): Boolean =
-    startsWith("http://", ignoreCase = true) || startsWith("https://", ignoreCase = true)
 
 private fun findString(element: JsonElement?, vararg keys: String): String? {
     when (element) {

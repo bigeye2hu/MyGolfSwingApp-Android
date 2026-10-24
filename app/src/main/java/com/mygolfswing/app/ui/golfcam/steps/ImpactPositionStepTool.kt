@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.TouchApp
@@ -15,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -33,6 +35,7 @@ internal const val IMPACT_POSITION_TOOL_TITLE_FONT_SP = 13
 internal const val IMPACT_POSITION_HINT_ICON_SIZE_DP = 14
 internal const val IMPACT_POSITION_HINT_SPACING_DP = 8
 internal const val IMPACT_POSITION_HINT_FONT_SP = 12
+internal const val IMPACT_POSITION_STEP_TOOL_PANEL_HEIGHT_DP = 72
 
 internal fun formatImpactPositionPercent(value: Float): String {
     val safeValue = value.takeIf { it.isFinite() }?.coerceIn(0f, 100f) ?: 50f
@@ -50,7 +53,12 @@ fun ImpactPositionStepTool(state: GolfCamWorkflowState = GolfCamWorkflowState())
     val yPct = (pos?.normalizedY ?: 0.5f) * 100f
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(top = 8.dp, bottom = 8.dp)
+            .testTag("golfcam-impact-position-tool"),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(IMPACT_POSITION_TOOL_VERTICAL_SPACING_DP.dp),
     ) {
         // ── 坐标信息行：X | 击球点 | Y ──
@@ -107,7 +115,6 @@ fun ImpactPositionStepTool(state: GolfCamWorkflowState = GolfCamWorkflowState())
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(IMPACT_POSITION_HINT_SPACING_DP.dp),
-            modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(
                 Icons.Filled.TouchApp,

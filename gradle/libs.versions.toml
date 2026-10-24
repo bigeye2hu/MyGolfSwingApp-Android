@@ -23,6 +23,8 @@ datastore = "1.1.1"
 camerax = "1.6.1"
 zxing = "3.5.4"
 billing = "9.1.0"
+work = "2.11.2"
+tencentIm = "9.1.7818"
 mlKitPose = "18.0.0-beta5"
 
 [libraries]
@@ -65,6 +67,8 @@ okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor",
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 google-play-billing = { group = "com.android.billingclient", name = "billing", version.ref = "billing" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+tencent-imsdk-plus = { group = "com.tencent.imsdk", name = "imsdk-plus", version.ref = "tencentIm" }
 google-mlkit-pose-detection = { group = "com.google.mlkit", name = "pose-detection", version.ref = "mlKitPose" }
 
 [plugins]

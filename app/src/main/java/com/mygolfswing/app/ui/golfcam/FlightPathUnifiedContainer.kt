@@ -23,11 +23,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Close
@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -77,11 +78,16 @@ import com.mygolfswing.app.ui.golfcam.model.LandingOutput
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.steps.FlightCurveStepTool
+import com.mygolfswing.app.ui.golfcam.steps.FLIGHT_CURVE_STEP_TOOL_PANEL_HEIGHT_DP
 import com.mygolfswing.app.ui.golfcam.steps.GolfCamThumbnailCache
 import com.mygolfswing.app.ui.golfcam.steps.ImpactFrameStepTool
+import com.mygolfswing.app.ui.golfcam.steps.IMPACT_FRAME_STEP_TOOL_PANEL_HEIGHT_DP
 import com.mygolfswing.app.ui.golfcam.steps.ImpactPositionStepTool
+import com.mygolfswing.app.ui.golfcam.steps.IMPACT_POSITION_STEP_TOOL_PANEL_HEIGHT_DP
 import com.mygolfswing.app.ui.golfcam.steps.LandingStepTool
+import com.mygolfswing.app.ui.golfcam.steps.LANDING_STEP_TOOL_PANEL_HEIGHT_DP
 import com.mygolfswing.app.ui.golfcam.steps.TrackStyleStepTool
+import com.mygolfswing.app.ui.golfcam.steps.TRACK_STYLE_STEP_TOOL_PANEL_HEIGHT_DP
 import com.mygolfswing.app.ui.golfcam.steps.TrimStepTool
 import com.mygolfswing.app.ui.golfcam.steps.golfCamThumbnailPrioritySampleTimeMs
 import com.mygolfswing.app.ui.golfcam.steps.golfCamTrimImpactPreloadProgressFraction
@@ -90,6 +96,8 @@ import com.mygolfswing.app.ui.golfcam.steps.landingSeekTimeMs
 import com.mygolfswing.app.ui.golfcam.steps.landingOutputForPositionChange
 import com.mygolfswing.app.ui.golfcam.steps.landingOutputForTimeChange
 import com.mygolfswing.app.ui.golfcam.steps.shouldWaitForTrimImpactThumbnailPreload
+import com.mygolfswing.app.ui.golfcam.steps.validImpactCandidateFramesForTrimRange
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -103,15 +111,39 @@ internal data class ImpactCandidateDetectionKey(
 internal const val THUMBNAIL_PRELOAD_OVERLAY_BACKGROUND_ALPHA = 0.70f
 internal const val THUMBNAIL_PRELOAD_OVERLAY_CARD_CORNER_DP = 20
 internal const val THUMBNAIL_PRELOAD_OVERLAY_CARD_HORIZONTAL_PADDING_DP = 32
-internal const val THUMBNAIL_PRELOAD_OVERLAY_CARD_VERTICAL_PADDING_DP = 28
+internal const val THUMBNAIL_PRELOAD_OVERLAY_CARD_VERTICAL_PADDING_DP = 32
 internal const val THUMBNAIL_PRELOAD_OVERLAY_ICON_SIZE_DP = 60
-internal const val THUMBNAIL_PRELOAD_OVERLAY_CONTENT_SPACING_DP = 14
+internal const val THUMBNAIL_PRELOAD_OVERLAY_CONTENT_SPACING_DP = 20
 internal const val THUMBNAIL_PRELOAD_OVERLAY_TITLE_FONT_SP = 18
 internal const val THUMBNAIL_PRELOAD_OVERLAY_SUBTITLE_FONT_SP = 14
 internal const val THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_WIDTH_DP = 200
 internal const val THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP = 8
 internal const val THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_TEXT_FONT_SP = 16
-internal const val STEP_TOOL_PANEL_HEIGHT_DP = 168
+internal const val TRIM_STEP_TOOL_PANEL_HEIGHT_DP = 150
+
+internal fun stepToolPanelHeightDp(step: GolfCamStep): Int =
+    when (step) {
+        GolfCamStep.TRIM -> TRIM_STEP_TOOL_PANEL_HEIGHT_DP
+        GolfCamStep.IMPACT_FRAME -> IMPACT_FRAME_STEP_TOOL_PANEL_HEIGHT_DP
+        GolfCamStep.IMPACT_POSITION -> IMPACT_POSITION_STEP_TOOL_PANEL_HEIGHT_DP
+        GolfCamStep.LANDING -> LANDING_STEP_TOOL_PANEL_HEIGHT_DP
+        GolfCamStep.FLIGHT_CURVE -> FLIGHT_CURVE_STEP_TOOL_PANEL_HEIGHT_DP
+        GolfCamStep.TRACK_STYLE -> TRACK_STYLE_STEP_TOOL_PANEL_HEIGHT_DP
+    }
+
+internal fun stepToolPanelPaddingDp(step: GolfCamStep): Pair<Int, Int> =
+    if (
+        step == GolfCamStep.TRIM ||
+        step == GolfCamStep.IMPACT_FRAME ||
+        step == GolfCamStep.IMPACT_POSITION ||
+        step == GolfCamStep.LANDING ||
+        step == GolfCamStep.FLIGHT_CURVE ||
+        step == GolfCamStep.TRACK_STYLE
+    ) {
+        0 to 0
+    } else {
+        16 to 12
+    }
 
 internal fun thumbnailPreloadProgressPercentText(progress: Float): String {
     return "${(progress.coerceIn(0f, 1f) * 100f).roundToInt()}%"
@@ -242,12 +274,30 @@ fun FlightPathUnifiedContainer(
     var videoFrameRate by remember(videoUri) { mutableDoubleStateOf(state.videoConfig?.frameRate ?: 30.0) }
     var trimPreviewPositionMs by remember { mutableLongStateOf(0L) }
     // 音频检测候选帧
-    var candidateFrames by remember { mutableStateOf<List<CandidateImpactFrame>>(emptyList()) }
-    var candidateDetectionKey by remember { mutableStateOf<ImpactCandidateDetectionKey?>(null) }
+    val restoredCandidateFrames = state.impactFrame?.candidateFrames.orEmpty()
+    val restoredTrim = state.trimResult
+    var candidateFrames by remember(videoUri) { mutableStateOf(restoredCandidateFrames) }
+    var candidateDetectionKey by remember(videoUri) {
+        mutableStateOf(
+            if (restoredCandidateFrames.isNotEmpty() && restoredTrim != null) {
+                ImpactCandidateDetectionKey(
+                    trimStartMs = restoredTrim.startMs,
+                    trimEndMs = restoredTrim.endMs,
+                    frameRate = GolfCamFrameTimeline.safeFrameRate(state.videoConfig?.frameRate ?: 30.0),
+                )
+            } else {
+                null
+            },
+        )
+    }
+    val impactFrameDraftIndex = remember(videoUri, restoredTrim?.startMs, restoredTrim?.endMs) {
+        mutableIntStateOf(state.impactFrame?.frameIndex ?: 0)
+    }
     var showHelp by remember { mutableStateOf(false) }
     var isPreloadingThumbnails by remember { mutableStateOf(false) }
     var isTrimImpactThumbnailPreloadGateRunning by remember { mutableStateOf(false) }
     var thumbnailPreloadProgress by remember { mutableFloatStateOf(0f) }
+    var trackStyleSpeedPreviewMode by remember { mutableStateOf(false) }
 
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
@@ -316,30 +366,19 @@ fun FlightPathUnifiedContainer(
         }
     }
 
+    LaunchedEffect(currentStep, state.impactFrame?.timeMs, player) {
+        if (currentStep == GolfCamStep.IMPACT_POSITION) {
+            state.impactFrame?.let { impactFrame ->
+                player.seekTo(impactFrame.timeMs.coerceAtLeast(0L))
+                player.pause()
+            }
+        }
+    }
+
     LaunchedEffect(videoUri, golfCamContainerThumbnailPreloadDurationMs(durationMs, state.videoConfig)) {
         val preloadDurationMs = golfCamContainerThumbnailPreloadDurationMs(durationMs, state.videoConfig)
             ?: return@LaunchedEffect
         GolfCamThumbnailCache.preloadVideo(context, videoUri, preloadDurationMs)
-    }
-
-    // 裁剪完成后触发音频检测，候选帧索引按真实视频帧率换算。
-    LaunchedEffect(state.trimResult, videoFrameRate) {
-        val trim = state.trimResult ?: return@LaunchedEffect
-        val nextDetectionKey = ImpactCandidateDetectionKey(trim.startMs, trim.endMs, videoFrameRate)
-        if (shouldReuseImpactCandidates(candidateDetectionKey, nextDetectionKey, candidateFrames)) return@LaunchedEffect
-        if (shouldClearImpactCandidatesForNewDetection(candidateDetectionKey, nextDetectionKey, candidateFrames)) {
-            candidateFrames = emptyList()
-        }
-        val startSec = trim.startMs / 1000.0
-        val endSec = trim.endMs / 1000.0
-        val rawCandidates = AudioImpactDetector.detect(context, videoUri, startSec, endSec)
-        candidateFrames = impactCandidatesForTrimRange(
-            rawCandidates = rawCandidates,
-            trimStartMs = trim.startMs,
-            trimEndMs = trim.endMs,
-            frameRate = videoFrameRate,
-        )
-        candidateDetectionKey = nextDetectionKey
     }
 
     fun goToNextStep() {
@@ -364,34 +403,76 @@ fun FlightPathUnifiedContainer(
                     frameRate = videoFrameRate,
                 )
                 val exactCachedSampleTimes = GolfCamThumbnailCache.cachedExactSampleTimes(videoUri, sampleTimesMs)
-                if (!shouldWaitForTrimImpactThumbnailPreload(exactCachedSampleTimes.size, sampleTimesMs.size)) {
-                    currentStep = nextStep
-                    return@launch
-                }
                 val loadedSampleTimes = exactCachedSampleTimes.toMutableSet()
                 thumbnailPreloadProgress = golfCamTrimImpactPreloadProgressFraction(
                     exactCachedCount = loadedSampleTimes.size,
                     totalCount = sampleTimesMs.size,
                 )
                 isPreloadingThumbnails = true
-                GolfCamThumbnailCache.loadTimelineThumbnails(
-                    context = context,
-                    videoUri = videoUri,
-                    sampleTimesMs = sampleTimesMs,
-                    priorityTimeMs = golfCamThumbnailPrioritySampleTimeMs(
-                        sampleTimesMs,
-                        state.impactFrame?.timeMs ?: trim.startMs,
-                    ),
-                    skipCachedSampleTimesMs = exactCachedSampleTimes,
-                    frameOption = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                ) { index, _ ->
-                    loadedSampleTimes += sampleTimesMs.getOrNull(index)?.coerceAtLeast(0L) ?: return@loadTimelineThumbnails
-                    thumbnailPreloadProgress = golfCamTrimImpactPreloadProgressFraction(
-                        exactCachedCount = loadedSampleTimes.size,
-                        totalCount = sampleTimesMs.size,
-                    )
+
+                // Match iOS: thumbnail preparation and impact-sound detection run together,
+                // and step 2 opens only after both tasks have finished.
+                val impactDetection = async {
+                    val nextDetectionKey = ImpactCandidateDetectionKey(trim.startMs, trim.endMs, videoFrameRate)
+                    if (!shouldReuseImpactCandidates(candidateDetectionKey, nextDetectionKey, candidateFrames)) {
+                        if (shouldClearImpactCandidatesForNewDetection(candidateDetectionKey, nextDetectionKey, candidateFrames)) {
+                            val previousKey = candidateDetectionKey
+                            candidateFrames = if (
+                                previousKey?.trimStartMs == nextDetectionKey.trimStartMs &&
+                                previousKey.trimEndMs == nextDetectionKey.trimEndMs
+                            ) {
+                                validImpactCandidateFramesForTrimRange(
+                                    candidateFrames = candidateFrames,
+                                    trimStartMs = trim.startMs,
+                                    trimEndMs = trim.endMs,
+                                    frameRate = videoFrameRate,
+                                )
+                            } else {
+                                emptyList()
+                            }
+                        }
+                        val rawCandidates = AudioImpactDetector.detect(
+                            context = context,
+                            uri = videoUri,
+                            startSec = trim.startMs / 1000.0,
+                            endSec = trim.endMs / 1000.0,
+                        )
+                        val detectedCandidates = impactCandidatesForTrimRange(
+                            rawCandidates = rawCandidates,
+                            trimStartMs = trim.startMs,
+                            trimEndMs = trim.endMs,
+                            frameRate = videoFrameRate,
+                        )
+                        if (detectedCandidates.isNotEmpty() || candidateFrames.isEmpty()) {
+                            candidateFrames = detectedCandidates
+                        }
+                        candidateDetectionKey = nextDetectionKey
+                    }
                 }
-                thumbnailPreloadProgress = 1f
+
+                if (shouldWaitForTrimImpactThumbnailPreload(exactCachedSampleTimes.size, sampleTimesMs.size)) {
+                    GolfCamThumbnailCache.loadTimelineThumbnails(
+                        context = context,
+                        videoUri = videoUri,
+                        sampleTimesMs = sampleTimesMs,
+                        priorityTimeMs = golfCamThumbnailPrioritySampleTimeMs(
+                            sampleTimesMs,
+                            state.impactFrame?.timeMs ?: trim.startMs,
+                        ),
+                        skipCachedSampleTimesMs = exactCachedSampleTimes,
+                        frameOption = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                    ) { index, _ ->
+                        loadedSampleTimes += sampleTimesMs.getOrNull(index)?.coerceAtLeast(0L) ?: return@loadTimelineThumbnails
+                        thumbnailPreloadProgress = golfCamTrimImpactPreloadProgressFraction(
+                            exactCachedCount = loadedSampleTimes.size,
+                            totalCount = sampleTimesMs.size,
+                        )
+                    }
+                    thumbnailPreloadProgress = 1f
+                } else {
+                    thumbnailPreloadProgress = 1f
+                }
+                impactDetection.await()
                 currentStep = nextStep
             } finally {
                 isPreloadingThumbnails = false
@@ -435,6 +516,7 @@ fun FlightPathUnifiedContainer(
                     currentStep = currentStep,
                     state = state,
                     videoFrameRate = videoFrameRate,
+                    trackStyleSpeedPreviewMode = trackStyleSpeedPreviewMode,
                     candidateFrames = candidateFrames,
                     onCandidateFrameSelected = { candidate ->
                         val trim = state.trimResult
@@ -445,6 +527,7 @@ fun FlightPathUnifiedContainer(
                             .coerceIn(startMs, lastAnchorMs)
                         player.seekTo(timeMs)
                         player.pause()
+                        impactFrameDraftIndex.intValue = candidate.frameIndex
                         state.updateImpactFrame(
                             ImpactFrameSelection(
                                 frameIndex = candidate.frameIndex,
@@ -468,6 +551,7 @@ fun FlightPathUnifiedContainer(
                                 landingPoint = landing,
                                 controlPoint1 = cp1,
                                 controlPoint2 = cp2,
+                                currentFrameIndex = flightCurveFrameIndex,
                             ),
                         )
                     },
@@ -478,9 +562,13 @@ fun FlightPathUnifiedContainer(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(STEP_TOOL_PANEL_HEIGHT_DP.dp)
+                    .height(stepToolPanelHeightDp(currentStep).dp)
                     .background(Color.White)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(
+                        horizontal = stepToolPanelPaddingDp(currentStep).first.dp,
+                        vertical = stepToolPanelPaddingDp(currentStep).second.dp,
+                    )
+                    .testTag("golfcam-step-tool-panel-${currentStep.name.lowercase()}"),
                 contentAlignment = Alignment.Center,
             ) {
                 when (currentStep) {
@@ -502,6 +590,7 @@ fun FlightPathUnifiedContainer(
                         state = state,
                         candidateFrames = candidateFrames,
                         frameRate = videoFrameRate,
+                        frameSelectionState = impactFrameDraftIndex,
                         onResult = { state.updateImpactFrame(it) },
                     )
                     GolfCamStep.IMPACT_POSITION -> ImpactPositionStepTool(state = state)
@@ -543,6 +632,11 @@ fun FlightPathUnifiedContainer(
                             player.seekTo(target)
                             player.pause()
                         }
+                        fun persistCurveFrameIndex() {
+                            state.flightCurve?.let { current ->
+                                state.updateFlightCurve(current.copy(currentFrameIndex = flightCurveFrameIndex))
+                            }
+                        }
                         // 进入曲线步骤时初始化帧数
                         LaunchedEffect(trimStartMs, trimEndMs, state.impactFrame, fps) {
                             if (durationMs > 0L) {
@@ -562,22 +656,26 @@ fun FlightPathUnifiedContainer(
                             onFrameSelected = { frameIndex ->
                                 flightCurveFrameIndex = frameIndex.coerceIn(0, (flightCurveTotalFrames - 1).coerceAtLeast(0))
                                 seekCurveFrame(flightCurveFrameIndex)
+                                persistCurveFrameIndex()
                             },
                             onImpactFrame = {
                                 flightCurveFrameIndex = (state.impactFrame?.frameIndex ?: 0)
                                     .coerceIn(0, (flightCurveTotalFrames - 1).coerceAtLeast(0))
                                 seekCurveFrame(flightCurveFrameIndex)
+                                persistCurveFrameIndex()
                             },
                             onPrevFrame = {
                                 if (flightCurveFrameIndex > 0) {
                                     flightCurveFrameIndex--
                                     seekCurveFrame(flightCurveFrameIndex)
+                                    persistCurveFrameIndex()
                                 }
                             },
                             onNextFrame = {
                                 if (flightCurveFrameIndex < flightCurveTotalFrames - 1) {
                                     flightCurveFrameIndex++
                                     seekCurveFrame(flightCurveFrameIndex)
+                                    persistCurveFrameIndex()
                                 }
                             },
                         )
@@ -585,6 +683,7 @@ fun FlightPathUnifiedContainer(
                     GolfCamStep.TRACK_STYLE -> TrackStyleStepTool(
                         state = state,
                         onResult = { state.updateTrackStyle(it) },
+                        onSpeedPreviewModeChanged = { trackStyleSpeedPreviewMode = it },
                     )
                 }
             }
@@ -632,28 +731,29 @@ private fun StepNavBar(
             .shadow(10.dp, ambientColor = DSColors.deepGreen.copy(alpha = 0.05f), spotColor = DSColors.deepGreen.copy(alpha = 0.05f))
             .background(DSColors.cardWhite)
             .statusBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .height(56.dp)
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
+        IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
             Icon(
                 Icons.Filled.Home,
                 contentDescription = "返回",
                 tint = DSColors.inkGreen,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
         Text(
             text = currentStep.title,
             color = DSColors.inkGreen,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             fontSize = 17.sp,
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.Center,
         )
-        IconButton(onClick = onHelp) {
+        IconButton(onClick = onHelp, modifier = Modifier.size(44.dp)) {
             Icon(
-                Icons.Filled.Info,
+                Icons.AutoMirrored.Outlined.HelpOutline,
                 contentDescription = "帮助",
                 tint = DSColors.inkGreen,
                 modifier = Modifier.size(20.dp),
@@ -670,6 +770,7 @@ private fun ThumbnailPreloadOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .testTag("golfcam-thumbnail-preload-overlay")
             .background(Color.Black.copy(alpha = THUMBNAIL_PRELOAD_OVERLAY_BACKGROUND_ALPHA))
             .clickable { },
         contentAlignment = Alignment.Center,
@@ -677,8 +778,14 @@ private fun ThumbnailPreloadOverlay(
         Column(
             modifier = Modifier
                 .padding(horizontal = 40.dp)
+                .shadow(
+                    elevation = 20.dp,
+                    shape = RoundedCornerShape(THUMBNAIL_PRELOAD_OVERLAY_CARD_CORNER_DP.dp),
+                    ambientColor = DSColors.fairway.copy(alpha = 0.30f),
+                    spotColor = DSColors.fairway.copy(alpha = 0.30f),
+                )
                 .clip(RoundedCornerShape(THUMBNAIL_PRELOAD_OVERLAY_CARD_CORNER_DP.dp))
-                .background(Color(0xFF2C2C2E))
+                .background(Color(0xFF1C1C1E))
                 .padding(
                     horizontal = THUMBNAIL_PRELOAD_OVERLAY_CARD_HORIZONTAL_PADDING_DP.dp,
                     vertical = THUMBNAIL_PRELOAD_OVERLAY_CARD_VERTICAL_PADDING_DP.dp,
@@ -700,45 +807,45 @@ private fun ThumbnailPreloadOverlay(
                     modifier = Modifier.size(28.dp),
                 )
             }
+            Text(
+                text = "正在准备击球帧",
+                color = Color.White,
+                fontSize = THUMBNAIL_PRELOAD_OVERLAY_TITLE_FONT_SP.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "优化缩略图并识别击球声音",
+                color = Color.White.copy(alpha = 0.80f),
+                fontSize = THUMBNAIL_PRELOAD_OVERLAY_SUBTITLE_FONT_SP.sp,
+                textAlign = TextAlign.Center,
+            )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = "正在优化缩略图",
-                    color = Color.White,
-                    fontSize = THUMBNAIL_PRELOAD_OVERLAY_TITLE_FONT_SP.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    text = "为您准备更流畅的编辑体验",
-                    color = Color.White.copy(alpha = 0.78f),
-                    fontSize = THUMBNAIL_PRELOAD_OVERLAY_SUBTITLE_FONT_SP.sp,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .width(THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_WIDTH_DP.dp)
-                    .height(THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP.dp)
-                    .clip(RoundedCornerShape((THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP / 2).dp))
-                    .background(Color.White.copy(alpha = 0.18f)),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(safeProgress)
+                        .width(THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_WIDTH_DP.dp)
                         .height(THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP.dp)
                         .clip(RoundedCornerShape((THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP / 2).dp))
-                        .background(Brush.linearGradient(listOf(DSColors.fairway, Color(0xFF55F3D8)))),
+                        .background(Color.White.copy(alpha = 0.20f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(safeProgress)
+                            .height(THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP.dp)
+                            .clip(RoundedCornerShape((THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_HEIGHT_DP / 2).dp))
+                            .background(Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen))),
+                    )
+                }
+                Text(
+                    text = thumbnailPreloadProgressPercentText(safeProgress),
+                    color = Color.White.copy(alpha = 0.90f),
+                    fontSize = THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_TEXT_FONT_SP.sp,
+                    fontWeight = FontWeight.Medium,
                 )
             }
-            Text(
-                text = thumbnailPreloadProgressPercentText(safeProgress),
-                color = Color.White,
-                fontSize = THUMBNAIL_PRELOAD_OVERLAY_PROGRESS_TEXT_FONT_SP.sp,
-                fontWeight = FontWeight.Medium,
-            )
         }
     }
 }

@@ -16,9 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,13 +31,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.data.coach.V2MemoDiscussionIndex
 import com.mygolfswing.app.data.model.V2MemoKind
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.store.V2MemoStore
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -50,19 +52,29 @@ import java.util.UUID
 @Composable
 fun V2VideoMemoListScreen(
     onBack: () -> Unit,
+    isGuest: Boolean = false,
     onOpenMemo: (UUID) -> Unit,
+    onOpenDiscussion: (connectionId: String, itemId: String) -> Unit = { _, _ -> },
     onCreateVideoMemo: () -> Unit = {},
+    onRequestLogin: () -> Unit = {},
 ) {
     val all by V2MemoStore.allMemos.collectAsState()
+    val discussionIndex by V2MemoDiscussionIndex.state.collectAsState()
     var filterId by rememberSaveable { mutableStateOf("all") }
-    val videos = remember(all) {
-        all.filter { it.kind == V2MemoKind.VIDEO || it.kind == V2MemoKind.MIXED }
-            .sortedByDescending { it.createdAt }
+    var previewingGuestMemo by remember { mutableStateOf<V2Memo?>(null) }
+    val videos = remember(all, isGuest) {
+        if (isGuest) {
+            V2GuestMemoSamples.mixed
+        } else {
+            all.filter { it.kind == V2MemoKind.VIDEO || it.kind == V2MemoKind.MIXED }
+                .sortedByDescending { it.createdAt }
+        }
     }
-    val filtered = remember(videos, filterId) {
-        videoMemoListVisibleMemos(videos, filterId)
+    val filtered = remember(videos, filterId, isGuest) {
+        if (isGuest) videos else videoMemoListVisibleMemos(videos, filterId)
     }
-    val stats = remember(videos) {
+    val stats = remember(videos, isGuest) {
+        if (isGuest) return@remember "共 ${videos.size} 条视频笔记"
         val now = LocalDateTime.now()
         val weekAgo = now.minusDays(6)
         val weekNew = videos.count { it.createdAt >= weekAgo }
@@ -84,12 +96,10 @@ fun V2VideoMemoListScreen(
         "online" to "在线", "plaza" to "球场视频",
     )
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite)
-            .v2NavigationBarPadding(),
-    ) {
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(
+            Modifier.fillMaxSize().v2NavigationBarPadding(),
+        ) {
         V2MemoListNavHeader(
             title = "视频笔记",
             onBack = onBack,
@@ -102,8 +112,10 @@ fun V2VideoMemoListScreen(
             },
         )
         V2MemoStatsBar(stats)
-        Spacer(Modifier.height(12.dp))
-        V2MemoFilterChips(filters, filterId) { filterId = it }
+        if (!isGuest) {
+            Spacer(Modifier.height(12.dp))
+            V2MemoFilterChips(filters, filterId) { filterId = it }
+        }
         Spacer(Modifier.height(12.dp))
         if (filtered.isEmpty()) {
             VideoMemoListEmptyState(
@@ -129,10 +141,15 @@ fun V2VideoMemoListScreen(
                             chipText = chip,
                             chipStyle = style,
                             metaText = meta,
+                            guestPreview = isGuest,
+                            discussionUpdates = if (isGuest) emptyList() else discussionIndex[memo.id].orEmpty(),
+                            onOpen = {
+                                if (isGuest) previewingGuestMemo = memo else onOpenMemo(memo.id)
+                            },
+                            onOpenDiscussion = onOpenDiscussion,
                             modifier = Modifier
                                 .padding(horizontal = DSSpacing.lg)
-                                .padding(top = 12.dp)
-                                .clickable { onOpenMemo(memo.id) },
+                                .padding(top = 12.dp),
                         )
                     }
                 }
@@ -141,6 +158,15 @@ fun V2VideoMemoListScreen(
                 }
             }
         }
+        }
+    }
+
+    previewingGuestMemo?.let { memo ->
+        V2GuestMemoPreviewSheet(
+            memo = memo,
+            onDismiss = { previewingGuestMemo = null },
+            onLogin = onRequestLogin,
+        )
     }
 }
 
@@ -164,12 +190,18 @@ private fun VideoMemoListEmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.weight(1f))
-        Icon(
-            if (isAll) Icons.Filled.Inbox else Icons.Filled.FilterList,
-            contentDescription = null,
-            tint = DSColors.shadowGray,
-            modifier = Modifier.size(if (isAll) 32.dp else 28.dp),
-        )
+        if (isAll) {
+            Icon(
+                imageVector = Icons.Outlined.Inbox,
+                contentDescription = null,
+                tint = DSColors.shadowGray,
+                modifier = Modifier
+                    .size(32.dp)
+                    .testTag("memo-video-empty-tray"),
+            )
+        } else {
+            V2MemoEmptyFilterGlyph(testTag = "memo-video-empty-filter")
+        }
         Spacer(Modifier.height(if (isAll) 8.dp else 12.dp))
         Text(
             text = when {

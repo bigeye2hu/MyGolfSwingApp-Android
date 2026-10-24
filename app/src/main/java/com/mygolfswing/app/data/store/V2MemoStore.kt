@@ -38,6 +38,13 @@ object V2MemoStore {
         _isSyncing.value = false
     }
 
+    internal fun replaceInMemoryForTesting(memos: List<V2Memo>) {
+        _allMemos.value = memos.sortedByDescending { it.createdAt }
+        pendingDeletedMemoIds.clear()
+        pendingUpsertMemoIds.clear()
+        _isSyncing.value = false
+    }
+
     @Volatile private var collecting = false
 
     fun startObserving() {

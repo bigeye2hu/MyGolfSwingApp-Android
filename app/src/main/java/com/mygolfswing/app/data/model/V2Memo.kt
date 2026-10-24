@@ -27,6 +27,8 @@ data class V2Memo(
     var tags: List<String> = emptyList(),
 
     var pinState: V2PinState = V2PinState.NONE,
+    /** 视频收藏与 Memo 置顶独立；null 兼容旧的本地 V2 快照。 */
+    var isFavorite: Boolean? = null,
     var linkedGoalIds: List<UUID> = emptyList(),
 
     val createdAt: LocalDateTime = LocalDateTime.now(),
@@ -51,6 +53,9 @@ data class V2Memo(
     var plazaVideoId: UUID? = null,
     /** 文字 Memo 优先级 raw（low/medium/high） */
     var priorityRaw: String = "medium",
+    /** iOS InsightCard 旧附件关系；详情页只读展示数量，编辑时原样保留。 */
+    var attachedVideoIds: List<UUID> = emptyList(),
+    var attachedImageIds: List<UUID> = emptyList(),
 ) {
     val isPlazaVideo: Boolean get() = plazaVideoId != null || source == V2MemoSource.PLAZA_SAVE
     val wordCount: Int get() = text?.length ?: 0

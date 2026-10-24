@@ -40,11 +40,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2CategoryGroup
 import com.mygolfswing.app.data.store.V2CategoryStore
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.designsystem.DSColors
 
 /**
@@ -78,7 +82,6 @@ fun V2MemoTagPickerField(
             groups = groups,
             selectedTagIds = selectedTagIds,
             onSelectedTagIdsChange = onSelectedTagIdsChange,
-            onOpenPicker = { showSheet = true },
             modifier = modifier,
         )
     } else {
@@ -155,25 +158,21 @@ private fun V2MemoDetailInlineTags(
     groups: List<V2CategoryGroup>,
     selectedTagIds: Set<String>,
     onSelectedTagIdsChange: (Set<String>) -> Unit,
-    onOpenPicker: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val nonEmpty = groups.filter { it.items.isNotEmpty() }
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("标签", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.deepGreen)
             Spacer(Modifier.weight(1f))
             Text(
-                "+ 添加标签",
+                "选择下方标签",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = DSColors.fairway.copy(alpha = 0.5f),
-                modifier = Modifier
-                    .clickable(onClick = onOpenPicker)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                color = DSColors.fairway,
             )
         }
         if (nonEmpty.isEmpty()) {
@@ -224,6 +223,7 @@ private fun V2MemoDetailTagGroup(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(if (selected) DSColors.fairway else Color(0xFFE8EDE9))
+                        .semantics { this.selected = selected }
                         .clickable { onToggle(item.id) }
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 )
@@ -260,7 +260,7 @@ fun V2MemoTagPicker(
     modifier: Modifier = Modifier,
 ) {
     val groups by V2CategoryStore.groups.collectAsState()
-    var showCreate by remember { mutableStateOf(false) }
+    var showCreate by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(
@@ -362,6 +362,7 @@ private fun CategoryGroupSection(
                             if (selected) DSColors.fairway else DSColors.borderLine,
                             RoundedCornerShape(50),
                         )
+                        .semantics { this.selected = selected }
                         .clickable { onToggle(item.id) }
                         .padding(horizontal = 14.dp, vertical = 7.dp),
                 )
@@ -377,8 +378,8 @@ private fun V2MemoTagCreateSheet(
     onDismiss: () -> Unit,
     onCreate: (name: String, groupId: String) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var selectedGroupId by remember { mutableStateOf(groups.firstOrNull()?.id.orEmpty()) }
+    var name by rememberSaveable { mutableStateOf("") }
+    var selectedGroupId by rememberSaveable { mutableStateOf(groups.firstOrNull()?.id.orEmpty()) }
     val canCreate = name.isNotBlank() && selectedGroupId.isNotBlank()
 
     ModalBottomSheet(
@@ -386,7 +387,8 @@ private fun V2MemoTagCreateSheet(
         containerColor = DSColors.warmWhite,
         dragHandle = null,
     ) {
-        Column(
+        V2RoomPage(Modifier.fillMaxWidth()) {
+            Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding()
@@ -492,6 +494,7 @@ private fun V2MemoTagCreateSheet(
                 )
             }
         }
+        }
     }
 }
 
@@ -506,6 +509,7 @@ private fun CategoryCreateGroupChip(
             .clip(CircleShape)
             .background(if (selected) DSColors.fairway else DSColors.cardWhite)
             .border(1.dp, if (selected) DSColors.fairway else DSColors.borderLine, CircleShape)
+            .semantics { this.selected = selected }
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp)
             .height(32.dp),

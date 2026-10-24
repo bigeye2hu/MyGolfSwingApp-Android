@@ -5,7 +5,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -50,42 +51,48 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.ai.V2ProfileReflector
 import com.mygolfswing.app.data.ai.profileReflectionFailureResult
-import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.model.V2GolfProfileData
 import com.mygolfswing.app.data.model.V2ProfileDates
 import com.mygolfswing.app.data.model.V2ProfileItem
 import com.mygolfswing.app.data.model.V2ProfileSource
 import com.mygolfswing.app.data.store.V2AIChatStore
 import com.mygolfswing.app.data.store.V2GolfProfileStore
-import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.data.store.V2ProfileStore
-import com.mygolfswing.app.ui.common.V2NavTopBar
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -98,25 +105,38 @@ import java.time.Instant
 fun V2AIArchiveScreen(
     onBack: () -> Unit,
     onRequestLogin: () -> Unit = {},
+    reflectProfile: suspend (java.util.UUID?) -> V2ProfileReflector.Result = V2ProfileReflector::reflectAll,
 ) {
     val accountProfile by V2ProfileStore.profile.collectAsState()
     val profile by V2GolfProfileStore.profile.collectAsState()
-    val goals by V2GoalStore.goals.collectAsState()
-    val isEmpty = V2GolfProfileStore.isProfileEmpty
+    val isEmpty = aiArchiveIsProfileEmpty(profile)
     var isSyncing by remember { mutableStateOf(false) }
     var syncToast by remember { mutableStateOf<String?>(null) }
-    var showAddSheet by remember { mutableStateOf(false) }
-    var addingSection by remember { mutableStateOf("") }
-    var newItemText by remember { mutableStateOf("") }
-    var newItemSource by remember { mutableStateOf(V2ProfileSource.USER_MANUAL) }
+    var showAddSheet by rememberSaveable { mutableStateOf(false) }
+    var addingSection by rememberSaveable { mutableStateOf("") }
+    var newItemText by rememberSaveable { mutableStateOf("") }
+    var newItemSource by rememberSaveable { mutableStateOf(V2ProfileSource.USER_MANUAL) }
     val scope = rememberCoroutineScope()
+    var manualSyncJob by remember { mutableStateOf<Job?>(null) }
     val addSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     LaunchedEffect(accountProfile.isLoggedIn) {
         if (accountProfile.isLoggedIn) {
             V2GolfProfileStore.reloadFromLocal()
             V2GolfProfileStore.refreshFromCloud()
+        } else {
+            manualSyncJob?.cancel()
+            manualSyncJob = null
+            isSyncing = false
+            syncToast = null
+            showAddSheet = false
+            addingSection = ""
+            newItemText = ""
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { manualSyncJob?.cancel() }
     }
 
     LaunchedEffect(syncToast) {
@@ -131,16 +151,9 @@ fun V2AIArchiveScreen(
     }
 
     Box(Modifier.fillMaxSize().background(DSColors.warmWhite)) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(Modifier.fillMaxSize()) {
-            V2NavTopBar(
-                title = "AI 训练档案",
-                onBack = onBack,
-                trailing = {
-                    TextButton(onClick = onBack) {
-                        Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
-                    }
-                },
-            )
+            AIArchiveTopBar(onDone = onBack)
             Column(
                 Modifier
                     .weight(1f)
@@ -159,18 +172,20 @@ fun V2AIArchiveScreen(
                         isSyncing = isSyncing,
                         lastSyncHint = lastSyncHintText(profile),
                         onSync = {
-                            if (isSyncing) return@ManualSyncCard
-                            scope.launch {
+                            if (isSyncing || !accountProfile.isLoggedIn) return@ManualSyncCard
+                            manualSyncJob?.cancel()
+                            manualSyncJob = scope.launch {
                                 isSyncing = true
                                 val cid = V2AIChatStore.currentSession.value.id
                                 val result = try {
-                                    V2ProfileReflector.reflectAll(cid)
+                                    reflectProfile(cid)
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
                                     profileReflectionFailureResult(e)
                                 } finally {
                                     isSyncing = false
+                                    manualSyncJob = null
                                 }
                                 when (result) {
                                     is V2ProfileReflector.Result.Updated -> {
@@ -242,22 +257,18 @@ fun V2AIArchiveScreen(
                         onRemove = { V2GolfProfileStore.removeItem("strengths", it) },
                     )
 
-                    TrainingGoalsSection(goals = goals)
+                    ComingSoonSection(
+                        title = "训练目标",
+                        icon = Icons.Default.Flag,
+                        accent = DSColors.fairway,
+                        hint = "AI 训练目标功能待开放",
+                    )
 
-                    ProfileStringSection(
+                    ComingSoonSection(
                         title = "教练指导",
                         icon = Icons.Default.Person,
                         accent = DSColors.deepGreen,
-                        section = "coachNotes",
-                        items = profile.coachNotes,
-                        emptyText = "记录教练给你的关键要求后，AI 回答会一起参考。",
-                        onAdd = {
-                            addingSection = "coachNotes"
-                            newItemText = ""
-                            newItemSource = V2ProfileSource.COACH_ADVICE
-                            showAddSheet = true
-                        },
-                        onRemove = { V2GolfProfileStore.removeItem("coachNotes", it) },
+                        hint = "教练协作功能待开放",
                     )
                 }
             }
@@ -276,6 +287,7 @@ fun V2AIArchiveScreen(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
+                        .testTag("ai-archive-sync-toast")
                         .background(DSColors.inkGreen.copy(alpha = 0.9f), CircleShape)
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                 )
@@ -283,41 +295,98 @@ fun V2AIArchiveScreen(
         }
     }
 
-    if (showAddSheet) {
+    if (showAddSheet && accountProfile.isLoggedIn) {
         ModalBottomSheet(
             onDismissRequest = { showAddSheet = false },
             sheetState = addSheetState,
             containerColor = DSColors.warmWhite,
         ) {
-            AddItemSheetContent(
-                section = addingSection,
-                text = newItemText,
-                source = newItemSource,
-                onTextChange = { newItemText = it },
-                onSourceChange = { newItemSource = it },
-                onCancel = { showAddSheet = false },
-                onConfirm = {
-                    val trimmed = newItemText.trim()
-                    if (trimmed.isNotEmpty()) {
-                        V2GolfProfileStore.addItem(addingSection, trimmed, newItemSource)
-                        showAddSheet = false
-                    }
-                },
-            )
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.5f)
+                    .background(DSColors.warmWhite)
+                    .testTag("ai-archive-add-sheet"),
+            ) {
+                V2RoomBackground(Modifier.fillMaxSize())
+                AddItemSheetContent(
+                    section = addingSection,
+                    text = newItemText,
+                    source = newItemSource,
+                    onTextChange = { newItemText = it },
+                    onSourceChange = { newItemSource = it },
+                    onCancel = { showAddSheet = false },
+                    onConfirm = confirm@{
+                        if (!accountProfile.isLoggedIn) {
+                            showAddSheet = false
+                            return@confirm
+                        }
+                        val trimmed = newItemText.trim()
+                        if (trimmed.isNotEmpty()) {
+                            V2GolfProfileStore.addItem(addingSection, trimmed, newItemSource)
+                            showAddSheet = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AIArchiveTopBar(onDone: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .v2StatusBarPadding()
+            .height(44.dp)
+            .testTag("ai-archive-top-bar"),
+    ) {
+        Text(
+            text = "AI 训练档案",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = DSColors.inkGreen,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        TextButton(
+            onClick = onDone,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = DSSpacing.sm),
+        ) {
+            Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 private fun lastSyncHintText(profile: V2GolfProfileData): String? {
-    if (profile.isEmpty) return null
+    if (aiArchiveIsProfileEmpty(profile)) return null
     val lastSync = V2ProfileDates.parseIsoOrNull(profile.summaryUpdatedAt) ?: return null
     val conv = V2AIChatStore.currentSession.value
-    val hasNew = conv.updatedAt.atZone(java.time.ZoneId.systemDefault()).toInstant()
-        .isAfter(lastSync)
+    val hasNew = aiArchiveConversationHasNewMessages(
+        hasMessages = conv.messages.isNotEmpty(),
+        conversationUpdatedAt = conv.updatedAt.atZone(java.time.ZoneId.systemDefault()).toInstant(),
+        lastSync = lastSync,
+    )
     if (hasNew) return null
     val relative = V2ProfileDates.relativeLabel(profile.summaryUpdatedAt) ?: return null
     return "上次同步：$relative · 暂无新对话"
 }
+
+internal fun aiArchiveConversationHasNewMessages(
+    hasMessages: Boolean,
+    conversationUpdatedAt: Instant,
+    lastSync: Instant,
+): Boolean = hasMessages && conversationUpdatedAt.isAfter(lastSync)
+
+internal fun aiArchiveIsProfileEmpty(profile: V2GolfProfileData): Boolean =
+    profile.currentFocus.isEmpty() &&
+        profile.painPoints.isEmpty() &&
+        profile.strengths.isEmpty() &&
+        profile.trainingGoals.isEmpty() &&
+        profile.coachNotes.isEmpty()
 
 internal fun aiArchiveSyncError(base: String, debugDetail: String?): String =
     aiArchiveSyncError(base, debugDetail, ServiceLocator.isDebuggable)
@@ -535,7 +604,12 @@ private fun ProfileItemSection(
             )
             if (items.size < limit) {
                 IconButton(onClick = onAdd) {
-                    Icon(Icons.Default.AddCircle, null, tint = DSColors.fairway, modifier = Modifier.size(22.dp))
+                    Icon(
+                        Icons.Default.AddCircle,
+                        contentDescription = "添加$title",
+                        tint = DSColors.fairway,
+                        modifier = Modifier.size(22.dp),
+                    )
                 }
             }
         }
@@ -605,259 +679,85 @@ private fun ProfileItemRow(item: V2ProfileItem, onRemove: () -> Unit) {
 }
 
 @Composable
-private fun TrainingGoalsSection(goals: List<V2Goal>) {
-    val activeGoals = remember(goals) {
-        goals
-            .filter { it.status == V2Goal.Status.ACTIVE }
-            .sortedWith(
-                compareByDescending<V2Goal> { it.todayFocus }
-                    .thenBy { it.priority.ordinal }
-                    .thenByDescending { it.updatedAt },
-            )
-    }
-    val completedCount = remember(goals) { goals.count { it.status == V2Goal.Status.COMPLETED } }
-    val visibleGoals = activeGoals.take(3)
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .shadow(8.dp, RoundedCornerShape(16.dp), spotColor = DSColors.fairway.copy(0.06f))
-            .clip(RoundedCornerShape(16.dp))
-            .background(DSColors.cardWhite)
-            .padding(DSSpacing.lg),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(DSColors.fairway.copy(0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.Star, null, tint = DSColors.fairway, modifier = Modifier.size(14.dp))
-            }
-            Spacer(Modifier.size(8.dp))
-            Text("训练目标", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = DSColors.inkGreen)
-            Spacer(Modifier.weight(1f))
-            Text(
-                "${activeGoals.size} 进行中",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = DSColors.fairway,
-                modifier = Modifier
-                    .background(DSColors.mistGreen, CircleShape)
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-            )
-        }
-        Spacer(Modifier.height(DSSpacing.sm))
-        if (visibleGoals.isEmpty()) {
-            Text(
-                "还没有进行中的目标。创建目标后，AI 会在回答里结合你的当前训练方向。",
-                fontSize = 12.sp,
-                color = DSColors.shadowGray,
-                lineHeight = 17.sp,
-            )
-        } else {
-            visibleGoals.forEachIndexed { index, goal ->
-                TrainingGoalRow(goal)
-                if (index < visibleGoals.lastIndex) Spacer(Modifier.height(8.dp))
-            }
-            val hiddenCount = activeGoals.size - visibleGoals.size
-            if (hiddenCount > 0 || completedCount > 0) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    buildString {
-                        if (hiddenCount > 0) append("还有 $hiddenCount 个进行中目标")
-                        if (hiddenCount > 0 && completedCount > 0) append(" · ")
-                        if (completedCount > 0) append("已完成 $completedCount 个")
-                    },
-                    fontSize = 11.sp,
-                    color = DSColors.shadowGray,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TrainingGoalRow(goal: V2Goal) {
-    val ratio = goal.ratio.coerceIn(0.0, 1.0).toFloat()
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(DSColors.warmWhite)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Box(
-            Modifier
-                .size(18.dp)
-                .background(
-                    if (goal.todayFocus) DSColors.fairway else DSColors.shadowGray.copy(0.2f),
-                    CircleShape,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Default.Star,
-                null,
-                tint = if (goal.todayFocus) Color.White else DSColors.shadowGray,
-                modifier = Modifier.size(11.dp),
-            )
-        }
-        Column(Modifier.padding(start = 10.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(goal.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = DSColors.inkGreen, modifier = Modifier.weight(1f))
-                if (goal.todayFocus) {
-                    Text(
-                        "今日重点",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
-                        modifier = Modifier
-                            .background(DSColors.fairway, CircleShape)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(goal.typeLabel, fontSize = 10.sp, color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
-                goal.cadence?.displayText?.let {
-                    Text(it, fontSize = 10.sp, color = DSColors.shadowGray)
-                }
-                if (goal.weekCheckInCount > 0) {
-                    Text("本周 ${goal.weekCheckInCount} 次", fontSize = 10.sp, color = DSColors.shadowGray)
-                }
-            }
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(DSColors.borderLine.copy(0.6f)),
-            ) {
-                if (ratio > 0f) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(ratio)
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(DSColors.fairway),
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(goal.sessionProgressDisplay, fontSize = 11.sp, color = DSColors.shadowGray)
-                Spacer(Modifier.weight(1f))
-                Text("${(ratio * 100).toInt()}%", fontSize = 11.sp, color = DSColors.shadowGray, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProfileStringSection(
+private fun ComingSoonSection(
     title: String,
     icon: ImageVector,
     accent: Color,
-    section: String,
-    items: List<String>,
-    emptyText: String,
-    onAdd: () -> Unit,
-    onRemove: (Int) -> Unit,
-) {
-    val limit = V2GolfProfileData.sectionLimits[section] ?: 5
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .shadow(8.dp, RoundedCornerShape(16.dp), spotColor = DSColors.fairway.copy(0.06f))
-            .clip(RoundedCornerShape(16.dp))
-            .background(DSColors.cardWhite)
-            .padding(DSSpacing.lg),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(accent.copy(0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, null, tint = accent, modifier = Modifier.size(14.dp))
-            }
-            Spacer(Modifier.size(8.dp))
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = DSColors.inkGreen)
-            Spacer(Modifier.weight(1f))
-            Text(
-                "${items.size}/$limit",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = DSColors.shadowGray,
-                modifier = Modifier
-                    .background(DSColors.mistGreen, CircleShape)
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
-            )
-            if (items.size < limit) {
-                IconButton(onClick = onAdd) {
-                    Icon(Icons.Default.AddCircle, null, tint = DSColors.fairway, modifier = Modifier.size(22.dp))
-                }
-            }
-        }
-        Spacer(Modifier.height(DSSpacing.sm))
-        if (items.isEmpty()) {
-            Text(emptyText, fontSize = 12.sp, color = DSColors.shadowGray, lineHeight = 17.sp)
-        } else {
-            items.forEachIndexed { index, item ->
-                ProfileStringRow(item = item, accent = accent, onRemove = { onRemove(index) })
-                if (index < items.lastIndex) Spacer(Modifier.height(8.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProfileStringRow(
-    item: String,
-    accent: Color,
-    onRemove: () -> Unit,
+    hint: String,
 ) {
     Row(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(DSColors.warmWhite)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Top,
+            .clip(RoundedCornerShape(16.dp))
+            .background(DSColors.cardWhite.copy(alpha = 0.6f))
+            .drawBehind {
+                drawRoundRect(
+                    color = DSColors.shadowGray.copy(alpha = 0.15f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()),
+                    style = Stroke(
+                        width = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(
+                            floatArrayOf(4.dp.toPx(), 3.dp.toPx()),
+                        ),
+                    ),
+                )
+            }
+            .padding(DSSpacing.lg),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
-            Modifier
-                .size(18.dp)
-                .background(accent.copy(0.18f), CircleShape),
+            modifier = Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(accent.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Person, null, tint = accent, modifier = Modifier.size(11.dp))
-        }
-        Column(Modifier.padding(start = 10.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(item, fontSize = 14.sp, color = DSColors.inkGreen, lineHeight = 19.sp)
-            Text(
-                "教练建议",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = accent,
-                modifier = Modifier
-                    .background(accent.copy(0.10f), CircleShape)
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accent.copy(alpha = 0.7f),
+                modifier = Modifier.size(13.dp),
             )
         }
-        IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Cancel, null, tint = DSColors.shadowGray.copy(0.6f), modifier = Modifier.size(16.dp))
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = DSColors.inkGreen.copy(alpha = 0.75f),
+                )
+                Text(
+                    text = "待开放",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = DSColors.shadowGray,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(DSColors.mistGreen)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            Text(
+                text = hint,
+                fontSize = 11.sp,
+                color = DSColors.shadowGray,
+                lineHeight = 15.sp,
+            )
         }
     }
 }
 
 @Composable
-private fun AddItemSheetContent(
+internal fun AddItemSheetContent(
     section: String,
     text: String,
     source: V2ProfileSource,
@@ -865,11 +765,13 @@ private fun AddItemSheetContent(
     onSourceChange: (V2ProfileSource) -> Unit,
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val sectionName = V2GolfProfileData.sectionNames[section] ?: section
     val showSourcePicker = section in listOf("currentFocus", "painPoints", "strengths")
+    val canConfirm = text.trim().isNotEmpty()
     Column(
-        Modifier
+        modifier
             .imePadding()
             .v2NavigationBarPadding()
             .padding(DSSpacing.lg)
@@ -877,8 +779,12 @@ private fun AddItemSheetContent(
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = onCancel) { Text("取消", color = DSColors.shadowGray) }
-            TextButton(onClick = onConfirm, enabled = text.trim().isNotEmpty()) {
-                Text("添加", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
+            TextButton(onClick = onConfirm, enabled = canConfirm) {
+                Text(
+                    "添加",
+                    color = if (canConfirm) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.45f),
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
         Text("添加到「$sectionName」", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = DSColors.inkGreen)

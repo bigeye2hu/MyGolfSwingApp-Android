@@ -55,6 +55,7 @@ internal fun decodeSwingSessionJson(sessionJson: String, json: Json): V2SwingSes
                 durationSec = o["durationSec"]!!.jsonPrimitive.doubleOrNull ?: return@runCatching null,
                 retention = V2SwingClipRetention.fromWire(o["retention"]?.jsonPrimitive?.contentOrNull),
                 sourceLabel = o["sourceLabel"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() },
+                notes = o["notes"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() },
             )
         }.getOrNull()
     } ?: emptyList()
@@ -113,6 +114,23 @@ class V2SwingSessionRepository(
         }
     }
 
+    suspend fun updateClipNotes(clipId: UUID, notes: String?) = withContext(Dispatchers.IO) {
+        val uid = session.current().userId ?: return@withContext
+        val normalized = notes?.trim()?.take(40)?.takeIf { it.isNotBlank() }
+        val rows = dao.observeAll(uid).first()
+        rows.forEach { row ->
+            val decoded = decode(row) ?: return@forEach
+            if (decoded.clips.none { it.id == clipId }) return@forEach
+            val updated = decoded.copy(
+                clips = decoded.clips.map { clip ->
+                    if (clip.id == clipId) clip.copy(notes = normalized) else clip
+                },
+            )
+            dao.upsert(encode(updated))
+            return@withContext
+        }
+    }
+
     suspend fun deleteClips(clipIds: Set<UUID>) = withContext(Dispatchers.IO) {
         if (clipIds.isEmpty()) return@withContext
         val uid = session.current().userId ?: return@withContext
@@ -161,6 +179,7 @@ class V2SwingSessionRepository(
                         "durationSec" to JsonPrimitive(c.durationSec),
                         "retention" to JsonPrimitive(c.retention.wire),
                         "sourceLabel" to JsonPrimitive(c.sourceLabel ?: ""),
+                        "notes" to JsonPrimitive(c.notes ?: ""),
                     ),
                 )
             },

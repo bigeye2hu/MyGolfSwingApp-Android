@@ -57,7 +57,12 @@ class V2PlazaRepository(
     }
 
     private var cachedCategories: List<V2PlazaCategoryChip> = emptyList()
-    private val coachNameCache = mutableMapOf<String, String>()
+    private val coachProfileCache = mutableMapOf<String, V2PlazaCoachProfile>()
+
+    /** 下拉刷新时允许重新获取教练头像与资料，避免整个进程一直显示旧缓存。 */
+    fun invalidateCoachProfileCache(coachId: String? = null) {
+        if (coachId.isNullOrBlank()) coachProfileCache.clear() else coachProfileCache.remove(coachId)
+    }
 
     suspend fun fetchVideos(
         limit: Int = 20,
@@ -90,8 +95,7 @@ class V2PlazaRepository(
         val success = resp["success"]?.jsonPrimitive?.boolean == true
         if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取广场视频失败")
         val arr = resp["videos"]?.jsonArray ?: return@runPlazaCatching emptyList()
-        val decoded = arr.mapNotNull { runCatching { decodeVideo(it.jsonObject) }.getOrNull() }
-        hydrateCoaches(decoded)
+        arr.mapNotNull { runCatching { decodeVideo(it.jsonObject) }.getOrNull() }
     }
 
     suspend fun fetchCategories(): Result<List<V2PlazaCategoryChip>> = runPlazaCatching {
@@ -113,7 +117,12 @@ class V2PlazaRepository(
             .also { cachedCategories = it }
     }
 
-    suspend fun fetchCoachProfile(coachId: String): Result<V2PlazaCoachProfile> = runPlazaCatching {
+    suspend fun fetchCoachProfile(
+        coachId: String,
+        forceRefresh: Boolean = false,
+    ): Result<V2PlazaCoachProfile> {
+        if (!forceRefresh) coachProfileCache[coachId]?.let { return Result.success(it) }
+        return runPlazaCatching {
         val resp = net.cloudApi.videoPlaza(
             JsonObject(
                 mapOf(
@@ -125,10 +134,57 @@ class V2PlazaRepository(
         val success = resp["success"]?.jsonPrimitive?.boolean != false
         if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取教练失败")
         decodeCoach(resp["coach"]?.jsonObject ?: error("教练不存在"))
+            .also { coachProfileCache[coachId] = it }
+        }
     }
 
     suspend fun fetchCoachVideos(coachId: String, limit: Int = 30, offset: Int = 0): Result<List<V2PlazaVideo>> =
         fetchVideos(limit = limit, offset = offset, coachId = coachId)
+
+    suspend fun fetchFavoriteVideos(
+        limit: Int = 20,
+        offset: Int = 0,
+    ): Result<List<V2PlazaVideo>> = runPlazaCatching {
+        val uid = session.current().userId ?: error("请先登录后再查看收藏")
+        val safeLimit = limit.coerceIn(1, 50)
+        val safeOffset = offset.coerceAtLeast(0)
+        val resp = net.cloudApi.videoPlaza(
+            plazaFavoriteVideosRequestBody(
+                userId = uid,
+                limit = safeLimit,
+                offset = safeOffset,
+            ),
+        )
+        val success = resp["success"]?.jsonPrimitive?.boolean != false
+        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取收藏失败")
+        val favorites = firstArray(
+            resp,
+            "videos",
+            "items",
+            "list",
+            "data.videos",
+            "data.items",
+            "data.list",
+        )
+            ?.mapNotNull { runCatching { decodeVideo(it.jsonObject).copy(isSaved = true) }.getOrNull() }
+            .orEmpty()
+
+        // 服务端收藏是权威来源。只有拿到完整的第一页时才清掉本地旧标记；
+        // 满页意味着可能还有下一页，不能误删较早但仍有效的收藏。
+        val now = System.currentTimeMillis()
+        savedDao.reconcileRemotePage(
+            userId = uid,
+            saved = favorites.mapIndexed { index, video ->
+                PlazaSavedEntity(
+                    userId = uid,
+                    videoId = video.saveKey(),
+                    savedAt = now - index,
+                )
+            },
+            isCompleteFirstPage = safeOffset == 0 && favorites.size < safeLimit,
+        )
+        favorites
+    }
 
     suspend fun save(videoId: String) = withContext(Dispatchers.IO) {
         val uid = session.current().userId ?: error("请先登录后再收藏")
@@ -175,18 +231,22 @@ class V2PlazaRepository(
         arr.mapNotNull { runCatching { decodeComment(it.jsonObject) }.getOrNull() }
     }
 
-    suspend fun addComment(videoId: String, content: String): Result<V2PlazaComment> = runPlazaCatching {
+    suspend fun addComment(
+        videoId: String,
+        content: String,
+        mentionUserIds: List<String> = emptyList(),
+        clientRequestId: String = UUID.randomUUID().toString(),
+    ): Result<V2PlazaComment> = runPlazaCatching {
         val current = session.current()
         val uid = current.userId ?: error("请先登录后再评论")
-        val body = JsonObject(
-            mapOf(
-                "action" to JsonPrimitive("addComment"),
-                "videoId" to JsonPrimitive(videoId),
-                "userId" to JsonPrimitive(uid),
-                "userName" to JsonPrimitive(current.nickname ?: current.username ?: "用户"),
-                "userAvatar" to JsonPrimitive(current.avatar ?: ""),
-                "content" to JsonPrimitive(content),
-            ),
+        val body = plazaCommentRequestBody(
+            videoId = videoId,
+            userId = uid,
+            userName = current.nickname ?: current.username ?: "用户",
+            userAvatar = current.avatar,
+            content = content,
+            mentionUserIds = mentionUserIds,
+            clientRequestId = clientRequestId,
         )
         val resp = net.cloudApi.videoPlaza(body)
         val success = resp["success"]?.jsonPrimitive?.boolean != false
@@ -207,18 +267,21 @@ class V2PlazaRepository(
         }
     }
 
-    suspend fun reportVideo(videoId: String, reason: String, detail: String): Result<Unit> = runPlazaCatching {
+    suspend fun reportVideo(
+        videoId: String,
+        reason: String,
+        reasonText: String,
+        detail: String,
+        priority: Int,
+    ): Result<Unit> = runPlazaCatching {
         val uid = session.current().userId ?: error("请先登录后再举报")
-        val body = JsonObject(
-            mapOf(
-                "action" to JsonPrimitive("reportVideo"),
-                "videoId" to JsonPrimitive(videoId),
-                "userId" to JsonPrimitive(uid),
-                "reason" to JsonPrimitive(reason),
-                "reasonText" to JsonPrimitive(reason),
-                "detail" to JsonPrimitive(detail),
-                "priority" to JsonPrimitive(if (reason == "child_abuse" || reason == "pornography") 8 else 3),
-            ),
+        val body = plazaReportRequestBody(
+            videoId = videoId,
+            userId = uid,
+            reason = reason,
+            reasonText = reasonText,
+            detail = detail,
+            priority = priority,
         )
         val resp = net.cloudApi.videoPlaza(body)
         val success = resp["success"]?.jsonPrimitive?.boolean != false
@@ -277,7 +340,8 @@ class V2PlazaRepository(
         val topic = inferTopic(categoryName ?: parentCategoryName, tags, o.string("title") ?: "")
         val thumb = thumbnailKindFor(topic)
         val coachId = o.string("coachId")
-        val coachName = o.string("coachName", "coach") ?: coachId?.let { coachNameCache[it] }?.let { "Coach $it" } ?: "教练"
+        val cachedCoach = coachId?.let(coachProfileCache::get)
+        val coachName = normalizedPlazaCoachName(o.string("coachName", "coach") ?: cachedCoach?.name)
         val initial = coachName.firstOrNull()?.toString() ?: "C"
         val tintKey = coachId ?: coachName
         val tint = avatarTints[(tintKey.hashCode().ushr(1)) % avatarTints.size]
@@ -302,51 +366,16 @@ class V2PlazaRepository(
             durationSec = o["duration"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
             topic = topic,
             categoryDisplayName = catName,
-            coach = V2PlazaCoach(coachName, initial, tint),
+            coach = V2PlazaCoach(coachName, initial, tint, cachedCoach?.avatarUrl),
             viewCount = stats?.get("views")?.jsonPrimitive?.intOrNull ?: 0,
             saveCount = stats?.get("favorites")?.jsonPrimitive?.intOrNull ?: 0,
+            likeCount = stats?.get("likes")?.jsonPrimitive?.intOrNull ?: 0,
             thumbnailKind = thumb,
             thumbnailUrl = cover,
             videoUrl = o["vodURL"]?.jsonPrimitive?.contentOrNull ?: "",
             publishedAtMs = publishMs,
-            isNew = (System.currentTimeMillis() - publishMs) < 7L * 24 * 3600 * 1000,
+            isNew = (System.currentTimeMillis() - publishMs) in 0 until 48L * 3600 * 1000,
         )
-    }
-
-    private suspend fun hydrateCoaches(videos: List<V2PlazaVideo>): List<V2PlazaVideo> {
-        val missingIds = videos.mapNotNull { it.sourceCoachId?.takeIf(String::isNotBlank) }
-            .distinct()
-            .filterNot { coachNameCache.containsKey(it) }
-        missingIds.forEach { id ->
-            fetchCoachName(id).getOrNull()?.let { coachNameCache[id] = it }
-        }
-        return videos.map { video ->
-            val coachId = video.sourceCoachId
-            val name = coachId?.let { coachNameCache[it] } ?: return@map video
-            val displayName = "Coach $name"
-            video.copy(
-                coach = V2PlazaCoach(
-                    displayName = displayName,
-                    initialChar = name.firstOrNull()?.toString() ?: "?",
-                    avatarTint = video.coach.avatarTint,
-                ),
-            )
-        }
-    }
-
-    private suspend fun fetchCoachName(coachId: String): Result<String> = runPlazaCatching {
-        val resp = net.cloudApi.videoPlaza(
-            JsonObject(
-                mapOf(
-                    "action" to JsonPrimitive("getCoachProfile"),
-                    "coachId" to JsonPrimitive(coachId),
-                ),
-            ),
-        )
-        val success = resp["success"]?.jsonPrimitive?.boolean != false
-        if (!success) error(resp["error"]?.jsonPrimitive?.contentOrNull ?: "获取教练失败")
-        val coach = resp["coach"]?.jsonObject ?: error("教练不存在")
-        coach.string("name") ?: error("missing coach name")
     }
 
     private suspend fun callAuthedVideoAction(action: String, videoId: String) {
@@ -476,6 +505,69 @@ class V2PlazaRepository(
                 ?.filter { it.isNotEmpty() }
             ?: emptyList()
 
+}
+
+internal fun plazaCommentRequestBody(
+    videoId: String,
+    userId: String,
+    userName: String,
+    userAvatar: String?,
+    content: String,
+    mentionUserIds: List<String>,
+    clientRequestId: String,
+): JsonObject = JsonObject(
+    mapOf(
+        "action" to JsonPrimitive("addComment"),
+        "videoId" to JsonPrimitive(videoId),
+        "userId" to JsonPrimitive(userId),
+        "userName" to JsonPrimitive(userName),
+        "userAvatar" to JsonPrimitive(userAvatar.orEmpty()),
+        "content" to JsonPrimitive(content),
+        "mentionUserIds" to JsonArray(mentionUserIds.distinct().take(5).map(::JsonPrimitive)),
+        "clientRequestId" to JsonPrimitive(clientRequestId),
+    ),
+)
+
+internal fun plazaReportRequestBody(
+    videoId: String,
+    userId: String,
+    reason: String,
+    reasonText: String,
+    detail: String,
+    priority: Int,
+): JsonObject = JsonObject(
+    mapOf(
+        "action" to JsonPrimitive("reportVideo"),
+        "videoId" to JsonPrimitive(videoId),
+        "userId" to JsonPrimitive(userId),
+        "reason" to JsonPrimitive(reason),
+        "reasonText" to JsonPrimitive(reasonText),
+        "detail" to JsonPrimitive(detail),
+        "priority" to JsonPrimitive(priority.coerceIn(1, 10)),
+    ),
+)
+
+internal fun plazaFavoriteVideosRequestBody(
+    userId: String,
+    limit: Int,
+    offset: Int,
+): JsonObject = JsonObject(
+    mapOf(
+        "action" to JsonPrimitive("getFavoriteVideos"),
+        "userId" to JsonPrimitive(userId),
+        "limit" to JsonPrimitive(limit.coerceIn(1, 50)),
+        "offset" to JsonPrimitive(offset.coerceAtLeast(0)),
+    ),
+)
+
+internal fun normalizedPlazaCoachName(rawName: String?): String {
+    val trimmed = rawName?.trim().orEmpty()
+    if (trimmed.isEmpty()) return "教练"
+    return if (trimmed.startsWith("coach ", ignoreCase = true)) {
+        trimmed.drop(6).trim().ifEmpty { "教练" }
+    } else {
+        trimmed
+    }
 }
 
 internal suspend inline fun <T> runPlazaCatching(

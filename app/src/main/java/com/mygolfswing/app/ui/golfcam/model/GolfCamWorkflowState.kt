@@ -17,8 +17,10 @@ import kotlin.math.ceil
 
 private const val MIN_VALID_LANDING_FLIGHT_TIME_SEC = 0.5
 private const val MAX_VALID_LANDING_FLIGHT_TIME_SEC = 8.0
-private const val MIN_VALID_CURVE_CONTROL_Y = -1.0f
-private const val MAX_VALID_CURVE_CONTROL_Y = 1.5f
+private const val MIN_VALID_CURVE_CONTROL_X = -0.35f
+private const val MAX_VALID_CURVE_CONTROL_X = 1.35f
+private const val MIN_VALID_CURVE_CONTROL_Y = -0.8f
+private const val MAX_VALID_CURVE_CONTROL_Y = 1.4f
 private const val MIN_VALID_STYLE_WIDTH_PCT = 5.0
 private const val MAX_VALID_STYLE_WIDTH_PCT = 160.0
 private const val MIN_VALID_STYLE_TAIL_HALF_LIFE = 5.0
@@ -47,7 +49,7 @@ internal fun clampedLandingOutput(next: LandingOutput): LandingOutput {
             value = next.flightTimeSec,
             min = MIN_VALID_LANDING_FLIGHT_TIME_SEC,
             max = MAX_VALID_LANDING_FLIGHT_TIME_SEC,
-            fallback = 4.5,
+            fallback = 6.0,
         ),
     )
 }
@@ -62,13 +64,14 @@ internal fun clampedFlightCurveSelection(
         landingPoint = clampedLandingOutput(currentLanding ?: next.landingPoint),
         controlPoint1 = clampedFlightCurveControlPoint(next.controlPoint1),
         controlPoint2 = clampedFlightCurveControlPoint(next.controlPoint2),
+        currentFrameIndex = next.currentFrameIndex.coerceAtLeast(0),
     )
 }
 
 private fun clampedFlightCurveControlPoint(point: NormalizedPoint): NormalizedPoint {
     return NormalizedPoint(
-        x = finiteFloatIn(point.x, 0f, 1f, fallback = 0.5f),
-        y = finiteFloatIn(point.y, MIN_VALID_CURVE_CONTROL_Y, MAX_VALID_CURVE_CONTROL_Y, fallback = 0f),
+        x = finiteFloatIn(point.x, MIN_VALID_CURVE_CONTROL_X, MAX_VALID_CURVE_CONTROL_X, fallback = 0.5f),
+        y = finiteFloatIn(point.y, MIN_VALID_CURVE_CONTROL_Y, MAX_VALID_CURVE_CONTROL_Y, fallback = 0.5f),
     )
 }
 
@@ -335,7 +338,8 @@ class GolfCamWorkflowState {
     private fun isNormalizedCoordinate(value: Float): Boolean = value in 0f..1f
 
     private fun isValidCurveControlPoint(point: NormalizedPoint): Boolean {
-        return point.x in 0f..1f && point.y in MIN_VALID_CURVE_CONTROL_Y..MAX_VALID_CURVE_CONTROL_Y
+        return point.x in MIN_VALID_CURVE_CONTROL_X..MAX_VALID_CURVE_CONTROL_X &&
+            point.y in MIN_VALID_CURVE_CONTROL_Y..MAX_VALID_CURVE_CONTROL_Y
     }
 
     private fun isValidTrackStyle(style: TrackStyle): Boolean {
@@ -351,7 +355,7 @@ enum class GolfCamStep(
 ) {
     TRIM(0, "裁剪视频", "裁剪", Icons.Filled.ContentCut),
     IMPACT_FRAME(1, "击球帧", "击球帧", Icons.Filled.VideoFile),
-    IMPACT_POSITION(2, "击球点", "击球点", Icons.Filled.GpsFixed),
+    IMPACT_POSITION(2, "击球位置", "击球点", Icons.Filled.GpsFixed),
     LANDING(3, "落点", "落点", Icons.Filled.Flag),
     FLIGHT_CURVE(4, "曲线", "曲线", Icons.AutoMirrored.Filled.ShowChart),
     TRACK_STYLE(5, "轨迹样式", "样式", Icons.Filled.Palette),

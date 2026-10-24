@@ -6,22 +6,31 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -36,16 +45,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -63,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.golfcam.model.BezierPath
 import com.mygolfswing.app.ui.golfcam.model.CandidateImpactFrame
 import com.mygolfswing.app.ui.golfcam.model.GolfCamFrameTimeline
+import com.mygolfswing.app.ui.golfcam.model.GolfCamSpeedConfig
 import com.mygolfswing.app.ui.golfcam.model.GolfCamStep
 import com.mygolfswing.app.ui.golfcam.model.GolfCamWorkflowState
 import com.mygolfswing.app.ui.golfcam.model.NormalizedPoint
@@ -112,6 +127,18 @@ internal fun previewTrajectoryTiming(
     )
 }
 
+internal fun trackStyleStaticPreviewProgress(
+    speedPreviewMode: Boolean,
+    timing: TrajectoryTiming?,
+    speedLevel: Double,
+): Float {
+    if (!speedPreviewMode || timing == null) return 1f
+    return GolfCamSpeedConfig.progress(
+        timeProgress = 0.5 / timing.totalDurationSec.coerceAtLeast(0.000001),
+        speedLevel = speedLevel,
+    ).toFloat().coerceIn(0f, 1f)
+}
+
 internal fun clampedCurveControlPoint(
     xPx: Float,
     yPx: Float,
@@ -130,21 +157,24 @@ internal fun visibleCurveHitCenter(
     heightPx: Float,
     targetSizePx: Float,
 ): Offset {
-    fun clampToVisible(value: Float, dimension: Float): Float {
-        if (dimension <= 0f || !dimension.isFinite() || !value.isFinite()) return 0f
-        if (dimension <= targetSizePx || !targetSizePx.isFinite()) return dimension / 2f
-        val half = targetSizePx / 2f
-        return value.coerceIn(half, dimension - half)
+    @Suppress("UNUSED_PARAMETER")
+    val ignoredTargetSizePx = targetSizePx
+    fun scaled(value: Float, dimension: Float): Float {
+        if (dimension <= 0f || !dimension.isFinite()) return 0f
+        return (value.takeIf { it.isFinite() } ?: 0.5f) * dimension
     }
     return Offset(
-        x = clampToVisible(point.x * widthPx, widthPx),
-        y = clampToVisible(point.y * heightPx, heightPx),
+        x = scaled(point.x, widthPx),
+        y = scaled(point.y, heightPx),
     )
 }
 
 private const val LANDING_MARKER_ANCHOR_RATIO = 0.25f
 internal const val IMPACT_MARKER_SIZE_DP = 24f
 internal const val IMPACT_DRAG_RADIUS_DP = 50f
+internal const val IMPACT_ACTIVE_RING_SIZE_DP = 34f
+internal const val IMPACT_ACTIVE_RING_STROKE_DP = 2f
+internal const val IMPACT_ACTIVE_RING_ALPHA = 0.6f
 internal const val LANDING_MARKER_SIZE_DP = 24f
 internal const val LANDING_DRAG_RADIUS_DP = 50f
 
@@ -159,6 +189,7 @@ fun UnifiedVideoPreview(
     state: GolfCamWorkflowState,
     modifier: Modifier = Modifier,
     videoFrameRate: Double = 30.0,
+    trackStyleSpeedPreviewMode: Boolean = false,
     candidateFrames: List<CandidateImpactFrame> = emptyList(),
     onCandidateFrameSelected: ((CandidateImpactFrame) -> Unit)? = null,
     onImpactPositionChange: ((Float, Float) -> Unit)? = null,
@@ -168,6 +199,16 @@ fun UnifiedVideoPreview(
     var playing by remember { mutableStateOf(false) }
     var elapsedMs by remember { mutableLongStateOf(0L) }
     var videoAspectRatio by remember { mutableFloatStateOf(9f / 16f) }
+    val supportsZoom = currentStep == GolfCamStep.LANDING || currentStep == GolfCamStep.FLIGHT_CURVE
+    val minimumZoomScale = if (currentStep == GolfCamStep.FLIGHT_CURVE) 0.72f else 1f
+    var zoomScale by remember(currentStep) {
+        mutableFloatStateOf(if (currentStep == GolfCamStep.FLIGHT_CURVE) 0.86f else 1f)
+    }
+    var curveVisible by remember(currentStep) { mutableStateOf(true) }
+    var trackStyleShowsStaticPreview by remember(currentStep) {
+        mutableStateOf(currentStep == GolfCamStep.TRACK_STYLE)
+    }
+    val haptics = LocalHapticFeedback.current
 
     DisposableEffect(player) {
         @Suppress("DEPRECATION")
@@ -193,6 +234,13 @@ fun UnifiedVideoPreview(
 
     LaunchedEffect(player, playing) {
         if (playing) player.play() else player.pause()
+    }
+
+    LaunchedEffect(currentStep, trackStyleSpeedPreviewMode) {
+        if (currentStep == GolfCamStep.TRACK_STYLE) {
+            playing = false
+            trackStyleShowsStaticPreview = true
+        }
     }
 
     LaunchedEffect(player, currentStep, state.impactFrame, playing) {
@@ -226,88 +274,226 @@ fun UnifiedVideoPreview(
             Box(
                 modifier = Modifier.size(displaySize.width.dp, displaySize.height.dp),
             ) {
-                AndroidView(
-                    factory = { ctx ->
-                        PlayerView(ctx).apply {
-                            this.player = player
-                            useController = false
-                        }
-                    },
-                    update = { view -> view.player = player },
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures { playing = !playing }
+                        .graphicsLayer {
+                            scaleX = zoomScale
+                            scaleY = zoomScale
+                        }
+                        .pointerInput(supportsZoom, minimumZoomScale) {
+                            if (!supportsZoom) return@pointerInput
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                do {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    if (event.changes.count { it.pressed } >= 2) {
+                                        val zoomChange = event.calculateZoom()
+                                        if (zoomChange.isFinite() && zoomChange > 0f) {
+                                            zoomScale = (zoomScale * zoomChange).coerceIn(minimumZoomScale, 4f)
+                                        }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            }
+                        }
+                        .testTag("golfcam-video-scaled-content"),
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                this.player = player
+                                useController = false
+                            }
                         },
-                )
+                        update = { view -> view.player = player },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures {
+                                    if (currentStep == GolfCamStep.TRACK_STYLE) {
+                                        trackStyleShowsStaticPreview = false
+                                    }
+                                    playing = !playing
+                                }
+                            },
+                    )
 
-                when (currentStep) {
-                    GolfCamStep.IMPACT_POSITION -> ImpactPositionOverlay(
-                        state = state,
-                        onPositionChange = onImpactPositionChange,
-                    )
-                    GolfCamStep.LANDING -> LandingOverlay(
-                        state = state,
-                        onLandingChange = onLandingChange,
-                    )
-                    GolfCamStep.FLIGHT_CURVE -> FlightCurveOverlay(
-                        state = state,
-                        onFlightCurveChange = onFlightCurveChange,
-                    )
-                    GolfCamStep.TRACK_STYLE -> {
-                        val bezier = state.flightCurve?.bezierPath
-                        val trackStyle = state.trackStyle?.style
-                        if (bezier != null && trackStyle != null) {
-                            val timing = state.impactFrame?.let { impact ->
-                                previewTrajectoryTiming(
-                                    impactTimeMs = impact.timeMs,
-                                    flightTimeSec = state.flightCurve?.landingPoint?.flightTimeSec,
-                                    fps = videoFrameRate,
-                                )
-                            }
-                            if (timing != null) {
-                                TrajectoryAnimationOverlay(
+                    when (currentStep) {
+                        GolfCamStep.IMPACT_POSITION -> ImpactPositionOverlay(
+                            state = state,
+                            onPositionChange = onImpactPositionChange,
+                        )
+                        GolfCamStep.LANDING -> LandingOverlay(
+                            state = state,
+                            onLandingChange = onLandingChange,
+                        )
+                        GolfCamStep.FLIGHT_CURVE -> if (curveVisible) {
+                            FlightCurveOverlay(
+                                state = state,
+                                onFlightCurveChange = onFlightCurveChange,
+                            )
+                        }
+                        GolfCamStep.TRACK_STYLE -> {
+                            val bezier = state.flightCurve?.bezierPath
+                            val trackStyle = state.trackStyle?.style
+                            if (bezier != null && trackStyle != null) {
+                                val timing = state.impactFrame?.let { impact ->
+                                    previewTrajectoryTiming(
+                                        impactTimeMs = impact.timeMs,
+                                        flightTimeSec = state.flightCurve?.landingPoint?.flightTimeSec,
+                                        fps = videoFrameRate,
+                                    )
+                                }
+                                if (trackStyleShowsStaticPreview) {
+                                    val staticProgress = trackStyleStaticPreviewProgress(
+                                        speedPreviewMode = trackStyleSpeedPreviewMode,
+                                        timing = timing,
+                                        speedLevel = trackStyle.speedLevel,
+                                    )
+                                    TrajectoryStaticOverlay(
+                                        bezier = bezier,
+                                        style = trackStyle,
+                                        progress = staticProgress,
+                                        modifier = Modifier.testTag("golfcam-track-style-static-preview"),
+                                    )
+                                } else if (timing != null) {
+                                    TrajectoryAnimationOverlay(
+                                        bezier = bezier,
+                                        timing = timing,
+                                        style = trackStyle,
+                                        playing = playing,
+                                        elapsedMs = elapsedMs.coerceAtLeast(0L),
+                                        modifier = Modifier.testTag("golfcam-track-style-animated-preview"),
+                                    )
+                                } else {
+                                    TrajectoryStaticOverlay(bezier = bezier, style = trackStyle)
+                                }
+                            } else if (bezier != null) {
+                                TrajectoryStaticOverlay(
                                     bezier = bezier,
-                                    timing = timing,
-                                    style = trackStyle,
-                                    playing = playing,
-                                    elapsedMs = elapsedMs.coerceAtLeast(0L),
+                                    style = com.mygolfswing.app.ui.golfcam.model.TrackStyle(),
                                 )
-                            } else {
-                                TrajectoryStaticOverlay(bezier = bezier, style = trackStyle)
                             }
-                        } else if (bezier != null) {
-                            TrajectoryStaticOverlay(
-                                bezier = bezier,
-                                style = com.mygolfswing.app.ui.golfcam.model.TrackStyle(),
-                            )
                         }
-                    }
-                    GolfCamStep.IMPACT_FRAME -> {
-                        if (candidateFrames.isNotEmpty()) {
-                            CandidateFrameBadges(
-                                candidates = candidateFrames,
-                                currentFrameIndex = state.impactFrame?.frameIndex ?: -1,
-                                onSelect = onCandidateFrameSelected,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(start = 10.dp, top = 10.dp),
-                            )
+                        GolfCamStep.IMPACT_FRAME -> {
+                            if (candidateFrames.isNotEmpty()) {
+                                CandidateFrameBadges(
+                                    candidates = candidateFrames,
+                                    currentFrameIndex = state.impactFrame?.frameIndex ?: -1,
+                                    onSelect = onCandidateFrameSelected,
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(start = 10.dp, top = 10.dp),
+                                )
+                            }
                         }
+                        else -> { /* TRIM 无视频叠加，TRIM 显示播放控件 */ }
                     }
-                    else -> { /* TRIM 无视频叠加，TRIM 显示播放控件 */ }
+
+                    if (currentStep == GolfCamStep.TRIM) {
+                        VideoTransportControls(
+                            playing = playing,
+                            onPrev = { player.seekTo((player.currentPosition - 3000L).coerceAtLeast(0L)) },
+                            onPlayPause = { playing = !playing },
+                            onNext = { player.seekTo(player.currentPosition + 3000L) },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 12.dp),
+                        )
+                    }
+
+                    if (currentStep == GolfCamStep.TRACK_STYLE) {
+                        TrackStyleTransportControls(
+                            playing = playing,
+                            onPlayPause = {
+                                trackStyleShowsStaticPreview = false
+                                playing = !playing
+                            },
+                            onReplay = {
+                                trackStyleShowsStaticPreview = false
+                                player.seekTo((state.impactFrame?.timeMs ?: 0L).coerceAtLeast(0L))
+                                playing = true
+                            },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 8.dp),
+                        )
+                    }
                 }
 
-                if (currentStep == GolfCamStep.TRIM) {
-                    VideoTransportControls(
-                        playing = playing,
-                        onPrev = { player.seekTo((player.currentPosition - 3000L).coerceAtLeast(0L)) },
-                        onPlayPause = { playing = !playing },
-                        onNext = { player.seekTo(player.currentPosition + 3000L) },
+                if (supportsZoom && zoomScale > minimumZoomScale + 0.001f) {
+                    Row(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 12.dp),
-                    )
+                            .align(Alignment.TopEnd)
+                            .padding(top = 10.dp, end = 10.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.60f))
+                            .clickable {
+                                zoomScale = minimumZoomScale
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                            .testTag("golfcam-reset-zoom"),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.ZoomOutMap, null, tint = Color.White, modifier = Modifier.size(11.dp))
+                        Text("重置", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+
+                if (currentStep == GolfCamStep.FLIGHT_CURVE) {
+                    if (!curveVisible) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onLongPress = {
+                                            curveVisible = true
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        },
+                                    )
+                                }
+                                .testTag("golfcam-flight-curve-hidden-overlay"),
+                        )
+                        Text(
+                            "长按显示轨迹",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 10.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.48f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            curveVisible = !curveVisible
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 10.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.50f))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
+                            .shadow(8.dp, CircleShape)
+                            .testTag("golfcam-flight-curve-visibility"),
+                    ) {
+                        Icon(
+                            imageVector = if (curveVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (curveVisible) "隐藏轨迹" else "显示轨迹",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                 }
             }
         }
@@ -315,6 +501,57 @@ fun UnifiedVideoPreview(
 }
 
 // ─── 视频播放控制栏 ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun TrackStyleTransportControls(
+    playing: Boolean,
+    onPlayPause: () -> Unit,
+    onReplay: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .padding(horizontal = 40.dp, vertical = 16.dp)
+            .testTag("golfcam-track-style-transport"),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .shadow(4.dp, CircleShape)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.90f))
+                .clickable(onClick = onPlayPause)
+                .testTag("golfcam-track-style-play-pause"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (playing) "暂停轨迹预览" else "播放轨迹预览",
+                tint = DSColors.deepGreen,
+                modifier = Modifier.size(25.dp),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .shadow(4.dp, CircleShape)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.78f))
+                .clickable(onClick = onReplay)
+                .testTag("golfcam-track-style-replay"),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Refresh,
+                contentDescription = "重播轨迹预览",
+                tint = DSColors.deepGreen,
+                modifier = Modifier.size(25.dp),
+            )
+        }
+    }
+}
 
 @Composable
 private fun VideoTransportControls(
@@ -396,6 +633,7 @@ private fun ImpactPositionOverlay(
     var nx by remember(pos) { mutableFloatStateOf(normalizedCoordinateOrCenter(pos?.normalizedX)) }
     var ny by remember(pos) { mutableFloatStateOf(normalizedCoordinateOrCenter(pos?.normalizedY)) }
     var isDragging by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
 
     LaunchedEffect(Unit) {
         if (pos == null) onPositionChange?.invoke(nx, ny)
@@ -411,32 +649,45 @@ private fun ImpactPositionOverlay(
         val hPx = with(density) { maxHeight.toPx() }
         val markerSizeDp = IMPACT_MARKER_SIZE_DP.dp
         val markerHalfPx = with(density) { (markerSizeDp / 2).toPx() }
+        val dragRadiusPx = with(density) { IMPACT_DRAG_RADIUS_DP.dp.toPx() }
 
-        // iOS 体验：可从画面任意位置起拖，标记跟随手势移动；双击仍可快速跳位。
+        // iOS：画面双击直接跳位；拖动只由击球点周围 100dp 的透明圆形热区接管。
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .testTag("golfcam-impact-position-overlay")
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onDoubleTap = { offset ->
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             nx = normalizedVideoCoordinate(offset.x, wPx)
                             ny = normalizedVideoCoordinate(offset.y, hPx)
                             onPositionChange?.invoke(nx, ny)
                         },
                     )
+                },
+        )
+
+        Box(
+            modifier = Modifier
+                .size((IMPACT_DRAG_RADIUS_DP * 2f).dp)
+                .offset {
+                    IntOffset(
+                        x = (nx * wPx - dragRadiusPx).toInt(),
+                        y = (ny * hPx - dragRadiusPx).toInt(),
+                    )
                 }
-                .pointerInput(Unit) {
+                .testTag("golfcam-impact-position-drag-target")
+                .pointerInput(wPx, hPx) {
                     detectDragGestures(
-                        onDragStart = { offset ->
-                            nx = normalizedVideoCoordinate(offset.x, wPx)
-                            ny = normalizedVideoCoordinate(offset.y, hPx)
-                            onPositionChange?.invoke(nx, ny)
+                        onDragStart = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             isDragging = true
                         },
-                        onDrag = { change, _ ->
+                        onDrag = { change, dragAmount ->
                             change.consume()
-                            nx = normalizedVideoCoordinate(change.position.x, wPx)
-                            ny = normalizedVideoCoordinate(change.position.y, hPx)
+                            nx = normalizedVideoCoordinate(nx * wPx + dragAmount.x, wPx)
+                            ny = normalizedVideoCoordinate(ny * hPx + dragAmount.y, hPx)
                             onPositionChange?.invoke(nx, ny)
                         },
                         onDragEnd = { isDragging = false },
@@ -445,14 +696,14 @@ private fun ImpactPositionOverlay(
                 },
         )
 
-        // 拖动时的外圈（对齐 iOS 白色圆环）
+        // iOS active ring: 34pt, 2pt white, 60% opacity.
         if (isDragging) {
             androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
                 drawCircle(
-                    color = Color.White,
-                    radius = with(density) { 18.dp.toPx() },
+                    color = Color.White.copy(alpha = IMPACT_ACTIVE_RING_ALPHA),
+                    radius = with(density) { (IMPACT_ACTIVE_RING_SIZE_DP / 2f).dp.toPx() },
                     center = Offset(nx * size.width, ny * size.height),
-                    style = Stroke(2.5f),
+                    style = Stroke(with(density) { IMPACT_ACTIVE_RING_STROKE_DP.dp.toPx() }),
                 )
             }
         }
@@ -469,7 +720,15 @@ private fun ImpactPositionOverlay(
                         x = (nx * wPx - markerHalfPx).toInt(),
                         y = (ny * hPx - markerHalfPx).toInt(),
                     )
-                },
+                }
+                .shadow(
+                    elevation = 4.dp,
+                    shape = CircleShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = 0.5f),
+                    spotColor = Color.Black.copy(alpha = 0.5f),
+                )
+                .testTag("golfcam-impact-position-marker"),
         )
     }
 }
@@ -485,19 +744,29 @@ private fun LandingOverlay(
     var nx by remember(landing) { mutableFloatStateOf(normalizedCoordinateOrCenter(landing?.normalizedX)) }
     var ny by remember(landing) { mutableFloatStateOf(normalizedCoordinateOrCenter(landing?.normalizedY)) }
     var isDragging by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    val landingMarkPainter = androidx.compose.ui.res.painterResource(com.mygolfswing.app.R.drawable.landing_mark)
+    val currentOnLandingChange by rememberUpdatedState(onLandingChange)
 
     LaunchedEffect(Unit) {
         if (landing == null) onLandingChange?.invoke(nx, ny)
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("golfcam-landing-overlay"),
+    ) {
         val density = LocalDensity.current
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
-        val markerSizePx = with(density) { LANDING_MARKER_SIZE_DP.dp.toPx() }
+        val markerSizeDp = (LANDING_MARKER_SIZE_DP * if (isDragging) 1.08f else 1f).dp
+        val markerSizePx = with(density) { markerSizeDp.toPx() }
+        val dragTargetPx = with(density) { (LANDING_DRAG_RADIUS_DP * 2f).dp.toPx() }
         val anchorCenter = Offset(nx * wPx, ny * hPx)
         val visualCx = anchorCenter.x
         val visualCy = anchorCenter.y - markerSizePx * LANDING_MARKER_ANCHOR_RATIO
+        val labelCenterY = anchorCenter.y - markerSizePx * 0.8f - with(density) { 12.dp.toPx() }
 
         Canvas(
             modifier = Modifier
@@ -507,48 +776,78 @@ private fun LandingOverlay(
                         onDoubleTap = { offset ->
                             nx = normalizedVideoCoordinate(offset.x, wPx)
                             ny = normalizedVideoCoordinate(offset.y, hPx)
-                            onLandingChange?.invoke(nx, ny)
+                            currentOnLandingChange?.invoke(nx, ny)
                         },
                     )
-                }
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            nx = normalizedVideoCoordinate(offset.x, wPx)
-                            ny = normalizedVideoCoordinate(offset.y, hPx)
-                            onLandingChange?.invoke(nx, ny)
-                            isDragging = true
-                        },
-                        onDragEnd = { isDragging = false },
-                        onDragCancel = { isDragging = false },
-                    ) { change, _ ->
-                        change.consume()
-                        nx = normalizedVideoCoordinate(change.position.x, wPx)
-                        ny = normalizedVideoCoordinate(change.position.y, hPx)
-                        onLandingChange?.invoke(nx, ny)
-                    }
                 },
-        ) {
-            val cx = nx * size.width
-            val anchorOffset = markerSizePx * LANDING_MARKER_ANCHOR_RATIO
-            val cy = ny * size.height - anchorOffset
-            drawLandingMarker(anchor = Offset(cx, cy + anchorOffset), active = isDragging)
-        }
+        ) {}
+
+        Image(
+            painter = landingMarkPainter,
+            contentDescription = "落点",
+            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White),
+            modifier = Modifier
+                .size(markerSizeDp)
+                .offset {
+                    IntOffset(
+                        x = (visualCx - markerSizePx / 2f).toInt(),
+                        y = (visualCy - markerSizePx / 2f).toInt(),
+                    )
+                }
+                .shadow(
+                    elevation = 3.dp,
+                    shape = CircleShape,
+                    clip = false,
+                    ambientColor = Color.Black.copy(alpha = 0.50f),
+                    spotColor = Color.Black.copy(alpha = 0.50f),
+                )
+                .testTag("golfcam-landing-marker"),
+        )
 
         Box(
             modifier = Modifier
                 .offset {
                     IntOffset(
-                        x = (visualCx - with(density) { 23.dp.toPx() }).toInt(),
-                        y = (visualCy - with(density) { 44.dp.toPx() }).toInt(),
+                        x = (anchorCenter.x - with(density) { 22.dp.toPx() }).toInt(),
+                        y = (labelCenterY - with(density) { 11.dp.toPx() }).toInt(),
                     )
                 }
+                .width(44.dp)
+                .height(22.dp)
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color.Black.copy(alpha = 0.55f))
                 .padding(horizontal = 6.dp, vertical = 3.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Text("落点", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
+
+        Box(
+            modifier = Modifier
+                .size((LANDING_DRAG_RADIUS_DP * 2f).dp)
+                .offset {
+                    IntOffset(
+                        x = (anchorCenter.x - dragTargetPx / 2f).toInt(),
+                        y = (anchorCenter.y - dragTargetPx / 2f).toInt(),
+                    )
+                }
+                .pointerInput(wPx, hPx) {
+                    detectDragGestures(
+                        onDragStart = {
+                            isDragging = true
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        nx = normalizedVideoCoordinate(nx * wPx + dragAmount.x, wPx)
+                        ny = normalizedVideoCoordinate(ny * hPx + dragAmount.y, hPx)
+                        currentOnLandingChange?.invoke(nx, ny)
+                    }
+                }
+                .testTag("golfcam-landing-drag-target"),
+        )
     }
 }
 
@@ -562,6 +861,7 @@ private fun FlightCurveOverlay(
     val impact = state.impactPosition ?: return
     val landing = state.landing ?: return
     val prev = state.flightCurve
+    val haptics = LocalHapticFeedback.current
     val defaults = remember(impact, landing) {
         GolfCamCurveSpec.suggestedControlPoints(
             start = NormalizedPoint(impact.normalizedX, impact.normalizedY),
@@ -569,25 +869,33 @@ private fun FlightCurveOverlay(
         )
     }
 
-    var cp1x by remember(prev, impact, landing) {
+    var cp1x by remember(impact, landing) {
         mutableFloatStateOf(prev?.controlPoint1?.x ?: defaults.first.x)
     }
-    var cp1y by remember(prev, impact, landing) {
+    var cp1y by remember(impact, landing) {
         mutableFloatStateOf(prev?.controlPoint1?.y ?: defaults.first.y)
     }
-    var cp2x by remember(prev, impact, landing) {
+    var cp2x by remember(impact, landing) {
         mutableFloatStateOf(prev?.controlPoint2?.x ?: defaults.second.x)
     }
-    var cp2y by remember(prev, impact, landing) {
+    var cp2y by remember(impact, landing) {
         mutableFloatStateOf(prev?.controlPoint2?.y ?: defaults.second.y)
     }
     var dragging by remember { mutableStateOf<Int?>(null) }
 
+    LaunchedEffect(Unit) {
+        onFlightCurveChange?.invoke(NormalizedPoint(cp1x, cp1y), NormalizedPoint(cp2x, cp2y))
+    }
     LaunchedEffect(cp1x, cp1y, cp2x, cp2y) {
+        delay(80L)
         onFlightCurveChange?.invoke(NormalizedPoint(cp1x, cp1y), NormalizedPoint(cp2x, cp2y))
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("golfcam-flight-curve-overlay"),
+    ) {
         val density = LocalDensity.current
         val wPx = with(density) { maxWidth.toPx() }
         val hPx = with(density) { maxHeight.toPx() }
@@ -603,10 +911,6 @@ private fun FlightCurveOverlay(
             val p2 = Offset(cp2x * w, cp2y * h)
             val p3 = Offset(landing.normalizedX * w, landing.normalizedY * h)
 
-            val helperDash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))
-            drawLine(Color.White.copy(alpha = 0.30f), p0, p1, strokeWidth = 1.dp.toPx(), pathEffect = helperDash)
-            drawLine(Color.White.copy(alpha = 0.30f), p2, p3, strokeWidth = 1.dp.toPx(), pathEffect = helperDash)
-
             drawGolfCamCurveStroke(p0 = p0, p1 = p1, p2 = p2, p3 = p3)
 
             drawCurveControlMarker(center = p1, dragging = dragging == 1, label = "P1")
@@ -615,7 +919,10 @@ private fun FlightCurveOverlay(
 
         CurveControlHitTarget(
             targetSize = touchTargetDp,
-            onDragStart = { dragging = 1 },
+            onDragStart = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                dragging = 1
+            },
             onDragEnd = { dragging = null },
             onDrag = { dragAmount ->
                 val next = clampedCurveControlPoint(
@@ -630,10 +937,14 @@ private fun FlightCurveOverlay(
             modifier = Modifier.offset {
                 IntOffset((cp1HitCenter.x - touchTargetPx / 2f).toInt(), (cp1HitCenter.y - touchTargetPx / 2f).toInt())
             },
+            tag = "golfcam-flight-curve-p1-target",
         )
         CurveControlHitTarget(
             targetSize = touchTargetDp,
-            onDragStart = { dragging = 2 },
+            onDragStart = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                dragging = 2
+            },
             onDragEnd = { dragging = null },
             onDrag = { dragAmount ->
                 val next = clampedCurveControlPoint(
@@ -648,6 +959,7 @@ private fun FlightCurveOverlay(
             modifier = Modifier.offset {
                 IntOffset((cp2HitCenter.x - touchTargetPx / 2f).toInt(), (cp2HitCenter.y - touchTargetPx / 2f).toInt())
             },
+            tag = "golfcam-flight-curve-p2-target",
         )
     }
 }
@@ -659,6 +971,7 @@ private fun CurveControlHitTarget(
     onDragEnd: () -> Unit,
     onDrag: (Offset) -> Unit,
     modifier: Modifier = Modifier,
+    tag: String,
 ) {
     val currentOnDragStart by rememberUpdatedState(onDragStart)
     val currentOnDragEnd by rememberUpdatedState(onDragEnd)
@@ -667,6 +980,7 @@ private fun CurveControlHitTarget(
     Box(
         modifier = modifier
             .size(targetSize)
+            .testTag(tag)
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { currentOnDragStart() },
@@ -678,30 +992,6 @@ private fun CurveControlHitTarget(
                 }
             },
     )
-}
-
-private fun DrawScope.drawLandingMarker(anchor: Offset, active: Boolean) {
-    val markerSize = if (active) (LANDING_MARKER_SIZE_DP + 2f).dp.toPx() else LANDING_MARKER_SIZE_DP.dp.toPx()
-    val anchorOffset = markerSize * LANDING_MARKER_ANCHOR_RATIO
-    val cx = anchor.x
-    val top = anchor.y - anchorOffset - markerSize / 2f
-    val left = cx - markerSize / 2f
-    fun arrowPath(offset: Offset = Offset.Zero) = Path().apply {
-        moveTo(left + offset.x + markerSize * 0.35f, top + offset.y + markerSize * 0.08f)
-        lineTo(left + offset.x + markerSize * 0.65f, top + offset.y + markerSize * 0.08f)
-        lineTo(left + offset.x + markerSize * 0.65f, top + offset.y + markerSize * 0.46f)
-        lineTo(left + offset.x + markerSize * 0.92f, top + offset.y + markerSize * 0.46f)
-        lineTo(left + offset.x + markerSize * 0.50f, top + offset.y + markerSize * 0.94f)
-        lineTo(left + offset.x + markerSize * 0.08f, top + offset.y + markerSize * 0.46f)
-        lineTo(left + offset.x + markerSize * 0.35f, top + offset.y + markerSize * 0.46f)
-        close()
-    }
-    val shadowOffset = Offset(0f, 2.dp.toPx())
-    if (active) {
-        drawCircle(Color.White.copy(alpha = 0.42f), radius = 18.dp.toPx(), center = anchor, style = Stroke(2.dp.toPx()))
-    }
-    drawPath(path = arrowPath(shadowOffset), color = Color.Black.copy(alpha = 0.50f))
-    drawPath(path = arrowPath(), color = Color.White)
 }
 
 private fun DrawScope.drawCurveControlMarker(center: Offset, dragging: Boolean, label: String) {

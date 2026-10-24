@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,20 +14,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +48,7 @@ private fun Modifier.profileListCardShadow(shape: RoundedCornerShape): Modifier 
 @Composable
 fun V2ProfileMoreList(
     modifier: Modifier = Modifier,
+    accountSecuritySubtitle: String = "",
     onStorageTap: () -> Unit = {},
     onResetCreditsTap: () -> Unit = {},
     onAIConfigTap: () -> Unit = {},
@@ -53,9 +57,10 @@ fun V2ProfileMoreList(
     onPrivacyPolicyTap: () -> Unit = {},
     onAccountSecurityTap: () -> Unit = {},
     onLogoutTap: () -> Unit = {},
-    onCloudAuditTap: () -> Unit = {},
     isLoggedIn: Boolean = true,
-    isTestUser: Boolean = false,
+    showsRoleSwitcher: Boolean = false,
+    accountActionsDisabled: Boolean = false,
+    onRoleSwitchTap: () -> Unit = {},
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -69,12 +74,15 @@ fun V2ProfileMoreList(
             onUserAgreementTap = onUserAgreementTap,
             onPrivacyPolicyTap = onPrivacyPolicyTap,
         )
-        AccountSecurityCard(onTap = onAccountSecurityTap)
-        if (isTestUser) {
-            DeveloperToolsCard(onCloudAuditTap = onCloudAuditTap)
+        AccountSecurityCard(subtitle = accountSecuritySubtitle, onTap = onAccountSecurityTap)
+        if (showsRoleSwitcher) {
+            RoleSwitcherCard(
+                accountActionsDisabled = accountActionsDisabled,
+                onTap = onRoleSwitchTap,
+            )
         }
         if (isLoggedIn) {
-            LogoutCard(onTap = onLogoutTap)
+            LogoutCard(accountActionsDisabled = accountActionsDisabled, onTap = onLogoutTap)
         } else {
             LoginEntryCard(onTap = onLogoutTap)
         }
@@ -82,30 +90,46 @@ fun V2ProfileMoreList(
 }
 
 @Composable
-private fun DeveloperToolsCard(onCloudAuditTap: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .profileListCardShadow(RoundedCornerShape(20.dp))
-            .clip(RoundedCornerShape(20.dp))
-            .background(DSColors.cardWhite),
+internal fun RoleSwitcherCard(
+    accountActionsDisabled: Boolean,
+    onTap: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .profileListCardShadow(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(DSColors.cardWhite)
+            .border(1.dp, DSColors.goldBright.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+            .clickable(enabled = !accountActionsDisabled, onClick = onTap)
+            .alpha(if (accountActionsDisabled) 0.62f else 1f)
+            .padding(horizontal = DSSpacing.lg)
+            .height(64.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(DSSpacing.md),
     ) {
-        Text(
-            text = "开发者工具",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color(0xFFF39C12),
-            modifier = Modifier.padding(horizontal = DSSpacing.lg, vertical = DSSpacing.lg),
-        )
-        Row(modifier = Modifier.clickable { onCloudAuditTap() }) {
-            Item(
-                icon = Icons.Filled.CloudSync,
-                bg = DSColors.fairway,
-                title = "云端一致性",
-                subtitle = "检查本机与 dataSync 数据差异",
-                showDivider = false,
+        Box(
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(DSColors.deepGreen),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.SwapHoriz, null, tint = DSColors.goldBright, modifier = Modifier.size(16.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("切换身份", color = DSColors.inkGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (accountActionsDisabled) "视频发送完成后即可切换" else "选择练习者版或教练版",
+                color = DSColors.shadowGray,
+                fontSize = 11.sp,
             )
         }
+        Text(
+            "双身份",
+            color = DSColors.fairway,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(DSColors.mistGreen)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+        )
+        Icon(Icons.Filled.ChevronRight, null, tint = DSColors.shadowGray.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
     }
 }
 
@@ -139,10 +163,24 @@ private fun MoreFunctionsCard(
             modifier = Modifier
                 .clickable { onStorageTap() },
         ) {
-            Item(icon = Icons.Filled.Storage, bg = Color(0xFF9B59B6), title = "存储空间", subtitle = "管理本地缓存", showDivider = true)
+            Item(
+                icon = Icons.Filled.Storage,
+                bg = Color(0xFF9B59B6),
+                title = "存储空间",
+                subtitle = "管理本地缓存",
+                showDivider = true,
+                iconStyle = V2ProfileMenuIconStyle.INTERNAL_DRIVE,
+            )
         }
         Row(modifier = Modifier.clickable { onResetCreditsTap() }) {
-            Item(icon = Icons.Filled.Refresh, bg = DSColors.deepGreen, title = "积分重置", subtitle = "校准余额与本地缓存", showDivider = true)
+            Item(
+                icon = Icons.Filled.Refresh,
+                bg = DSColors.deepGreen,
+                title = "积分重置",
+                subtitle = "校准余额与本地缓存",
+                showDivider = true,
+                iconStyle = V2ProfileMenuIconStyle.FILLED_CIRCLE_REFRESH,
+            )
         }
         Row(modifier = Modifier.clickable { onAIConfigTap() }) {
             Item(icon = Icons.Filled.Memory, bg = DSColors.fairway, title = "AI 接口配置", subtitle = "挥呗 AI", showDivider = true)
@@ -154,7 +192,14 @@ private fun MoreFunctionsCard(
             Item(icon = Icons.Filled.Description, bg = Color(0xFF8E8E93), title = "用户协议", subtitle = "了解服务条款", showDivider = true)
         }
         Row(modifier = Modifier.clickable { onPrivacyPolicyTap() }) {
-            Item(icon = Icons.Filled.PrivacyTip, bg = Color(0xFF3D5A80), title = "隐私政策", subtitle = "数据安全与隐私保护", showDivider = false)
+            Item(
+                icon = Icons.Filled.Shield,
+                bg = Color(0xFF3D5A80),
+                title = "隐私政策",
+                subtitle = "数据安全与隐私保护",
+                showDivider = false,
+                iconStyle = V2ProfileMenuIconStyle.LOCK_SHIELD,
+            )
         }
     }
 }
@@ -166,6 +211,7 @@ private fun Item(
     title: String,
     subtitle: String,
     showDivider: Boolean,
+    iconStyle: V2ProfileMenuIconStyle = V2ProfileMenuIconStyle.STANDARD,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -175,15 +221,7 @@ private fun Item(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(DSSpacing.md),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(bg),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(imageVector = icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-            }
+            V2ProfileMenuIconTile(icon = icon, background = bg, style = iconStyle)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -211,7 +249,7 @@ private fun Item(
 }
 
 @Composable
-private fun AccountSecurityCard(onTap: () -> Unit) {
+private fun AccountSecurityCard(subtitle: String, onTap: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -238,7 +276,17 @@ private fun AccountSecurityCard(onTap: () -> Unit) {
                 modifier = Modifier.size(16.dp),
             )
         }
-        Text(text = "账号与安全", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen, modifier = Modifier.weight(1f))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = "账号与安全", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = DSColors.shadowGray,
+                    maxLines = 1,
+                )
+            }
+        }
         Icon(
             imageVector = Icons.Filled.ChevronRight,
             contentDescription = null,
@@ -249,18 +297,32 @@ private fun AccountSecurityCard(onTap: () -> Unit) {
 }
 
 @Composable
-private fun LogoutCard(onTap: () -> Unit) {
-    Box(
+private fun LogoutCard(accountActionsDisabled: Boolean, onTap: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .profileListCardShadow(RoundedCornerShape(16.dp))
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite)
-            .clickable { onTap() }
+            .clickable(enabled = !accountActionsDisabled) { onTap() }
             .height(64.dp),
-        contentAlignment = Alignment.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
     ) {
-        Text(text = "退出登录", color = DSColors.flagRed, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        if (accountActionsDisabled) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = DSColors.shadowGray,
+                strokeWidth = 2.dp,
+            )
+        }
+        Text(
+            text = if (accountActionsDisabled) "内容发送中，暂不可退出" else "退出登录",
+            color = if (accountActionsDisabled) DSColors.shadowGray else DSColors.flagRed,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = if (accountActionsDisabled) 8.dp else 0.dp),
+        )
     }
 }
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material3.Icon
@@ -28,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,10 +43,12 @@ import com.mygolfswing.app.ui.designsystem.DSColors
  * 广场 2 列网格视频卡（对齐 iOS `V2PlazaVideoGridCard`）。
  */
 @Composable
+@android.annotation.SuppressLint("ModifierParameter")
 fun V2PlazaGridCard(
     video: V2PlazaVideo,
     onTap: () -> Unit,
     onSaveTap: () -> Unit,
+    isGuest: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -61,13 +65,13 @@ fun V2PlazaGridCard(
             .border(width = 1.dp, color = Color.Black.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp))
             .clickable { onTap() },
     ) {
-        Thumbnail(video = video, onSaveTap = onSaveTap)
+        Thumbnail(video = video, isGuest = isGuest, onSaveTap = onSaveTap)
         InfoBlock(video = video)
     }
 }
 
 @Composable
-private fun Thumbnail(video: V2PlazaVideo, onSaveTap: () -> Unit) {
+private fun Thumbnail(video: V2PlazaVideo, isGuest: Boolean, onSaveTap: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -86,7 +90,7 @@ private fun Thumbnail(video: V2PlazaVideo, onSaveTap: () -> Unit) {
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            TopicChip(text = video.categoryDisplayName ?: video.topic.displayName)
+            video.categoryDisplayName?.let { TopicChip(text = it) }
             Spacer(modifier = Modifier.weight(1f))
             if (video.isNew) NewBadge()
         }
@@ -98,7 +102,7 @@ private fun Thumbnail(video: V2PlazaVideo, onSaveTap: () -> Unit) {
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SaveButton(saved = video.isSaved, onTap = onSaveTap)
+            SaveButton(saved = video.isSaved, isGuest = isGuest, onTap = onSaveTap)
             Spacer(modifier = Modifier.weight(1f))
             DurationChip(seconds = video.durationSec.toInt())
         }
@@ -170,12 +174,18 @@ private fun DurationChip(seconds: Int) {
 }
 
 @Composable
-private fun SaveButton(saved: Boolean, onTap: () -> Unit) {
+private fun SaveButton(saved: Boolean, isGuest: Boolean, onTap: () -> Unit) {
     Box(
         modifier = Modifier
             .size(24.dp)
             .clip(CircleShape)
-            .background(if (saved) DSColors.trophyGold else Color.Black.copy(alpha = 0.55f))
+            .background(
+                when {
+                    saved -> DSColors.trophyGold
+                    isGuest -> DSColors.deepGreen.copy(alpha = 0.82f)
+                    else -> Color.Black.copy(alpha = 0.55f)
+                },
+            )
             .clickable { onTap() },
         contentAlignment = Alignment.Center,
     ) {
@@ -185,6 +195,20 @@ private fun SaveButton(saved: Boolean, onTap: () -> Unit) {
             tint = Color.White,
             modifier = Modifier.size(10.dp),
         )
+        if (isGuest && !saved) {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = null,
+                tint = DSColors.deepGreen,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 1.dp, y = 1.dp)
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .padding(2.dp),
+            )
+        }
     }
 }
 
@@ -212,7 +236,7 @@ private fun InfoBlock(video: V2PlazaVideo) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            CoachAvatar(coach = video.coach)
+            V2PlazaCoachAvatar(coach = video.coach, size = 16.dp, fontSize = 7.sp)
             Text(
                 text = video.coach.displayName,
                 fontSize = 11.sp,
@@ -231,21 +255,11 @@ private fun InfoBlock(video: V2PlazaVideo) {
                 text = video.publicGridPrimaryMetaText(),
             )
             Spacer(modifier = Modifier.weight(1f))
-            StatLabel(icon = Icons.Filled.BookmarkBorder, text = video.publicFavoriteText())
+            StatLabel(
+                icon = if (video.publicGridUsesBookmark()) Icons.Filled.BookmarkBorder else Icons.Filled.Schedule,
+                text = video.publicGridSecondaryMetaText(),
+            )
         }
-    }
-}
-
-@Composable
-private fun CoachAvatar(coach: com.mygolfswing.app.data.model.V2PlazaCoach) {
-    Box(
-        modifier = Modifier
-            .size(14.dp)
-            .clip(CircleShape)
-            .background(Brush.linearGradient(coach.avatarTint.gradient)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text = coach.initialChar, color = Color.White, fontSize = 6.sp, fontWeight = FontWeight.Bold)
     }
 }
 

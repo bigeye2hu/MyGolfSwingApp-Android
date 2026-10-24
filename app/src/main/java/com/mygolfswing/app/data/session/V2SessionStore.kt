@@ -5,11 +5,13 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 private val Context.sessionDataStore by preferencesDataStore(name = "v2_session")
 
@@ -21,10 +23,43 @@ private val Context.sessionDataStore by preferencesDataStore(name = "v2_session"
  */
 class V2SessionStore(context: Context) {
     private val dataStore = context.sessionDataStore
+    private val installationPreferences = context.applicationContext.getSharedPreferences(
+        INSTALLATION_PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
 
     val state: Flow<V2Session> = dataStore.data.map { prefs -> prefs.toSession() }
 
+    /**
+     * Last server-confirmed credits update for the active account.
+     *
+     * The key is account-scoped so switching users can never show another account's calibration
+     * time. This mirrors iOS `CreditsManager.lastUpdateTime` instead of keeping the timestamp in a
+     * single screen instance.
+     */
+    val creditsLastUpdateEpochMillis: Flow<Long?> = dataStore.data.map { prefs ->
+        prefs.readString(K_USER_ID)?.let { userId -> prefs[creditsLastUpdateKey(userId)] }
+    }
+
     suspend fun current(): V2Session = dataStore.data.first().toSession()
+
+    /**
+     * Installation-scoped identifier used by the unified account-session backend.
+     *
+     * This intentionally lives outside the account DataStore so logout clears private account
+     * state without making the same Android installation look like a new device. It mirrors iOS'
+     * `AccountAuthSessionStore.deviceId` and never uses a hardware identifier.
+     */
+    @Synchronized
+    fun deviceId(): String {
+        installationPreferences.getString(K_DEVICE_ID, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?.let { return it }
+        val generated = UUID.randomUUID().toString()
+        installationPreferences.edit().putString(K_DEVICE_ID, generated).apply()
+        return generated
+    }
 
     /** 登录成功后写入 session（user_id + sig 必填，其它有则覆盖） */
     suspend fun login(session: V2Session) {
@@ -51,6 +86,11 @@ class V2SessionStore(context: Context) {
             prefs.writeOptionalBoolean(K_HAS_PASSWORD, session.hasPassword)
             prefs.writeOptionalInt(K_CREDITS, session.credits)
             prefs.writeString(K_CREATED_AT, session.createdAt)
+            prefs.writeString(K_AUTH_TOKEN, session.authToken)
+            prefs.writeString(K_AUTH_TOKEN_EXPIRES_AT, session.authTokenExpiresAt)
+            prefs.writeString(K_REFRESH_TOKEN, session.refreshToken)
+            prefs.writeString(K_REFRESH_TOKEN_EXPIRES_AT, session.refreshTokenExpiresAt)
+            prefs.writeString(K_COACH_AUTHORIZATION_STATUS, session.coachAuthorizationStatus)
         }
     }
 
@@ -63,9 +103,29 @@ class V2SessionStore(context: Context) {
         dataStore.edit { it[K_USER_SIG] = userSig }
     }
 
-    suspend fun updateCredits(credits: Int) {
-        dataStore.edit { it[K_CREDITS] = credits }
+    suspend fun updateCredits(credits: Int, serverConfirmedAtEpochMillis: Long? = null) {
+        dataStore.edit { prefs ->
+            prefs[K_CREDITS] = credits
+            if (serverConfirmedAtEpochMillis != null) {
+                prefs.readString(K_USER_ID)?.let { userId ->
+                    prefs[creditsLastUpdateKey(userId)] = serverConfirmedAtEpochMillis
+                }
+            }
+        }
     }
+
+    /** Clears only the active account's local credits snapshot before a server recalibration. */
+    suspend fun clearCreditsCache(userId: String) {
+        dataStore.edit { prefs ->
+            if (prefs.readString(K_USER_ID) == userId) {
+                prefs.remove(K_CREDITS)
+            }
+            prefs.remove(creditsLastUpdateKey(userId))
+        }
+    }
+
+    suspend fun creditsLastUpdateEpochMillis(userId: String): Long? =
+        dataStore.data.first()[creditsLastUpdateKey(userId)]
 
     suspend fun pendingDeletes(bucket: String, userId: String): Set<String> {
         val key = pendingDeleteKey(bucket, userId)
@@ -145,7 +205,11 @@ class V2SessionStore(context: Context) {
                 prefs.writeProviderVerified(id, true)
             } else {
                 prefs.writeAIString(K_AI_API_KEY, apiKey)
-                apiKey?.takeIf { it.isNotBlank() }?.let { prefs.writeProviderApiKey(id, it) }
+                // A blank value is an explicit disconnect: remove the
+                // provider-scoped credential as iOS `disconnectCurrentProvider`
+                // does, otherwise selecting this provider again resurrects a
+                // key the user already removed.
+                prefs.writeProviderApiKey(id, apiKey)
                 prefs.writeProviderVerified(id, verified && !apiKey.isNullOrBlank())
             }
 
@@ -166,6 +230,8 @@ class V2SessionStore(context: Context) {
     }
 
     companion object {
+        private const val INSTALLATION_PREFERENCES = "v2_installation"
+        private const val K_DEVICE_ID = "CurrentDeviceId"
         private val K_USER_ID = stringPreferencesKey("userId")
         private val K_USER_SIG = stringPreferencesKey("userSig")
         private val K_SDK_APP_ID = intPreferencesKey("sdkAppId")
@@ -188,6 +254,11 @@ class V2SessionStore(context: Context) {
         private val K_HAS_PASSWORD = booleanPreferencesKey("hasPassword")
         private val K_CREDITS = intPreferencesKey("credits")
         private val K_CREATED_AT = stringPreferencesKey("createdAt")
+        private val K_AUTH_TOKEN = stringPreferencesKey("authToken")
+        private val K_AUTH_TOKEN_EXPIRES_AT = stringPreferencesKey("authTokenExpiresAt")
+        private val K_REFRESH_TOKEN = stringPreferencesKey("refreshToken")
+        private val K_REFRESH_TOKEN_EXPIRES_AT = stringPreferencesKey("refreshTokenExpiresAt")
+        private val K_COACH_AUTHORIZATION_STATUS = stringPreferencesKey("coachAuthorizationStatus")
 
         private val K_AI_PROVIDER_ID = stringPreferencesKey("ai_provider_id")
         private val K_AI_API_KEY = stringPreferencesKey("ai_api_key")
@@ -196,6 +267,9 @@ class V2SessionStore(context: Context) {
 
         fun pendingDeleteKey(bucket: String, userId: String): Preferences.Key<String> =
             stringPreferencesKey("pending_delete_${bucket}_$userId")
+
+        fun creditsLastUpdateKey(userId: String): Preferences.Key<Long> =
+            longPreferencesKey("credits_last_update_time_$userId")
     }
 }
 
@@ -222,6 +296,11 @@ data class V2Session(
     val hasPassword: Boolean? = null,
     val credits: Int? = null,
     val createdAt: String? = null,
+    val authToken: String? = null,
+    val authTokenExpiresAt: String? = null,
+    val refreshToken: String? = null,
+    val refreshTokenExpiresAt: String? = null,
+    val coachAuthorizationStatus: String? = null,
 ) {
     val isLoggedIn: Boolean get() = !userId.isNullOrBlank() && !userSig.isNullOrBlank()
 
@@ -253,6 +332,11 @@ private fun Preferences.toSession(): V2Session = V2Session(
     hasPassword = this[booleanPreferencesKey("hasPassword")],
     credits = this[intPreferencesKey("credits")],
     createdAt = readString(stringPreferencesKey("createdAt")),
+    authToken = readString(stringPreferencesKey("authToken")),
+    authTokenExpiresAt = readString(stringPreferencesKey("authTokenExpiresAt")),
+    refreshToken = readString(stringPreferencesKey("refreshToken")),
+    refreshTokenExpiresAt = readString(stringPreferencesKey("refreshTokenExpiresAt")),
+    coachAuthorizationStatus = readString(stringPreferencesKey("coachAuthorizationStatus")),
 )
 
 private fun Preferences.readString(key: Preferences.Key<String>): String? =
@@ -319,7 +403,7 @@ private fun androidx.datastore.preferences.core.MutablePreferences.writeAIString
 
 private fun androidx.datastore.preferences.core.MutablePreferences.writeProviderApiKey(
     providerId: String,
-    value: String,
+    value: String?,
 ) {
     providerApiKeyKey(providerId)?.let { writeString(it, value) }
 }

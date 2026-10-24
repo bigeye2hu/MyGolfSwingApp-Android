@@ -5,6 +5,7 @@ package com.mygolfswing.app.data.net
  */
 object V2ApiConfig {
     const val CLOUD_BASE_HOST = "https://mygolfswingapp-9g2izywqa8ac3f5b-1259543736.ap-shanghai.app.tcloudbase.com/"
+    const val DOWNLOAD_SERVICE_HEALTH = "https://download.mygolfai.com.cn/"
     const val DOWNLOAD_SERVER_BASE = "https://download.mygolfai.com.cn/api/"
 
     const val IM_SDK_APP_ID: Int = 1600125336

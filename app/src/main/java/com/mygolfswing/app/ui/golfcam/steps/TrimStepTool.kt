@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -27,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,13 +38,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -58,14 +64,15 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToLong
 
 internal const val TRIM_THUMBNAIL_COUNT = 15
-internal const val TRIM_SAFE_MARGIN_DP = 28
+internal const val TRIM_SAFE_MARGIN_DP = 16
 internal const val TRIM_HANDLE_WIDTH_DP = 12
 internal const val TRIM_BAR_HEIGHT_DP = 56
 internal const val TRIM_HANDLE_TOUCH_EXTRA_DP = 16
 internal const val TRIM_DIM_OVERLAY_ALPHA = 0.60f
-internal const val TRIM_SELECTION_BORDER_STROKE_PX = 1.5f
+internal const val TRIM_SELECTION_BORDER_STROKE_DP = 1.5f
 internal const val TRIM_SELECTION_FILL_ALPHA = 0.08f
 internal const val TRIM_SELECTION_CORNER_RADIUS_DP = 6
 internal const val TRIM_STRIP_CORNER_RADIUS_DP = 4
@@ -185,11 +192,14 @@ internal fun trimThumbnailSampleTimesUs(
     thumbnailCount: Int = TRIM_THUMBNAIL_COUNT,
 ): List<Long> {
     if (durationMs <= 0L || thumbnailCount <= 0) return emptyList()
-    return golfCamThumbnailSampleTimesMs(
-        startMs = 0L,
-        endMs = durationMs,
-        maxThumbnails = thumbnailCount,
-    ).map { sampleTimeMs -> golfCamThumbnailRetrieverTimeUs(sampleTimeMs) }
+    val count = thumbnailCount.coerceAtMost(TRIM_THUMBNAIL_COUNT)
+    val intervalMs = durationMs.toDouble() / count.toDouble()
+    return (0 until count).map { index ->
+        val midpointMs = ((index.toDouble() + 0.5) * intervalMs)
+            .roundToLong()
+            .coerceIn(0L, (durationMs - 1L).coerceAtLeast(0L))
+        golfCamThumbnailRetrieverTimeUs(midpointMs)
+    }
 }
 
 internal fun formatTrimTimeLabel(ms: Long): String {
@@ -251,22 +261,38 @@ fun TrimStepTool(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // 时间标签行（与 trim bar 对齐，同样缩进）
+        // 时间标签行
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = SAFE_MARGIN),
+                .padding(horizontal = SAFE_MARGIN)
+                .padding(top = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TimeLabel("开始", formatMs((startFraction * durationMs).toLong()), Alignment.Start)
-            TimeLabel(
-                "时长",
-                formatMs(((endFraction - startFraction) * durationMs).toLong()),
-                Alignment.CenterHorizontally,
-                highlight = true,
-            )
-            TimeLabel("结束", formatMs((endFraction * durationMs).toLong()), Alignment.End)
+            EdgeTimeLabel("开始", formatMs((startFraction * durationMs).toLong()), Alignment.Start)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("时长", color = Color(0xFF6B6B70), fontSize = 10.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AccessTime,
+                        contentDescription = null,
+                        tint = DSColors.fairway,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        formatMs(((endFraction - startFraction) * durationMs).toLong()),
+                        color = DSColors.inkGreen,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+            EdgeTimeLabel("结束", formatMs((endFraction * durationMs).toLong()), Alignment.End)
         }
 
         // 缩略图条 + 可拖拽把手
@@ -289,17 +315,17 @@ fun TrimStepTool(
 
         // 提示文字
         Row(
-            modifier = Modifier.padding(horizontal = SAFE_MARGIN),
+            modifier = Modifier.padding(horizontal = SAFE_MARGIN).padding(bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
                 Icons.Filled.ContentCut,
                 contentDescription = null,
-                tint = DSColors.shadowGray,
-                modifier = Modifier.size(12.dp),
+                tint = DSColors.fairway,
+                modifier = Modifier.size(14.dp),
             )
-            Text("拖动两端把手选择挥杆片段", color = DSColors.shadowGray, fontSize = 11.sp)
+            Text("拖动两端手柄选择包含挥杆的视频片段", color = DSColors.shadowGray, fontSize = 12.sp)
         }
     }
 }
@@ -345,7 +371,7 @@ private fun VideoTrimBar(
             sampleTimesMs = thumbnailSampleTimesMs,
             priorityTimeMs = prioritySampleTimeMs,
             skipCachedSampleTimesMs = exactCachedSampleTimes,
-            frameOption = MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+            frameOption = MediaMetadataRetriever.OPTION_CLOSEST,
         ) { index, bitmap ->
             thumbnails = golfCamFillMissingThumbnailSlotsFromNearest(
                 thumbnails.toMutableList().also { current ->
@@ -356,58 +382,123 @@ private fun VideoTrimBar(
     }
 
     val density = LocalDensity.current
+    val latestStartFraction by rememberUpdatedState(startFraction)
+    val latestEndFraction by rememberUpdatedState(endFraction)
+    val latestCurrentTimeMs by rememberUpdatedState(currentTimeMs)
+    val latestOnStartChange by rememberUpdatedState(onStartChange)
+    val latestOnEndChange by rememberUpdatedState(onEndChange)
+    val latestOnPlayheadSeek by rememberUpdatedState(onPlayheadSeek)
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = SAFE_MARGIN),
+            .padding(horizontal = SAFE_MARGIN)
+            .height(BAR_HEIGHT)
+            .semantics { contentDescription = "GolfCam 裁剪时间轴" },
     ) {
-        val barWidthPx = with(density) { maxWidth.toPx() }
+        val totalWidthPx = with(density) { maxWidth.toPx() }
         val handleWPx = with(density) { HANDLE_W.toPx() }
+        val innerWidthPx = (totalWidthPx - handleWPx * 2f).coerceAtLeast(1f)
         val touchZone = with(density) { (HANDLE_W + HANDLE_TOUCH_EXTRA).toPx() }
         val playheadTouchZone = with(density) { 14.dp.toPx() }
         val playheadFraction = trimPlayheadFraction(durationMs, currentTimeMs, startFraction, endFraction)
 
-        // 记录当前拖哪个把手
         var activeDrag by remember { mutableStateOf<DragTarget?>(null) }
+        var initialFraction by remember { mutableFloatStateOf(0f) }
+        var accumulatedX by remember { mutableFloatStateOf(0f) }
 
-        // 条体（缩略图 + 遮罩 + 边框）
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(BAR_HEIGHT)
-                .clip(RoundedCornerShape(TRIM_STRIP_CORNER_RADIUS_DP.dp))
-                .background(Color(0xFF111111))
                 .drawBehind {
-                    if (thumbnails.isNotEmpty()) drawThumbnails(thumbnails, size)
-                    drawDimOverlay(startFraction, endFraction, size)
-                    drawSelectionBorder(startFraction, endFraction, size, handleWPx)
-                    playheadFraction?.let { drawPlayhead(it, size) }
+                    drawTrimStripPlaceholder(
+                        stripX = handleWPx,
+                        stripWidth = innerWidthPx,
+                        stripHeight = size.height,
+                    )
+                    if (thumbnails.isNotEmpty()) {
+                        drawThumbnails(
+                            thumbnails = thumbnails,
+                            stripX = handleWPx,
+                            stripWidth = innerWidthPx,
+                            stripHeight = size.height,
+                        )
+                    }
+                    drawDimOverlay(
+                        startFraction = startFraction,
+                        endFraction = endFraction,
+                        stripX = handleWPx,
+                        stripWidth = innerWidthPx,
+                        stripHeight = size.height,
+                    )
+                    drawSelectionBorder(
+                        startFraction = startFraction,
+                        endFraction = endFraction,
+                        innerWidth = innerWidthPx,
+                        canvasSize = size,
+                        handleWidth = handleWPx,
+                    )
+                    playheadFraction?.let {
+                        drawPlayhead(
+                            fraction = it,
+                            stripX = handleWPx,
+                            stripWidth = innerWidthPx,
+                            canvasHeight = size.height,
+                        )
+                    }
                 }
-                .pointerInput(barWidthPx, touchZone, playheadFraction, startFraction, endFraction) {
+                .pointerInput(totalWidthPx, durationMs) {
                     detectDragGestures(
                         onDragStart = { offset ->
-                            val startX = startFraction * barWidthPx
-                            val endX = endFraction * barWidthPx
-                            val playheadX = playheadFraction?.let { it * barWidthPx }
+                            val currentStart = trimFractionOrDefault(latestStartFraction, 0f)
+                            val currentEnd = trimFractionOrDefault(latestEndFraction, 1f).coerceAtLeast(currentStart)
+                            val currentPlayhead = trimPlayheadFraction(
+                                durationMs = durationMs,
+                                currentTimeMs = latestCurrentTimeMs,
+                                startFraction = currentStart,
+                                endFraction = currentEnd,
+                            )
+                            val startX = innerWidthPx * currentStart + handleWPx / 2f
+                            val endX = innerWidthPx * currentEnd + handleWPx * 1.5f
+                            val playheadX = currentPlayhead?.let { handleWPx + it * innerWidthPx }
                             activeDrag = when {
                                 abs(offset.x - startX) <= touchZone -> DragTarget.START
                                 abs(offset.x - endX) <= touchZone -> DragTarget.END
                                 playheadX != null && abs(offset.x - playheadX) <= playheadTouchZone -> DragTarget.PLAYHEAD
                                 else -> null
                             }
+                            initialFraction = when (activeDrag) {
+                                DragTarget.START -> currentStart
+                                DragTarget.END -> currentEnd
+                                DragTarget.PLAYHEAD -> currentPlayhead ?: currentStart
+                                null -> 0f
+                            }
+                            accumulatedX = 0f
                         },
-                        onDrag = { change, _ ->
+                        onDrag = { change, dragAmount ->
                             val target = activeDrag ?: return@detectDragGestures
                             change.consume()
-                            val newFraction = (change.position.x / barWidthPx).coerceIn(0f, 1f)
+                            accumulatedX += dragAmount.x
+                            val nextFraction = (initialFraction + accumulatedX / innerWidthPx).coerceIn(0f, 1f)
                             when (target) {
                                 DragTarget.START ->
-                                    onStartChange(clampTrimStartFraction(newFraction, endFraction, durationMs))
+                                    latestOnStartChange(
+                                        clampTrimStartFraction(nextFraction, latestEndFraction, durationMs),
+                                    )
                                 DragTarget.END ->
-                                    onEndChange(clampTrimEndFraction(newFraction, startFraction, durationMs))
+                                    latestOnEndChange(
+                                        clampTrimEndFraction(nextFraction, latestStartFraction, durationMs),
+                                    )
                                 DragTarget.PLAYHEAD ->
-                                    onPlayheadSeek(trimPlayheadSeekTimeMs(durationMs, newFraction, startFraction, endFraction))
+                                    latestOnPlayheadSeek(
+                                        trimPlayheadSeekTimeMs(
+                                            durationMs,
+                                            nextFraction,
+                                            latestStartFraction,
+                                            latestEndFraction,
+                                        ),
+                                    )
                             }
                         },
                         onDragEnd = { activeDrag = null },
@@ -416,93 +507,135 @@ private fun VideoTrimBar(
                 },
         )
 
-        // 左把手（仅视觉，交互在条体上）
         TrimHandle(
             modifier = Modifier
                 .width(HANDLE_W)
                 .height(BAR_HEIGHT)
-                .offset { IntOffset((startFraction * barWidthPx - handleWPx / 2f).toInt(), 0) }
+                .offset { IntOffset((startFraction * innerWidthPx).toInt(), 0) }
                 .zIndex(1f),
-            isLeft = true,
         )
 
-        // 右把手
         TrimHandle(
             modifier = Modifier
                 .width(HANDLE_W)
                 .height(BAR_HEIGHT)
-                .offset { IntOffset((endFraction * barWidthPx - handleWPx / 2f).toInt(), 0) }
+                .offset { IntOffset((endFraction * innerWidthPx + handleWPx).toInt(), 0) }
                 .zIndex(1f),
-            isLeft = false,
         )
     }
 }
 
-// ─── 把手外观（iOS 风格：白色窄竖条，两条细 grip 线）────────────────────────────
+// ─── 把手外观 ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun TrimHandle(
-    modifier: Modifier,
-    isLeft: Boolean,
-) {
-    val shape = if (isLeft)
-        RoundedCornerShape(topStart = 5.dp, bottomStart = 5.dp)
-    else
-        RoundedCornerShape(topEnd = 5.dp, bottomEnd = 5.dp)
-
+private fun TrimHandle(modifier: Modifier) {
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(DSColors.fairway)
+            .clip(RoundedCornerShape(TRIM_SELECTION_CORNER_RADIUS_DP.dp))
+            .background(Brush.verticalGradient(listOf(DSColors.fairway, DSColors.deepGreen)))
             .drawBehind {
-                val cx = size.width / 2f
-                val lineH = size.height * 0.36f
-                val top = (size.height - lineH) / 2f
-                val white = Color.White.copy(alpha = 0.8f)
-                drawLine(white, Offset(cx - 2.5f, top), Offset(cx - 2.5f, top + lineH), strokeWidth = 1.5f)
-                drawLine(white, Offset(cx + 2.5f, top), Offset(cx + 2.5f, top + lineH), strokeWidth = 1.5f)
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.22f),
+                    cornerRadius = CornerRadius(TRIM_SELECTION_CORNER_RADIUS_DP.dp.toPx()),
+                    style = Stroke(width = 0.8.dp.toPx()),
+                )
+                val gripHeight = 12.dp.toPx()
+                val top = (size.height - gripHeight) / 2f
+                val bottom = top + gripHeight
+                val halfSpacing = 2.25.dp.toPx()
+                val stroke = 2.5.dp.toPx()
+                val white = Color.White.copy(alpha = 0.78f)
+                drawLine(white, Offset(size.width / 2f - halfSpacing, top), Offset(size.width / 2f - halfSpacing, bottom), stroke)
+                drawLine(white, Offset(size.width / 2f + halfSpacing, top), Offset(size.width / 2f + halfSpacing, bottom), stroke)
             },
     )
 }
 
 // ─── Canvas 绘制 ──────────────────────────────────────────────────────────────
 
-private fun DrawScope.drawThumbnails(thumbnails: List<ImageBitmap?>, canvasSize: Size) {
-    val thumbW = canvasSize.width / thumbnails.size
+private fun DrawScope.drawTrimStripPlaceholder(
+    stripX: Float,
+    stripWidth: Float,
+    stripHeight: Float,
+) {
+    drawRoundRect(
+        brush = Brush.horizontalGradient(
+            colors = listOf(
+                DSColors.mistGreen,
+                DSColors.mistGreen.copy(alpha = 0.68f),
+                DSColors.mistGreen,
+            ),
+            startX = stripX,
+            endX = stripX + stripWidth,
+        ),
+        topLeft = Offset(stripX, 0f),
+        size = Size(stripWidth, stripHeight),
+        cornerRadius = CornerRadius(TRIM_STRIP_CORNER_RADIUS_DP.dp.toPx()),
+    )
+}
+
+private fun DrawScope.drawThumbnails(
+    thumbnails: List<ImageBitmap?>,
+    stripX: Float,
+    stripWidth: Float,
+    stripHeight: Float,
+) {
+    val thumbW = stripWidth / thumbnails.size.coerceAtLeast(1)
     thumbnails.forEachIndexed { i, bmp ->
         if (bmp != null) {
+            val targetAspect = thumbW / stripHeight.coerceAtLeast(1f)
+            val sourceAspect = bmp.width.toFloat() / bmp.height.coerceAtLeast(1).toFloat()
+            val sourceWidth: Int
+            val sourceHeight: Int
+            val sourceX: Int
+            val sourceY: Int
+            if (sourceAspect > targetAspect) {
+                sourceHeight = bmp.height
+                sourceWidth = (sourceHeight * targetAspect).roundToLong().toInt().coerceIn(1, bmp.width)
+                sourceX = ((bmp.width - sourceWidth) / 2).coerceAtLeast(0)
+                sourceY = 0
+            } else {
+                sourceWidth = bmp.width
+                sourceHeight = (sourceWidth / targetAspect.coerceAtLeast(0.0001f)).roundToLong().toInt().coerceIn(1, bmp.height)
+                sourceX = 0
+                sourceY = ((bmp.height - sourceHeight) / 2).coerceAtLeast(0)
+            }
             drawImage(
                 image = bmp,
-                srcOffset = IntOffset.Zero,
-                srcSize = IntSize(bmp.width, bmp.height),
-                dstOffset = IntOffset((i * thumbW).toInt(), 0),
-                dstSize = IntSize((thumbW + 1).toInt(), canvasSize.height.toInt()),
+                srcOffset = IntOffset(sourceX, sourceY),
+                srcSize = IntSize(sourceWidth, sourceHeight),
+                dstOffset = IntOffset((stripX + i * thumbW).toInt(), 0),
+                dstSize = IntSize((thumbW + 1f).toInt(), stripHeight.toInt()),
                 filterQuality = FilterQuality.Low,
             )
         }
     }
 }
 
-private fun DrawScope.drawDimOverlay(startFraction: Float, endFraction: Float, canvasSize: Size) {
-    val startX = startFraction * canvasSize.width
-    val endX = endFraction * canvasSize.width
+private fun DrawScope.drawDimOverlay(
+    startFraction: Float,
+    endFraction: Float,
+    stripX: Float,
+    stripWidth: Float,
+    stripHeight: Float,
+) {
+    val startX = stripX + startFraction * stripWidth
+    val endX = stripX + endFraction * stripWidth
     val dim = Color.Black.copy(alpha = TRIM_DIM_OVERLAY_ALPHA)
-    if (startX > 0f) drawRect(dim, Offset.Zero, Size(startX, canvasSize.height))
-    if (endX < canvasSize.width) drawRect(dim, Offset(endX, 0f), Size(canvasSize.width - endX, canvasSize.height))
+    if (startFraction > 0f) drawRect(dim, Offset(stripX, 0f), Size(startX - stripX, stripHeight))
+    if (endFraction < 1f) drawRect(dim, Offset(endX, 0f), Size(stripX + stripWidth - endX, stripHeight))
 }
 
 private fun DrawScope.drawSelectionBorder(
     startFraction: Float,
     endFraction: Float,
+    innerWidth: Float,
     canvasSize: Size,
-    handleWPx: Float,
+    handleWidth: Float,
 ) {
-    val startX = startFraction * canvasSize.width
-    val endX = endFraction * canvasSize.width
-    val stroke = TRIM_SELECTION_BORDER_STROKE_PX
-    val selectedStartX = startX.coerceIn(0f, canvasSize.width)
-    val selectedEndX = endX.coerceIn(selectedStartX, canvasSize.width)
-    val selectedWidth = max(handleWPx * 2f, selectedEndX - selectedStartX)
+    val stroke = TRIM_SELECTION_BORDER_STROKE_DP.dp.toPx()
+    val selectedStartX = (startFraction * innerWidth).coerceIn(0f, canvasSize.width)
+    val selectedWidth = max(handleWidth * 2f, (endFraction - startFraction) * innerWidth + handleWidth * 2f)
         .coerceAtMost(canvasSize.width - selectedStartX)
     val corner = TRIM_SELECTION_CORNER_RADIUS_DP.dp.toPx()
     val topLeft = Offset(selectedStartX + stroke / 2f, stroke / 2f)
@@ -521,14 +654,19 @@ private fun DrawScope.drawSelectionBorder(
         topLeft = topLeft,
         size = size,
         cornerRadius = CornerRadius(corner, corner),
-        style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+        style = Stroke(width = stroke),
     )
 }
 
-private fun DrawScope.drawPlayhead(fraction: Float, canvasSize: Size) {
-    val x = fraction.coerceIn(0f, 1f) * canvasSize.width
+private fun DrawScope.drawPlayhead(
+    fraction: Float,
+    stripX: Float,
+    stripWidth: Float,
+    canvasHeight: Float,
+) {
+    val x = stripX + fraction.coerceIn(0f, 1f) * stripWidth
     val top = 2.dp.toPx()
-    val bottom = canvasSize.height - 2.dp.toPx()
+    val bottom = canvasHeight - 2.dp.toPx()
     drawLine(
         Color.Black.copy(alpha = 0.50f),
         Offset(x, top),
@@ -546,19 +684,18 @@ private fun DrawScope.drawPlayhead(fraction: Float, canvasSize: Size) {
 // ─── 时间标签 ─────────────────────────────────────────────────────────────────
 
 @Composable
-private fun TimeLabel(
+private fun EdgeTimeLabel(
     title: String,
     time: String,
     alignment: Alignment.Horizontal,
-    highlight: Boolean = false,
 ) {
-    Column(horizontalAlignment = alignment) {
-        Text(title, color = DSColors.shadowGray, fontSize = 10.sp)
+    Column(horizontalAlignment = alignment, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, color = Color(0xFF6B6B70), fontSize = 10.sp)
         Text(
             time,
-            color = if (highlight) DSColors.fairway else DSColors.inkGreen,
-            fontSize = 12.sp,
-            fontWeight = if (highlight) FontWeight.Bold else FontWeight.SemiBold,
+            color = DSColors.shadowGray,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
             fontFamily = FontFamily.Monospace,
         )
     }

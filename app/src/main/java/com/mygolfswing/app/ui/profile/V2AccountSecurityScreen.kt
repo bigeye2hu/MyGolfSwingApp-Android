@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.profile
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -22,15 +24,16 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -48,14 +51,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.store.V2ProfileStore
-import com.mygolfswing.app.ui.common.V2NavTopBarCentered
+import com.mygolfswing.app.ui.auth.V2ChangePasswordDialog
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
+import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -65,188 +78,161 @@ import kotlinx.coroutines.launch
 /**
  * 账号与安全 / 设置页（对齐 iOS `ProfileSettingsPage`）。
  *
- * 从 V2「我」页「账号与安全」进入；密码修改在子页 [com.mygolfswing.app.ui.auth.V2ChangePasswordScreen]。
+ * 从 V2「我」页「账号与安全」进入；密码修改沿用 iOS 的当前页品牌弹窗。
  */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun V2AccountSecurityScreen(
     onBack: () -> Unit,
-    onOpenChangePassword: () -> Unit,
     onOpenTerms: () -> Unit,
     onOpenPrivacy: () -> Unit,
     onOpenCloudAudit: () -> Unit,
     onOpenAccountDeletion: () -> Unit,
     onLogoutComplete: () -> Unit,
+    hasActiveDelivery: Boolean = false,
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
     var confirmLogout by remember { mutableStateOf(false) }
     var showNicknameEditor by remember { mutableStateOf(false) }
     var showPhoneEditor by remember { mutableStateOf(false) }
+    var showPasswordSetup by remember { mutableStateOf(false) }
     var phoneEditorHadPhone by remember { mutableStateOf(false) }
     var loggingOut by remember { mutableStateOf(false) }
     var successMessage by remember { mutableStateOf<String?>(null) }
     var logoutError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    val isTestUser = V2DeveloperToolsAccess.isCloudAuditEnabled(profile)
-
     LaunchedEffect(Unit) {
         V2ProfileStore.refresh(force = true)
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite),
-    ) {
-        V2NavTopBarCentered(title = "设置", onBack = onBack)
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            AccountSettingsTopBar(onBack = onBack)
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .v2NavigationBarPadding()
-                .padding(horizontal = 20.dp)
-                .padding(top = 12.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            BasicInfoSection(
-                username = profile.username.removePrefix("@"),
-                nickname = profile.nickname,
-                email = profile.email,
-                phone = profile.phone,
-                createdAt = profile.createdAt,
-                onEditNickname = { showNicknameEditor = true },
-                onEditPhone = {
-                    phoneEditorHadPhone = !profile.phone.isNullOrBlank()
-                    showPhoneEditor = true
-                },
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .v2NavigationBarPadding()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 12.dp, bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                BasicInfoSection(
+                    username = profile.username.removePrefix("@"),
+                    nickname = profile.nickname,
+                    email = profile.email,
+                    phone = profile.phone,
+                    createdAt = profile.createdAt,
+                    onEditNickname = { showNicknameEditor = true },
+                    onEditPhone = {
+                        phoneEditorHadPhone = !profile.phone.isNullOrBlank()
+                        showPhoneEditor = true
+                    },
+                )
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionCaption("账号与安全")
-                SettingsGroup {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Key,
-                        title = "设置登录密码",
-                        trailingText = if (profile.hasPassword) "已设置" else "未设置",
-                        trailingColor = if (profile.hasPassword) Color(0xFF34C759) else Color(0xFFFF9500),
-                        onClick = onOpenChangePassword,
-                    )
-                }
-            }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SectionCaption("账号与安全")
+                        SettingsGroup {
+                            SettingsActionRow(
+                                icon = Icons.Filled.Key,
+                                title = "设置登录密码",
+                                trailingText = if (profile.hasPassword) "已设置" else "未设置",
+                                trailingColor = if (profile.hasPassword) Color(0xFF34C759) else Color(0xFFFF9500),
+                                onClick = { showPasswordSetup = true },
+                            )
+                        }
+                    }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SectionCaption("关于")
-                SettingsGroup {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Description,
-                        title = "用户协议",
-                        onClick = onOpenTerms,
-                    )
-                    GroupDivider()
-                    SettingsActionRow(
-                        icon = Icons.Filled.Security,
-                        title = "隐私政策",
-                        onClick = onOpenPrivacy,
-                    )
-                }
-            }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SectionCaption("关于")
+                        SettingsGroup {
+                            SettingsActionRow(
+                                icon = Icons.Filled.Description,
+                                title = "用户协议",
+                                onClick = onOpenTerms,
+                            )
+                            GroupDivider()
+                            SettingsActionRow(
+                                icon = Icons.Filled.Shield,
+                                title = "隐私政策",
+                                lockShield = true,
+                                onClick = onOpenPrivacy,
+                            )
+                        }
+                    }
 
-            if (isTestUser) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "开发者工具",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xFFFF9500),
-                    )
-                    SettingsGroup {
-                        SettingsActionRow(
-                            icon = Icons.Filled.CloudSync,
-                            title = "云端一致性",
-                            onClick = onOpenCloudAudit,
+                    ActionCard(onClick = {
+                        if (!loggingOut && !hasActiveDelivery) confirmLogout = true
+                    }) {
+                        if (loggingOut) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = DSColors.fairway,
+                            )
+                        } else {
+                            SettingsIconBox(icon = Icons.AutoMirrored.Filled.Logout)
+                        }
+                        Text(
+                            text = when {
+                                loggingOut -> "退出中..."
+                                hasActiveDelivery -> "内容发送中，暂不可退出"
+                                else -> "退出登录"
+                            },
+                            fontSize = 16.sp,
+                            color = if (loggingOut || hasActiveDelivery) DSColors.shadowGray else DSColors.fairway,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (!loggingOut && !hasActiveDelivery) {
+                            Icon(
+                                imageVector = Icons.Filled.ChevronRight,
+                                contentDescription = null,
+                                tint = DSColors.shadowGray.copy(alpha = 0.7f),
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+
+                    ActionCard(onClick = onOpenAccountDeletion) {
+                        SettingsIconBox(icon = Icons.Filled.Delete, tint = DSColors.flagRed)
+                        Text(
+                            text = "删除账号",
+                            fontSize = 16.sp,
+                            color = DSColors.flagRed,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            imageVector = Icons.Filled.ChevronRight,
+                            contentDescription = null,
+                            tint = DSColors.shadowGray.copy(alpha = 0.7f),
+                            modifier = Modifier.size(14.dp),
                         )
                     }
                 }
-            }
-
-            ActionCard(onClick = { if (!loggingOut) confirmLogout = true }) {
-                if (loggingOut) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = DSColors.fairway,
-                    )
-                } else {
-                    SettingsIconBox(icon = Icons.AutoMirrored.Filled.Logout)
-                }
-                Text(
-                    text = if (loggingOut) "退出中..." else "退出登录",
-                    fontSize = 16.sp,
-                    color = if (loggingOut) DSColors.shadowGray else DSColors.fairway,
-                    modifier = Modifier.weight(1f),
-                )
-                if (!loggingOut) {
-                    Icon(
-                        imageVector = Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = DSColors.shadowGray.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-            }
-
-            ActionCard(onClick = onOpenAccountDeletion) {
-                SettingsIconBox(icon = Icons.Filled.Delete, tint = DSColors.flagRed)
-                Text(
-                    text = "删除账号",
-                    fontSize = 16.sp,
-                    color = DSColors.flagRed,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    imageVector = Icons.Filled.ChevronRight,
-                    contentDescription = null,
-                    tint = DSColors.shadowGray.copy(alpha = 0.7f),
-                    modifier = Modifier.size(14.dp),
-                )
             }
         }
     }
 
     if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            title = { Text("确认退出登录？", style = DSTypography.titleMedium) },
-            text = {
-                Text(
-                    "退出后本地视频与笔记将保留在本机，云端数据不会被删除。",
-                    style = DSTypography.body,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmLogout = false
-                    scope.launch {
-                        loggingOut = true
-                        try {
-                            V2ProfileStore.logoutAndWait()
-                            onLogoutComplete()
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Throwable) {
-                            logoutError = profileLogoutThrowableError(e)
-                        } finally {
-                            loggingOut = false
-                        }
+        ProfileLogoutDialog(
+            onDismiss = { confirmLogout = false },
+            onConfirm = {
+                confirmLogout = false
+                scope.launch {
+                    loggingOut = true
+                    try {
+                        V2ProfileStore.logoutAndWait()
+                        onLogoutComplete()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        logoutError = profileLogoutThrowableError(e)
+                    } finally {
+                        loggingOut = false
                     }
-                }) {
-                    Text("退出", color = DSColors.flagRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmLogout = false }) {
-                    Text("取消", color = DSColors.shadowGray)
                 }
             },
         )
@@ -290,6 +276,13 @@ fun V2AccountSecurityScreen(
         )
     }
 
+    if (showPasswordSetup) {
+        V2ChangePasswordDialog(
+            onDismiss = { showPasswordSetup = false },
+            onChangeSuccess = { showPasswordSetup = false },
+        )
+    }
+
     successMessage?.let { message ->
         AlertDialog(
             onDismissRequest = { successMessage = null },
@@ -301,6 +294,180 @@ fun V2AccountSecurityScreen(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun AccountSettingsTopBar(onBack: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .v2StatusBarPadding()
+            .height(44.dp)
+            .testTag("account-settings-top-bar")
+            .background(DSColors.warmWhite),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .clickable(onClick = onBack)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                Icons.Filled.ChevronLeft,
+                contentDescription = "返回",
+                tint = DSColors.fairway,
+                modifier = Modifier.size(16.dp),
+            )
+            Text("返回", color = DSColors.fairway, fontSize = 16.sp)
+        }
+        Text(
+            "设置",
+            style = DSTypography.titleMedium,
+            color = DSColors.inkGreen,
+            modifier = Modifier.align(Alignment.Center),
+        )
+    }
+}
+
+@Composable
+internal fun ProfileLogoutDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val consumeCardTap = { Unit }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.40f))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 360.dp)
+                    .padding(horizontal = 24.dp)
+                    .shadow(
+                        elevation = 24.dp,
+                        shape = RoundedCornerShape(24.dp),
+                        ambientColor = DSColors.deepGreen.copy(alpha = 0.20f),
+                        spotColor = DSColors.deepGreen.copy(alpha = 0.20f),
+                    )
+                    .clip(RoundedCornerShape(24.dp))
+                    .border(1.dp, DSColors.fairway.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+                    .clickable(onClick = consumeCardTap),
+            ) {
+                Box(Modifier.fillMaxWidth().height(92.dp)) {
+                    Image(
+                        painter = painterResource(R.drawable.golf_course_background),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        DSColors.deepGreen.copy(alpha = 0.76f),
+                                        DSColors.fairway.copy(alpha = 0.48f),
+                                    ),
+                                ),
+                            ),
+                    )
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Text("退出登录", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(
+                            "退出后仍可重新登录此账号",
+                            color = Color.White.copy(alpha = 0.82f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DSColors.cardWhite)
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        Text(
+                            "确认退出当前账号？",
+                            color = DSColors.inkGreen,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "本机登录状态将被清除，不会删除账号和云端数据。",
+                            color = DSColors.shadowGray,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LogoutDialogAction(
+                            label = "取消",
+                            background = DSColors.mistGreen,
+                            foreground = DSColors.inkGreen,
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f),
+                        )
+                        LogoutDialogAction(
+                            label = "确认退出",
+                            background = DSColors.fairway,
+                            foreground = Color.White,
+                            onClick = onConfirm,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogoutDialogAction(
+    label: String,
+    background: Color,
+    foreground: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(background)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = foreground, fontSize = 15.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -432,10 +599,10 @@ private fun InfoRow(
         }
         if (showArrow) {
             Icon(
-                imageVector = Icons.Filled.ChevronRight,
-                contentDescription = null,
-                tint = DSColors.shadowGray.copy(alpha = 0.7f),
-                modifier = Modifier.size(12.dp),
+                imageVector = Icons.Filled.Settings,
+                contentDescription = "编辑昵称",
+                tint = DSColors.fairway,
+                modifier = Modifier.size(14.dp),
             )
         }
     }
@@ -469,6 +636,7 @@ private fun SettingsActionRow(
     title: String,
     trailingText: String? = null,
     trailingColor: Color = DSColors.shadowGray,
+    lockShield: Boolean = false,
     onClick: () -> Unit,
 ) {
     Row(
@@ -479,7 +647,7 @@ private fun SettingsActionRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        SettingsIconBox(icon = icon)
+        SettingsIconBox(icon = icon, lockShield = lockShield)
         Text(text = title, fontSize = 16.sp, color = DSColors.inkGreen, modifier = Modifier.weight(1f))
         if (trailingText != null) {
             Text(text = trailingText, fontSize = 14.sp, color = trailingColor)
@@ -511,7 +679,11 @@ private fun ActionCard(onClick: () -> Unit, content: @Composable RowScope.() -> 
 }
 
 @Composable
-private fun SettingsIconBox(icon: ImageVector, tint: Color = DSColors.fairway) {
+private fun SettingsIconBox(
+    icon: ImageVector,
+    tint: Color = DSColors.fairway,
+    lockShield: Boolean = false,
+) {
     Box(
         modifier = Modifier
             .size(32.dp)
@@ -519,7 +691,15 @@ private fun SettingsIconBox(icon: ImageVector, tint: Color = DSColors.fairway) {
             .background(DSColors.mistGreen),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+        if (lockShield) {
+            V2LockShieldGlyph(
+                foreground = tint,
+                cutout = DSColors.mistGreen,
+                modifier = Modifier.size(14.dp),
+            )
+        } else {
+            Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+        }
     }
 }
 

@@ -38,7 +38,7 @@ class V2AIChatRepository(
             V2AISession(
                 id = UUID.fromString(row.id),
                 title = row.title,
-                messages = messages.ifEmpty { listOf(welcome()) },
+                messages = messages,
                 updatedAt = java.time.Instant.ofEpochMilli(row.updatedAt)
                     .atZone(ZoneId.systemDefault()).toLocalDateTime(),
             )
@@ -159,8 +159,4 @@ class V2AIChatRepository(
     private fun JsonObject.double(key: String): Double? =
         this[key]?.jsonPrimitive?.doubleOrNull
 
-    private fun welcome() = V2ChatMessage(
-        role = V2AIMessageRole.ASSISTANT,
-        text = "嗨，我是你的 AI 高尔夫教练。今天想聊挥杆、推杆、还是练球计划？",
-    )
 }

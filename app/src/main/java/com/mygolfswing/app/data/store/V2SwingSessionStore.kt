@@ -38,6 +38,7 @@ object V2SwingSessionStore {
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
     private val pendingClipRetentions = mutableMapOf<UUID, V2SwingClipRetention>()
+    private val pendingClipNotes = mutableMapOf<UUID, String?>()
     private val pendingDeletedClipIds = mutableSetOf<UUID>()
 
     val totalClipCount: Int get() = _sessions.value.sumOf { it.clips.size }
@@ -55,8 +56,17 @@ object V2SwingSessionStore {
         _dayItems.value = emptyList()
         _allDayItems.value = emptyList()
         pendingClipRetentions.clear()
+        pendingClipNotes.clear()
         pendingDeletedClipIds.clear()
         _lastError.value = null
+    }
+
+    internal fun replaceInMemoryForTesting(sessions: List<V2SwingSession>) {
+        pendingClipRetentions.clear()
+        pendingClipNotes.clear()
+        pendingDeletedClipIds.clear()
+        _lastError.value = null
+        setSessions(sessions)
     }
 
     fun clipsForDay(day: LocalDate): List<V2SwingClip> =
@@ -126,6 +136,35 @@ object V2SwingSessionStore {
         }
     }
 
+    fun updateClipNotes(clipId: UUID, notes: String?) {
+        val normalized = notes?.trim()?.take(40)?.takeIf { it.isNotBlank() }
+        val previousSessions = _sessions.value
+        pendingClipNotes[clipId] = normalized
+        _lastError.value = null
+        setSessions(
+            _sessions.value.map { session ->
+                session.copy(
+                    clips = session.clips.map { clip ->
+                        if (clip.id == clipId) clip.copy(notes = normalized) else clip
+                    },
+                )
+            },
+        )
+        scope.launch {
+            try {
+                repo.updateClipNotes(clipId, normalized)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                pendingClipNotes.remove(clipId)
+                setSessions(previousSessions)
+                _lastError.value = swingStoreThrowableError("挥杆心得保存失败，请稍后重试", e)
+            } finally {
+                pendingClipNotes.remove(clipId)
+            }
+        }
+    }
+
     fun deleteClips(clipIds: Set<UUID>) {
         if (clipIds.isEmpty()) return
         val previousSessions = _sessions.value
@@ -164,12 +203,15 @@ object V2SwingSessionStore {
     private fun applyPendingMutations(sessions: List<V2SwingSession>): List<V2SwingSession> {
         val deletedIds = pendingDeletedClipIds.toSet()
         val retentionById = pendingClipRetentions.toMap()
-        if (deletedIds.isEmpty() && retentionById.isEmpty()) return sessions
+        val notesById = pendingClipNotes.toMap()
+        if (deletedIds.isEmpty() && retentionById.isEmpty() && notesById.isEmpty()) return sessions
         return sessions.mapNotNull { session ->
             val clips = session.clips
                 .filterNot { it.id in deletedIds }
                 .map { clip ->
-                    retentionById[clip.id]?.let { clip.copy(retention = it) } ?: clip
+                    var updated = retentionById[clip.id]?.let { clip.copy(retention = it) } ?: clip
+                    if (notesById.containsKey(clip.id)) updated = updated.copy(notes = notesById[clip.id])
+                    updated
                 }
             session.copy(clips = clips).takeIf { it.clips.isNotEmpty() }
         }

@@ -1,7 +1,9 @@
 package com.mygolfswing.app.ui.golfcam
 
 import android.content.ContentValues
+import android.content.ClipData
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Rect
@@ -15,9 +17,14 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,28 +37,31 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.ShowChart
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -67,16 +77,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import androidx.core.graphics.withSave
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -104,12 +118,14 @@ import com.mygolfswing.app.ui.golfcam.render.TrajectoryRibbonRenderer
 import com.mygolfswing.app.ui.golfcam.render.VideoDisplayGeometry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -318,6 +334,24 @@ internal fun shouldAllowExportSave(
     previewFile: File?,
 ): Boolean {
     return !saving && saveMessage == null && isValidExportPreviewFile(previewFile)
+}
+
+internal fun golfCamExportShareIntent(context: Context, previewFile: File): Intent? {
+    if (!isValidExportPreviewFile(previewFile)) return null
+    val shareUri = runCatching {
+        FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            previewFile,
+        )
+    }.getOrNull() ?: return null
+    return Intent(Intent.ACTION_SEND).apply {
+        type = "video/mp4"
+        putExtra(Intent.EXTRA_SUBJECT, "挥杆轨迹视频")
+        putExtra(Intent.EXTRA_STREAM, shareUri)
+        clipData = ClipData.newUri(context.contentResolver, "挥杆轨迹视频", shareUri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
 }
 
 internal fun exportPreviewSaveButtonAlpha(
@@ -583,12 +617,18 @@ internal fun previewPanelActionStates(
     exporting: Boolean,
     exportDone: Boolean,
     videoConfigTrusted: Boolean = true,
+    includeDebugOnlyActions: Boolean = true,
 ): List<PreviewPanelActionState> {
-    return listOf(
+    val productionActions = listOf(
         PreviewPanelActionState(PreviewPanelAction.FLIGHT_PATH, enabled = true, deferredBadge = false),
+        PreviewPanelActionState(PreviewPanelAction.EXPORT, enabled = videoConfigTrusted && !exporting && !exportDone, deferredBadge = false),
+    )
+    if (!includeDebugOnlyActions) return productionActions
+    return listOf(
+        productionActions[0],
         PreviewPanelActionState(PreviewPanelAction.CLUB_PATH, enabled = false, deferredBadge = true),
         PreviewPanelActionState(PreviewPanelAction.TRIM, enabled = false, deferredBadge = true),
-        PreviewPanelActionState(PreviewPanelAction.EXPORT, enabled = videoConfigTrusted && !exporting && !exportDone, deferredBadge = false),
+        productionActions[1],
     )
 }
 
@@ -659,22 +699,31 @@ fun GolfCamOverlayPreviewScreen(
     var exporting by remember { mutableStateOf(false) }
     var exportProgress by remember { mutableFloatStateOf(0f) }
     var exportDone by remember { mutableStateOf(false) }
+    var exportJob by remember { mutableStateOf<Job?>(null) }
     var videoConfig by remember { mutableStateOf(trustedPreviewVideoConfigOrUnknown(initialVideoConfig)) }
     var showPlaybackButton by remember { mutableStateOf(true) }
     var showExportSettings by remember { mutableStateOf(false) }
     var selectedExportResolution by remember { mutableStateOf(ExportResolution.HD_1080P) }
     var exportedVideoFile by remember { mutableStateOf<File?>(null) }
     var savingExport by remember { mutableStateOf(false) }
+    var sharingExport by remember { mutableStateOf(false) }
     var exportSaveMessage by remember { mutableStateOf<String?>(null) }
     var exportErrorMessage by remember { mutableStateOf<String?>(null) }
-    var deferredPreviewAction by remember { mutableStateOf<PreviewPanelAction?>(null) }
     val previewSelection = remember(selection) { normalizedPreviewExportSelection(selection) }
     val videoConfigTrusted = !shouldDetectGolfCamVideoConfig(videoConfig)
     val exportSettingsState = exportSettingsUiState(selectedExportResolution, videoConfig)
+    val exportShareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) {
+        sharingExport = false
+    }
 
     DisposableEffect(exportedVideoFile) {
         val tempFile = exportedVideoFile
         onDispose { deleteExportPreviewTempFile(tempFile) }
+    }
+    DisposableEffect(Unit) {
+        onDispose { exportJob?.cancel() }
     }
 
     LaunchedEffect(videoUri, initialVideoConfig) {
@@ -750,7 +799,12 @@ fun GolfCamOverlayPreviewScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DSColors.warmWhite)
+            .testTag("golfcam-overlay-preview"),
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
             PreviewTopBar(
                 selectedResolution = exportSettingsState.selectedResolution,
@@ -761,8 +815,7 @@ fun GolfCamOverlayPreviewScreen(
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
+                    .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
             val displaySize = VideoDisplayGeometry.fit(
@@ -787,7 +840,8 @@ fun GolfCamOverlayPreviewScreen(
                         width = PREVIEW_VIDEO_CARD_BORDER_WIDTH_DP.dp,
                         color = Color.White.copy(alpha = PREVIEW_VIDEO_CARD_BORDER_ALPHA),
                         shape = RoundedCornerShape(PREVIEW_VIDEO_CARD_CORNER_RADIUS_DP.dp),
-                    ),
+                    )
+                    .testTag("golfcam-overlay-video"),
             ) {
                 AndroidView(
                     factory = { ctx -> PlayerView(ctx).apply { this.player = player; useController = false } },
@@ -824,7 +878,7 @@ fun GolfCamOverlayPreviewScreen(
                     ) {
                         Icon(
                             imageVector = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = null,
+                            contentDescription = if (playing) "暂停轨迹总览" else "播放轨迹总览",
                             tint = Color.White,
                             modifier = Modifier.size(34.dp),
                         )
@@ -837,6 +891,8 @@ fun GolfCamOverlayPreviewScreen(
                 playbackProgress = playbackProgress,
                 impactProgress = impactProgress,
                 landingProgress = landingProgress,
+                impactTimeMs = previewImpactMs,
+                landingTimeMs = timing.landingTimeMs,
                 currentTimeMs = previewPositionMs,
                 totalTimeMs = clippedDurationMs,
                 playing = playing,
@@ -845,15 +901,21 @@ fun GolfCamOverlayPreviewScreen(
                 exportDone = exportDone,
                 videoConfigTrusted = videoConfigTrusted,
                 exportErrorMessage = exportErrorMessage,
+                includeDebugOnlyActions = ServiceLocator.isDebuggable,
                 onTogglePlay = {
                     playing = !playing
                     showPlaybackButton = true
                 },
+                onSeekProgress = { progress ->
+                    val targetMs = (clippedDurationMs * progress.coerceIn(0f, 1f)).roundToInt().toLong()
+                    player.seekTo(targetMs)
+                    previewPositionMs = targetMs
+                    showPlaybackButton = true
+                },
                 onEditFlightPath = onReEdit,
-                onDeferredAction = { deferredPreviewAction = it },
                 onExport = {
                     if (videoConfigTrusted && !exporting && !exportDone) {
-                        scope.launch {
+                        exportJob = scope.launch {
                             exporting = true
                             exportProgress = 0f
                             exportErrorMessage = null
@@ -885,20 +947,10 @@ fun GolfCamOverlayPreviewScreen(
                                 exportErrorMessage = exportFailureMessage(error)
                             } finally {
                                 exporting = false
+                                exportJob = null
                             }
                         }
                     }
-                },
-            )
-        }
-
-        deferredPreviewAction?.let { action ->
-            PreviewDeferredActionDialog(
-                action = action,
-                onDismiss = { deferredPreviewAction = null },
-                onReEdit = {
-                    deferredPreviewAction = null
-                    onReEdit()
                 },
             )
         }
@@ -920,10 +972,12 @@ fun GolfCamOverlayPreviewScreen(
             ExportPreviewOverlay(
                 videoFile = file,
                 saving = savingExport,
+                sharing = sharingExport,
                 saveMessage = exportSaveMessage,
                 onDismiss = {
                     deleteExportPreviewTempFile(file)
                     exportedVideoFile = null
+                    sharingExport = false
                     exportSaveMessage = null
                 },
                 onClearSaveMessage = { exportSaveMessage = null },
@@ -952,11 +1006,35 @@ fun GolfCamOverlayPreviewScreen(
                         }
                     }
                 },
+                onShare = {
+                    if (!savingExport && !sharingExport && exportSaveMessage == null) {
+                        val shareIntent = golfCamExportShareIntent(context, file)
+                        if (shareIntent == null) {
+                            exportSaveMessage = "导出文件已失效，请重新导出后再分享"
+                        } else {
+                            sharingExport = true
+                            runCatching {
+                                exportShareLauncher.launch(Intent.createChooser(shareIntent, "分享轨迹视频"))
+                            }.onFailure {
+                                sharingExport = false
+                                exportSaveMessage = "暂时无法打开分享面板，请稍后重试"
+                            }
+                        }
+                    }
+                },
             )
         }
 
         if (exporting) {
-            ExportingProgressOverlay(progress = exportProgress)
+            ExportingProgressOverlay(
+                progress = exportProgress,
+                onCancel = {
+                    exportJob?.cancel()
+                    exportJob = null
+                    exporting = false
+                    exportProgress = 0f
+                },
+            )
         }
     }
 }
@@ -979,10 +1057,9 @@ private fun PreviewTopBar(
             onClick = onDismiss,
             modifier = Modifier
                 .size(44.dp)
-                .clip(CircleShape)
-                .background(DSColors.mistGreen.copy(alpha = 0.76f)),
+                .testTag("golfcam-overlay-home"),
         ) {
-            Icon(Icons.Filled.Home, contentDescription = null, tint = DSColors.inkGreen, modifier = Modifier.size(21.dp))
+            Icon(Icons.Filled.Home, contentDescription = "返回首页", tint = DSColors.inkGreen, modifier = Modifier.size(20.dp))
         }
         Spacer(modifier = Modifier.weight(1f))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1004,9 +1081,10 @@ private fun PreviewTopBar(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(DSColors.mistGreen.copy(alpha = 0.76f)),
+                .background(DSColors.mistGreen.copy(alpha = 0.76f))
+                .testTag("golfcam-overlay-settings"),
         ) {
-            Icon(Icons.Filled.Settings, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.Settings, contentDescription = "导出设置", tint = DSColors.fairway, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -1035,20 +1113,40 @@ private fun ExportSettingsOverlay(
                 .clickable {}
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp)
-                .padding(top = 24.dp, bottom = 28.dp),
+                .padding(top = 8.dp, bottom = 8.dp)
+                .testTag("golfcam-export-settings"),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            Box(
+            Row(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(DSColors.mistGreen.copy(alpha = 0.92f)),
-                contentAlignment = Alignment.Center,
+                    .fillMaxWidth()
+                    .height(44.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.Download, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(25.dp))
+                Spacer(modifier = Modifier.weight(1f))
+                Text(
+                    "完成",
+                    color = DSColors.fairway,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { onDismiss() }
+                        .padding(horizontal = 4.dp, vertical = 10.dp)
+                        .testTag("golfcam-export-settings-done"),
+                )
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(DSColors.fairway),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(23.dp))
+                }
                 Text("导出设置", color = DSColors.inkGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text("选择导出视频的分辨率", color = DSColors.shadowGray, fontSize = 14.sp)
             }
@@ -1074,33 +1172,29 @@ private fun ExportSettingsOverlay(
                     onSelect = onSelect,
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("当前选择:", color = DSColors.shadowGray, fontSize = 14.sp)
-                Text(selectedResolution.displayName, color = DSColors.inkGreen, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Text(
-                "完成",
-                color = DSColors.fairway,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
+            Row(
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .background(DSColors.mistGreen.copy(alpha = 0.72f))
-                    .clickable { onDismiss() }
-                    .padding(horizontal = 28.dp, vertical = 10.dp),
-            )
+                    .padding(bottom = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = DSColors.fairway, modifier = Modifier.size(18.dp))
+                Text("当前选择: ${selectedResolution.displayName}", color = DSColors.inkGreen, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
         }
     }
 }
 
 @Composable
-private fun ExportPreviewOverlay(
+internal fun ExportPreviewOverlay(
     videoFile: File,
     saving: Boolean,
+    sharing: Boolean,
     saveMessage: String?,
     onDismiss: () -> Unit,
     onClearSaveMessage: () -> Unit,
     onSave: () -> Unit,
+    onShare: () -> Unit,
 ) {
     val context = LocalContext.current
     val player = remember(videoFile) {
@@ -1114,11 +1208,12 @@ private fun ExportPreviewOverlay(
     DisposableEffect(videoFile) {
         onDispose { player.release() }
     }
+    val busy = saving || sharing
     BackHandler(enabled = true) {
-        if (shouldAllowExportPreviewDismiss(saving)) onDismiss()
+        if (shouldAllowExportPreviewDismiss(busy)) onDismiss()
     }
-    val saveButtonEnabled = shouldAllowExportSave(saving, saveMessage, videoFile)
-    val saveButtonAlpha = exportPreviewSaveButtonAlpha(saving, saveMessage, videoFile)
+    val saveButtonEnabled = shouldAllowExportSave(busy, saveMessage, videoFile)
+    val saveButtonAlpha = if (busy) 0.55f else exportPreviewSaveButtonAlpha(busy, saveMessage, videoFile)
 
     Box(
         modifier = Modifier
@@ -1133,40 +1228,69 @@ private fun ExportPreviewOverlay(
 
         IconButton(
             onClick = onDismiss,
-            enabled = shouldAllowExportPreviewDismiss(saving),
+            enabled = shouldAllowExportPreviewDismiss(busy),
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(start = 16.dp, top = 16.dp)
                 .size(40.dp)
+                .shadow(8.dp, CircleShape)
                 .clip(CircleShape)
                 .background(DSColors.inkGreen.copy(alpha = 0.72f)),
         ) {
-            Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = "关闭导出预览",
+                tint = Color.White.copy(alpha = if (busy) 0.45f else 1f),
+                modifier = Modifier.size(30.dp),
+            )
         }
 
-        Box(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(horizontal = 56.dp, vertical = 40.dp)
-                .fillMaxWidth()
-                .height(54.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            DSColors.fairway.copy(alpha = saveButtonAlpha),
-                            DSColors.deepGreen.copy(alpha = saveButtonAlpha),
-                        ),
-                    ),
-                )
-                .clickable(enabled = saveButtonEnabled) { onSave() },
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White.copy(alpha = saveButtonAlpha), modifier = Modifier.size(18.dp))
-                Text("保存到相册", color = Color.White.copy(alpha = saveButtonAlpha), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                DSColors.fairway.copy(alpha = saveButtonAlpha),
+                                DSColors.deepGreen.copy(alpha = saveButtonAlpha),
+                            ),
+                        ),
+                    )
+                    .border(1.dp, DSColors.cardWhite.copy(alpha = 0.28f), RoundedCornerShape(14.dp))
+                    .clickable(enabled = saveButtonEnabled) { onSave() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White.copy(alpha = saveButtonAlpha), modifier = Modifier.size(18.dp))
+                    Text("保存到相册", color = Color.White.copy(alpha = saveButtonAlpha), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DSColors.cardWhite.copy(alpha = if (busy) 0.52f else 0.94f))
+                    .border(1.dp, DSColors.fairway.copy(alpha = 0.22f), RoundedCornerShape(14.dp))
+                    .clickable(enabled = saveButtonEnabled) { onShare() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Share, contentDescription = null, tint = DSColors.inkGreen.copy(alpha = if (busy) 0.55f else 1f), modifier = Modifier.size(17.dp))
+                    Text("分享", color = DSColors.inkGreen.copy(alpha = if (busy) 0.55f else 1f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
         }
 
@@ -1208,7 +1332,7 @@ private fun ExportPreviewOverlay(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     Text(
-                        "保存结果",
+                        "操作结果",
                         color = DSColors.inkGreen,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
@@ -1238,58 +1362,77 @@ private fun ExportPreviewOverlay(
 }
 
 @Composable
-private fun ExportingProgressOverlay(
+internal fun ExportingProgressOverlay(
     progress: Float,
+    onCancel: () -> Unit,
 ) {
     val safeProgress = previewProgressDisplayFraction(progress)
+    val rainbow = listOf(
+        Color(0xFFFF4D80),
+        Color(0xFFFF991A),
+        Color(0xFFFFE633),
+        Color(0xFF4DE680),
+        Color(0xFF33B3FF),
+        Color(0xFF9950FF),
+        Color(0xFFFF4D80),
+    )
+    val cardShape = RoundedCornerShape(24.dp)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.46f))
-            .clickable { },
+            .clickable { }
+            .testTag("golfcam-export-progress"),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             modifier = Modifier
                 .padding(horizontal = 40.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF1F2F27).copy(alpha = 0.96f))
-                .padding(horizontal = 30.dp, vertical = 28.dp),
+                .shadow(20.dp, cardShape)
+                .clip(cardShape)
+                .background(Color(0xFF1F2F27).copy(alpha = 0.92f))
+                .border(2.5.dp, Brush.sweepGradient(rainbow), cardShape)
+                .padding(horizontal = 36.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    progress = { safeProgress },
-                    color = DSColors.fairway,
-                    trackColor = Color.White.copy(alpha = 0.18f),
-                    strokeWidth = 5.dp,
-                    modifier = Modifier.size(58.dp),
-                )
-                Text(
-                    text = "${(safeProgress * 100f).roundToInt()}%",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                )
+            Box(modifier = Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val stroke = 5.dp.toPx()
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.15f),
+                        style = Stroke(width = stroke),
+                    )
+                    drawArc(
+                        brush = Brush.sweepGradient(rainbow),
+                        startAngle = -90f,
+                        sweepAngle = if (safeProgress > 0f) safeProgress * 360f else 360f,
+                        useCenter = false,
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+                if (safeProgress > 0f) {
+                    Text(
+                        text = "${(safeProgress * 100f).toInt()}%",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("正在导出视频", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "请保持本页打开，完成后会进入导出预览",
-                    color = Color.White.copy(alpha = 0.72f),
-                    fontSize = 13.sp,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            LinearProgressIndicator(
-                progress = { safeProgress },
+            Text("正在导出视频...", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "取消导出",
+                color = Color.White.copy(alpha = 0.92f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .width(210.dp)
-                    .height(7.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = DSColors.fairway,
-                trackColor = Color.White.copy(alpha = 0.16f),
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.16f))
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                    .clickable { onCancel() }
+                    .padding(horizontal = 18.dp, vertical = 8.dp)
+                    .testTag("golfcam-export-cancel"),
             )
         }
     }
@@ -1309,8 +1452,14 @@ private fun ExportResolutionOption(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) DSColors.mistGreen.copy(alpha = 0.92f) else DSColors.cardWhite)
+            .border(
+                width = if (selected) 1.8.dp else 1.dp,
+                color = if (selected) DSColors.fairway.copy(alpha = 0.72f) else DSColors.shadowGray.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(14.dp),
+            )
             .clickable(enabled = available) { onSelect(resolution) }
-            .padding(16.dp),
+            .padding(16.dp)
+            .testTag("golfcam-export-resolution-${resolution.name.lowercase()}"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1343,15 +1492,15 @@ private fun ExportResolutionOption(
                 Text(it, color = Color(0xFFB95D4D), fontSize = 11.sp)
             }
         }
-        Text(
-            when {
-                selected -> "✓"
-                available -> "○"
-                else -> "锁"
+        Icon(
+            imageVector = when {
+                selected -> Icons.Filled.CheckCircle
+                available -> Icons.Outlined.RadioButtonUnchecked
+                else -> Icons.Filled.Lock
             },
-            color = if (selected) DSColors.fairway else if (available) DSColors.shadowGray.copy(alpha = 0.45f) else DSColors.shadowGray.copy(alpha = 0.55f),
-            fontSize = if (selected) 24.sp else 18.sp,
-            fontWeight = FontWeight.Bold,
+            contentDescription = null,
+            tint = if (selected) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.45f),
+            modifier = Modifier.size(if (selected || available) 24.dp else 20.dp),
         )
     }
 }
@@ -1361,6 +1510,8 @@ private fun PreviewBottomPanel(
     playbackProgress: Float,
     impactProgress: Float,
     landingProgress: Float,
+    impactTimeMs: Long,
+    landingTimeMs: Long,
     currentTimeMs: Long,
     totalTimeMs: Long,
     playing: Boolean,
@@ -1369,15 +1520,17 @@ private fun PreviewBottomPanel(
     exportDone: Boolean,
     videoConfigTrusted: Boolean,
     exportErrorMessage: String?,
+    includeDebugOnlyActions: Boolean,
     onTogglePlay: () -> Unit,
+    onSeekProgress: (Float) -> Unit,
     onEditFlightPath: () -> Unit,
-    onDeferredAction: (PreviewPanelAction) -> Unit,
     onExport: () -> Unit,
 ) {
     val actionStates = previewPanelActionStates(
         exporting = exporting,
         exportDone = exportDone,
         videoConfigTrusted = videoConfigTrusted,
+        includeDebugOnlyActions = includeDebugOnlyActions,
     )
         .associateBy { it.action }
     fun stateFor(action: PreviewPanelAction): PreviewPanelActionState {
@@ -1387,10 +1540,10 @@ private fun PreviewBottomPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(PREVIEW_BOTTOM_PANEL_HEIGHT_DP.dp)
             .shadow(16.dp, RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp), ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.08f))
             .background(DSColors.cardWhite)
             .navigationBarsPadding()
+            .height(PREVIEW_BOTTOM_PANEL_HEIGHT_DP.dp)
             .padding(horizontal = 20.dp)
             .padding(top = 12.dp, bottom = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1399,10 +1552,13 @@ private fun PreviewBottomPanel(
             playbackProgress = playbackProgress,
             impactProgress = impactProgress,
             landingProgress = landingProgress,
+            impactTimeMs = impactTimeMs,
+            landingTimeMs = landingTimeMs,
             currentTimeMs = currentTimeMs,
             totalTimeMs = totalTimeMs,
             playing = playing,
             onTogglePlay = onTogglePlay,
+            onSeekProgress = onSeekProgress,
         )
 
         if (exporting) {
@@ -1424,7 +1580,9 @@ private fun PreviewBottomPanel(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .requiredHeight(85.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             PreviewFunctionButton(
@@ -1435,24 +1593,24 @@ private fun PreviewBottomPanel(
                 onClick = onEditFlightPath,
                 modifier = Modifier.weight(1f),
             )
-            PreviewFunctionButton(
-                title = "杆头轨迹",
-                icon = Icons.Filled.Edit,
-                tint = Color(0xFF3E8FA5),
-                devBadge = stateFor(PreviewPanelAction.CLUB_PATH).deferredBadge,
-                enabled = stateFor(PreviewPanelAction.CLUB_PATH).enabled,
-                onClick = { onDeferredAction(PreviewPanelAction.CLUB_PATH) },
-                modifier = Modifier.weight(1f),
-            )
-            PreviewFunctionButton(
-                title = "裁剪",
-                icon = Icons.Filled.ContentCut,
-                tint = DSColors.trophyGold,
-                devBadge = stateFor(PreviewPanelAction.TRIM).deferredBadge,
-                enabled = stateFor(PreviewPanelAction.TRIM).enabled,
-                onClick = { onDeferredAction(PreviewPanelAction.TRIM) },
-                modifier = Modifier.weight(1f),
-            )
+            if (includeDebugOnlyActions) {
+                PreviewFunctionButton(
+                    title = "杆头轨迹",
+                    icon = Icons.Filled.Edit,
+                    tint = Color(0xFF3E8FA5),
+                    devBadge = stateFor(PreviewPanelAction.CLUB_PATH).deferredBadge,
+                    enabled = stateFor(PreviewPanelAction.CLUB_PATH).enabled,
+                    modifier = Modifier.weight(1f),
+                )
+                PreviewFunctionButton(
+                    title = "裁剪",
+                    icon = Icons.Filled.ContentCut,
+                    tint = DSColors.trophyGold,
+                    devBadge = stateFor(PreviewPanelAction.TRIM).deferredBadge,
+                    enabled = stateFor(PreviewPanelAction.TRIM).enabled,
+                    modifier = Modifier.weight(1f),
+                )
+            }
             PreviewFunctionButton(
                 title = "导出",
                 icon = Icons.Filled.Download,
@@ -1471,14 +1629,48 @@ private fun PreviewProgressBar(
     playbackProgress: Float,
     impactProgress: Float,
     landingProgress: Float,
+    impactTimeMs: Long,
+    landingTimeMs: Long,
     currentTimeMs: Long,
     totalTimeMs: Long,
     playing: Boolean,
     onTogglePlay: () -> Unit,
+    onSeekProgress: (Float) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth().height(32.dp)) {
-            val markerWidth = 42.dp
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .testTag("golfcam-overlay-progress")
+                .pointerInput(onSeekProgress) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        fun seekAt(x: Float) {
+                            val width = size.width.toFloat().coerceAtLeast(1f)
+                            onSeekProgress((x / width).coerceIn(0f, 1f))
+                        }
+                        seekAt(down.position.x)
+                        var pressed = true
+                        while (pressed) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+                            pressed = change.pressed
+                            if (pressed) {
+                                seekAt(change.position.x)
+                                change.consume()
+                            }
+                        }
+                    }
+                },
+        ) {
+            val markerWidth = 48.dp
+            val safePlayback = previewProgressDisplayFraction(playbackProgress)
+            val safeImpact = previewProgressDisplayFraction(impactProgress)
+            val safeLanding = previewProgressDisplayFraction(landingProgress)
+            val impactLeft = (maxWidth - markerWidth) * safeImpact
+            val landingLeft = (maxWidth - markerWidth) * safeLanding
+            val stackLanding = abs((landingLeft - impactLeft).value) < 50f
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -1490,24 +1682,45 @@ private fun PreviewProgressBar(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .fillMaxWidth(previewProgressDisplayFraction(playbackProgress))
+                    .fillMaxWidth(safePlayback)
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .background(Brush.horizontalGradient(listOf(DSColors.fairway, DSColors.leafGreen))),
             )
-            KeyTimeMarker(
+            KeyTimeMarkerLabel(
                 label = "击球",
-                progress = impactProgress,
+                timeMs = impactTimeMs,
                 color = DSColors.trophyGold,
-                markerWidth = markerWidth,
-                containerWidth = maxWidth,
+                modifier = Modifier.offset(x = impactLeft, y = 18.dp),
             )
-            KeyTimeMarker(
+            KeyTimeMarkerLabel(
                 label = "落点",
-                progress = landingProgress,
+                timeMs = landingTimeMs,
                 color = DSColors.fairway,
-                markerWidth = markerWidth,
-                containerWidth = maxWidth,
+                modifier = Modifier.offset(x = landingLeft, y = if (stackLanding) 0.dp else 18.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = (maxWidth - 2.dp) * safeImpact)
+                    .size(width = 2.dp, height = 12.dp)
+                    .background(DSColors.trophyGold),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = (maxWidth - 2.dp) * safeLanding)
+                    .size(width = 2.dp, height = 12.dp)
+                    .background(DSColors.fairway),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = (maxWidth - 12.dp) * safePlayback, y = 3.dp)
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(DSColors.cardWhite)
+                    .border(2.dp, DSColors.fairway, CircleShape),
             )
         }
 
@@ -1533,34 +1746,34 @@ private fun PreviewProgressBar(
 }
 
 @Composable
-private fun KeyTimeMarker(
+private fun KeyTimeMarkerLabel(
     label: String,
-    progress: Float,
+    timeMs: Long,
     color: Color,
-    markerWidth: androidx.compose.ui.unit.Dp,
-    containerWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier,
 ) {
-    val safeProgress = previewProgressDisplayFraction(progress)
-    val left = (containerWidth - markerWidth) * safeProgress
     Column(
-        modifier = Modifier
-            .offset(x = left.coerceAtLeast(0.dp))
-            .width(markerWidth)
-            .padding(bottom = 8.dp),
+        modifier = modifier
+            .width(48.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(DSColors.cardWhite.copy(alpha = 0.96f))
+            .border(1.dp, color.copy(alpha = 0.62f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         Text(
             label,
             color = color,
             fontSize = 8.sp,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .clip(RoundedCornerShape(4.dp))
-                .background(DSColors.cardWhite.copy(alpha = 0.96f))
-                .padding(horizontal = 4.dp, vertical = 1.dp),
         )
-        Box(modifier = Modifier.size(width = 2.dp, height = 12.dp).background(color))
+        Text(
+            formatPreviewTime(timeMs),
+            color = color.copy(alpha = 0.85f),
+            fontSize = 7.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
@@ -1584,14 +1797,12 @@ private fun PreviewFunctionButton(
     onClick: () -> Unit = {},
 ) {
     val buttonShape = RoundedCornerShape(16.dp)
-    val clickable = enabled || devBadge
     val backgroundColor = when {
-        !enabled && !devBadge -> Color(0xFFF7F8F4)
         primary -> DSColors.mistGreen.copy(alpha = 0.85f)
         else -> Color(0xFFF3F7F0)
     }
     val borderColor = when {
-        !enabled && !devBadge -> DSColors.shadowGray.copy(alpha = 0.15f)
+        !enabled -> DSColors.shadowGray.copy(alpha = 0.15f)
         primary -> tint.copy(alpha = 0.58f)
         else -> tint.copy(alpha = 0.22f)
     }
@@ -1605,8 +1816,9 @@ private fun PreviewFunctionButton(
                 color = borderColor,
                 shape = buttonShape,
             )
-            .clickable(enabled = clickable) { onClick() }
-            .padding(vertical = 11.dp, horizontal = 4.dp),
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 11.dp, horizontal = 4.dp)
+            .testTag("golfcam-overlay-action-${title}"),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
@@ -1622,7 +1834,7 @@ private fun PreviewFunctionButton(
                     )
                     .clip(CircleShape)
                     .background(
-                        if (!enabled && !devBadge) {
+                        if (!enabled) {
                             Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                         } else if (primary) {
                             Brush.linearGradient(listOf(tint, DSColors.deepGreen))
@@ -1635,7 +1847,7 @@ private fun PreviewFunctionButton(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (!enabled && !devBadge) DSColors.shadowGray.copy(alpha = 0.45f) else if (primary) Color.White else tint,
+                    tint = if (!enabled) DSColors.shadowGray.copy(alpha = 0.45f) else if (primary) Color.White else tint,
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -1655,7 +1867,7 @@ private fun PreviewFunctionButton(
         }
         Text(
             title,
-            color = if (enabled || devBadge) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
+            color = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
             fontSize = 12.sp,
             fontWeight = if (primary) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 1,
@@ -1664,46 +1876,13 @@ private fun PreviewFunctionButton(
     }
 }
 
-@Composable
-private fun PreviewDeferredActionDialog(
-    action: PreviewPanelAction,
-    onDismiss: () -> Unit,
-    onReEdit: () -> Unit,
-) {
-    val title = when (action) {
-        PreviewPanelAction.CLUB_PATH -> "杆头轨迹"
-        PreviewPanelAction.TRIM -> "裁剪"
-        else -> "功能说明"
-    }
-    val body = when (action) {
-        PreviewPanelAction.CLUB_PATH -> "当前预览以飞行轨迹为主。需要调整击球帧、落点、曲线或样式时，可以返回编辑流程继续修改后再导出。"
-        PreviewPanelAction.TRIM -> "预览页暂不直接修改裁剪区间。你可以返回编辑流程，在裁剪步骤重新选择有效片段，再回到预览导出。"
-        else -> "可以返回编辑流程继续调整后再导出。"
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { Text(body) },
-        confirmButton = {
-            TextButton(onClick = onReEdit) {
-                Text("返回编辑", color = DSColors.fairway)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("知道了", color = DSColors.shadowGray)
-            }
-        },
-    )
-}
-
 internal fun formatPreviewTime(ms: Long): String {
     return String.format(Locale.US, "%.1fs", ms.coerceAtLeast(0L) / 1000.0)
 }
 
 // ─── 视频导出（逐帧渲染轨迹叠加）─────────────────────────────────────────────────
 
-private suspend fun exportVideoWithTrajectory(
+internal suspend fun exportVideoWithTrajectory(
     context: Context,
     videoUri: Uri,
     selection: TrackStyleSelection,
@@ -1761,6 +1940,12 @@ private suspend fun exportVideoWithTrajectory(
         val encoderFps = exportFrameRate.roundToInt().coerceIn(1, 120)
 
         val bezier = exportSelection.flightCurve.bezierPath
+        val arcTable = ArcLengthTable(
+            bezier = bezier,
+            videoWidth = width.toFloat(),
+            videoHeight = height.toFloat(),
+            appliesIosApexCorrection = true,
+        )
         val legacyProgressAtTime = if (exportSelection.style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
             null
         } else {
@@ -1768,13 +1953,14 @@ private suspend fun exportVideoWithTrajectory(
                 bezier = bezier,
                 timing = timing,
                 params = TrajectoryMotionModel.parametersFromStyle(exportSelection.style),
+                arcTableOverride = arcTable,
             )
             model::progressAtTime
         }
-        val arcTable = ArcLengthTable(bezier)
 
         // 输出文件
-        outputFile = File(context.cacheDir, "trajectory_export_${System.currentTimeMillis()}.mp4")
+        val exportCacheDirectory = File(context.cacheDir, "videos").apply { mkdirs() }
+        outputFile = File(exportCacheDirectory, "trajectory_export_${System.currentTimeMillis()}.mp4")
 
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -1933,7 +2119,7 @@ private suspend fun exportVideoWithTrajectory(
     }
 }
 
-private suspend fun saveExportedVideoToGallery(
+internal suspend fun saveExportedVideoToGallery(
     context: Context,
     outputFile: File,
 ) = withContext(Dispatchers.IO) {

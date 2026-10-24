@@ -1,16 +1,14 @@
 package com.mygolfswing.app.ui.auth
 
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,16 +19,19 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -38,9 +39,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -53,18 +51,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.ServiceLocator
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.designsystem.DSColors
-import com.mygolfswing.app.ui.designsystem.DSSpacing
-import com.mygolfswing.app.ui.designsystem.DSTypography
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -87,7 +93,8 @@ fun V2ResetPasswordScreen(
     var pwVisible by remember { mutableStateOf(false) }
     var confirmPwVisible by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    var sendingCode by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
     var showSuccess by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -111,145 +118,95 @@ fun V2ResetPasswordScreen(
             .fillMaxSize()
             .background(DSColors.warmWhite),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .imePadding(),
         ) {
-            Hero(onBack = onBack)
-            AuthCard(
+            ResetHero(onBack = onBack)
+            Column(
                 modifier = Modifier
-                    .padding(horizontal = DSSpacing.lg)
+                    .align(Alignment.CenterHorizontally)
+                    .padding(horizontal = 16.dp)
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
                     .offset(y = (-32).dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AuthFieldLabel("手机号")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .height(56.dp)
-                                .background(DSColors.cardWhite, RoundedCornerShape(12.dp))
-                                .border(BorderStroke(1.dp, AuthPalette.goldAccent), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text("🇨🇳 +86", style = DSTypography.bodyBold, color = DSColors.fairway)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedTextField(
-                            value = phone,
-                            onValueChange = { phone = it.filter { c -> c.isDigit() }.take(11); error = null },
-                            placeholder = { Text("请输入手机号") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                            modifier = Modifier.weight(1f),
-                            colors = fieldColors(),
-                        )
-                    }
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AuthFieldLabel("验证码")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = code,
-                            onValueChange = { code = it.filter { c -> c.isDigit() }.take(6); error = null },
-                            placeholder = { Text("请输入 6 位验证码") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            modifier = Modifier.weight(1f),
-                            colors = fieldColors(),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (phone.length != 11) {
-                                    error = "请输入正确的手机号"; return@Button
+                ResetContentCard(
+                    phone = phone,
+                    onPhoneChange = { phone = it.filter(Char::isDigit).take(11); error = null },
+                    code = code,
+                    onCodeChange = { code = it.filter(Char::isDigit).take(6); error = null },
+                    newPassword = newPw,
+                    onNewPasswordChange = { newPw = it; error = null },
+                    confirmPassword = confirmPw,
+                    onConfirmPasswordChange = { confirmPw = it; error = null },
+                    passwordVisible = pwVisible,
+                    onTogglePassword = { pwVisible = !pwVisible },
+                    confirmVisible = confirmPwVisible,
+                    onToggleConfirm = { confirmPwVisible = !confirmPwVisible },
+                    countdown = countdown,
+                    sendingCode = sendingCode,
+                    submitting = submitting,
+                    error = error,
+                    onSendCode = {
+                        if (phone.length != 11) {
+                            error = "请输入正确的手机号"
+                        } else {
+                            scope.launch {
+                                sendingCode = true
+                                error = null
+                                try {
+                                    ServiceLocator.authRepo.sendSmsCode(phone)
+                                        .onSuccess { countdown = 60 }
+                                        .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Throwable) {
+                                    error = authThrowableError("验证码发送失败，请稍后重试", e)
+                                } finally {
+                                    sendingCode = false
                                 }
-                                scope.launch {
-                                    loading = true
-                                    try {
-                                        val r = ServiceLocator.authRepo.sendSmsCode(
-                                            phone,
-                                            purpose = com.mygolfswing.app.data.repo.V2AuthRepository.SmsPurpose.RESET_PASSWORD,
-                                        )
-                                        r.onSuccess { countdown = 60 }
-                                            .onFailure { error = authUserError("验证码发送失败，请稍后重试", it.message) }
-                                    } catch (e: CancellationException) {
-                                        throw e
-                                    } catch (e: Throwable) {
-                                        error = authThrowableError("验证码发送失败，请稍后重试", e)
-                                    } finally {
-                                        loading = false
-                                    }
-                                }
-                            },
-                            enabled = phone.length == 11 && countdown == 0 && !loading,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (countdown > 0) AuthPalette.placeholder else DSColors.fairway,
-                                contentColor = DSColors.warmWhite,
-                                disabledContainerColor = AuthPalette.placeholder,
-                                disabledContentColor = DSColors.warmWhite,
-                            ),
-                            modifier = Modifier.height(56.dp).width(110.dp),
-                        ) {
-                            Text(if (countdown > 0) "${countdown}s" else "获取验证码", style = DSTypography.caption)
+                            }
                         }
-                    }
-                }
-
-                PasswordField("新密码", newPw, { newPw = it; error = null }, pwVisible, { pwVisible = !pwVisible }, "8 位以上，包含字母和数字")
-                PasswordField("确认新密码", confirmPw, { confirmPw = it; error = null }, confirmPwVisible, { confirmPwVisible = !confirmPwVisible }, "再次输入新密码")
-
-                if (!error.isNullOrBlank()) {
-                    Text(error!!, color = DSColors.flagRed, style = DSTypography.caption)
-                }
-
-                AuthPrimaryButton(
-                    text = "重置密码并登录",
-                    loading = loading,
-                    onClick = {
-                        val v = validate(phone, code, newPw, confirmPw)
-                        if (v != null) {
-                            error = v; return@AuthPrimaryButton
+                    },
+                    onSubmit = submit@{
+                        val validation = resetPasswordValidationError(phone, code, newPw, confirmPw)
+                        if (validation != null) {
+                            error = validation
+                            return@submit
                         }
                         scope.launch {
-                            loading = true
+                            submitting = true
+                            error = null
                             try {
-                                val r = ServiceLocator.authRepo.resetPasswordWithSms(phone, code, newPw)
-                                if (r.isSuccess) {
-                                    // 重置后自动用新密码登录
-                                    val login = ServiceLocator.authRepo.loginWithUsername(phone, newPw)
-                                    login.onSuccess {
-                                        showSuccess = true
-                                    }
-                                        .onFailure {
-                                            error = "重置成功，请回到登录页用新密码登录"
-                                        }
+                                val reset = ServiceLocator.authRepo.resetPasswordWithSms(phone, code, newPw)
+                                if (reset.isSuccess) {
+                                    ServiceLocator.authRepo.loginWithUsername(phone, newPw)
+                                        .onSuccess { showSuccess = true }
+                                        .onFailure { error = "重置成功，请回到登录页用新密码登录" }
                                 } else {
-                                    error = authUserError("重置失败，请检查验证码和新密码后重试", r.exceptionOrNull()?.message)
+                                    error = authUserError(
+                                        "重置失败，请检查验证码和新密码后重试",
+                                        reset.exceptionOrNull()?.message,
+                                    )
                                 }
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Throwable) {
                                 error = authThrowableError("重置失败，请检查验证码和新密码后重试", e)
                             } finally {
-                                loading = false
+                                submitting = false
                             }
                         }
                     },
                 )
+                ResetTipsCard()
             }
-            TipsCard(
-                modifier = Modifier
-                    .padding(horizontal = DSSpacing.lg)
-                    .offset(y = (-16).dp),
-            )
-            Spacer(Modifier.height(8.dp).navigationBarsPadding())
+            Spacer(Modifier.height(28.dp).navigationBarsPadding())
         }
         if (showSuccess) {
             ResetSuccessOverlay()
@@ -258,117 +215,344 @@ fun V2ResetPasswordScreen(
 }
 
 @Composable
-private fun Hero(onBack: () -> Unit) {
-    AuthHeroBackground(height = 260.dp, bottomFadeHeight = 80.dp) {
+private fun ResetHero(onBack: () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(260.dp)) {
+        Image(
+            painter = painterResource(R.drawable.golf_course_background),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(80.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            AuthPalette.heroTop.copy(alpha = 0.54f),
+                            DSColors.warmWhite.copy(alpha = 0.62f),
+                            DSColors.warmWhite,
+                        ),
+                    ),
+                ),
+        )
         IconButton(
             onClick = onBack,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(top = 54.dp, start = 20.dp)
-                .background(DSColors.warmWhite.copy(alpha = 0.18f), CircleShape)
-                .border(1.dp, DSColors.warmWhite.copy(alpha = 0.3f), CircleShape),
+                .size(36.dp)
+                .background(Color.Black.copy(alpha = 0.28f), CircleShape),
         ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = DSColors.warmWhite)
+            Icon(
+                Icons.Filled.ChevronLeft,
+                contentDescription = "返回",
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
         }
         Column(
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .background(authHeroBrush, CircleShape)
-                    .border(1.5.dp, AuthPalette.goldAccent, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.LockReset, contentDescription = null, tint = DSColors.warmWhite, modifier = Modifier.size(30.dp))
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("重置密码", color = DSColors.warmWhite, style = DSTypography.titleLarge)
-            Spacer(Modifier.height(4.dp))
-            Text("通过绑定的手机号 + 短信验证码", color = DSColors.warmWhite.copy(alpha = 0.82f), style = DSTypography.caption)
+            Text(
+                "重置密码",
+                color = Color.White,
+                style = TextStyle(
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Black,
+                    shadow = Shadow(AuthPalette.heroTop.copy(alpha = 0.45f), Offset(0f, 2f), 5f),
+                ),
+            )
+            Text(
+                "通过绑定的手机号 + 短信验证码",
+                color = Color.White.copy(alpha = 0.82f),
+                style = TextStyle(
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Normal,
+                    shadow = Shadow(AuthPalette.heroTop.copy(alpha = 0.30f), Offset(0f, 1f), 3f),
+                ),
+            )
         }
     }
 }
 
 @Composable
-private fun PasswordField(
+private fun ResetContentCard(
+    phone: String,
+    onPhoneChange: (String) -> Unit,
+    code: String,
+    onCodeChange: (String) -> Unit,
+    newPassword: String,
+    onNewPasswordChange: (String) -> Unit,
+    confirmPassword: String,
+    onConfirmPasswordChange: (String) -> Unit,
+    passwordVisible: Boolean,
+    onTogglePassword: () -> Unit,
+    confirmVisible: Boolean,
+    onToggleConfirm: () -> Unit,
+    countdown: Int,
+    sendingCode: Boolean,
+    submitting: Boolean,
+    error: String?,
+    onSendCode: () -> Unit,
+    onSubmit: () -> Unit,
+) {
+    val shape = RoundedCornerShape(24.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 18.dp,
+                shape = shape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = 0.18f),
+                spotColor = Color.Black.copy(alpha = 0.18f),
+            )
+            .background(Color.White, shape)
+            .border(1.dp, AuthPalette.heroMid2.copy(alpha = 0.12f), shape)
+            .padding(horizontal = 20.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ResetFieldLabel("手机号")
+            ResetInputShell {
+                Text(
+                    "+86",
+                    color = DSColors.fairway,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                ResetInputDivider()
+                ResetBasicField(
+                    value = phone,
+                    onValueChange = onPhoneChange,
+                    placeholder = "请输入手机号",
+                    keyboardType = KeyboardType.Phone,
+                    modifier = Modifier.weight(1f).testTag("reset-phone"),
+                )
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ResetFieldLabel("验证码")
+            ResetInputShell {
+                ResetBasicField(
+                    value = code,
+                    onValueChange = onCodeChange,
+                    placeholder = "请输入 6 位验证码",
+                    keyboardType = KeyboardType.NumberPassword,
+                    modifier = Modifier.weight(1f).testTag("reset-code"),
+                )
+                ResetInputDivider()
+                val sendEnabled = phone.length == 11 && countdown == 0 && !sendingCode
+                Box(
+                    modifier = Modifier
+                        .widthIn(min = 76.dp)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = sendEnabled, onClick = onSendCode)
+                        .testTag("reset-send-code"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        sendingCode -> CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        countdown > 0 -> Text(
+                            "${countdown}s",
+                            color = AuthPalette.placeholder,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        else -> Text(
+                            "获取验证码",
+                            color = AuthPalette.goldAccent.copy(alpha = if (sendEnabled) 1f else 0.55f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+
+        ResetPasswordField(
+            label = "新密码",
+            value = newPassword,
+            onValueChange = onNewPasswordChange,
+            visible = passwordVisible,
+            onToggleVisible = onTogglePassword,
+            placeholder = "8 位以上，包含字母和数字",
+            tag = "reset-new-password",
+        )
+        ResetPasswordField(
+            label = "确认新密码",
+            value = confirmPassword,
+            onValueChange = onConfirmPasswordChange,
+            visible = confirmVisible,
+            onToggleVisible = onToggleConfirm,
+            placeholder = "再次输入新密码",
+            tag = "reset-confirm-password",
+        )
+
+        if (!error.isNullOrBlank()) {
+            Row(
+                modifier = Modifier.offset(y = (-4).dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(Icons.Filled.Error, null, tint = DSColors.flagRed, modifier = Modifier.size(12.dp))
+                Text(error, color = DSColors.flagRed, fontSize = 12.sp)
+            }
+        }
+
+        Button(
+            onClick = onSubmit,
+            enabled = !submitting,
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = AuthPalette.heroMid2,
+                contentColor = Color.White,
+                disabledContainerColor = AuthPalette.heroMid2,
+                disabledContentColor = Color.White,
+            ),
+            modifier = Modifier
+                .padding(top = if (error.isNullOrBlank()) 4.dp else 0.dp)
+                .fillMaxWidth()
+                .height(54.dp)
+                .shadow(
+                    elevation = 7.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    ambientColor = AuthPalette.heroMid2.copy(alpha = 0.30f),
+                    spotColor = AuthPalette.heroMid2.copy(alpha = 0.30f),
+                )
+                .testTag("reset-submit"),
+        ) {
+            if (submitting) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+            } else {
+                Text("重置密码并登录", fontSize = 17.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResetPasswordField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,
     visible: Boolean,
     onToggleVisible: () -> Unit,
     placeholder: String,
+    tag: String,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        AuthFieldLabel(label)
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            placeholder = { Text(placeholder) },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-            leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = AuthPalette.placeholder) },
-            trailingIcon = {
-                IconButton(onClick = onToggleVisible) {
-                    Icon(
-                        if (visible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
-                        contentDescription = null,
-                        tint = AuthPalette.placeholder,
-                    )
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = fieldColors(),
-        )
+        ResetFieldLabel(label)
+        ResetInputShell(spacing = 12.dp) {
+            Icon(Icons.Filled.Lock, null, tint = AuthPalette.placeholder, modifier = Modifier.size(14.dp))
+            ResetBasicField(
+                value = value,
+                onValueChange = onValueChange,
+                placeholder = placeholder,
+                keyboardType = KeyboardType.Password,
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                modifier = Modifier.weight(1f).testTag(tag),
+            )
+            IconButton(onClick = onToggleVisible, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    if (visible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                    contentDescription = if (visible) "隐藏$label" else "显示$label",
+                    tint = AuthPalette.placeholder,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun TipsCard(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    Column(
-        modifier = modifier
+private fun ResetInputShell(
+    spacing: Dp = 10.dp,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Row(
+        modifier = Modifier
             .fillMaxWidth()
-            .background(AuthPalette.goldAccent.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-            .border(BorderStroke(1.dp, AuthPalette.goldAccent.copy(alpha = 0.18f)), RoundedCornerShape(14.dp))
+            .height(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(AuthPalette.inputBg)
+            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        content = content,
+    )
+}
+
+@Composable
+private fun ResetInputDivider() {
+    Box(Modifier.width(1.dp).height(22.dp).background(Color.White.copy(alpha = 0.22f)))
+}
+
+@Composable
+private fun ResetBasicField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    keyboardType: KeyboardType,
+    modifier: Modifier = Modifier,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        singleLine = true,
+        textStyle = TextStyle(color = AuthPalette.labelText, fontSize = 15.sp),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        visualTransformation = visualTransformation,
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(DSColors.fairway),
+        decorationBox = { innerTextField ->
+            Box(contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) {
+                    Text(placeholder, color = AuthPalette.placeholder, fontSize = 14.sp, maxLines = 1)
+                }
+                innerTextField()
+            }
+        },
+    )
+}
+
+@Composable
+private fun ResetFieldLabel(text: String) {
+    Text(text, color = AuthPalette.labelText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun ResetTipsCard() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.82f), RoundedCornerShape(14.dp))
+            .border(1.dp, AuthPalette.heroMid2.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("温馨提示", color = AuthPalette.labelText, style = DSTypography.caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold))
-        Text("• 如果账号未绑定手机号，请联系客服重置密码", color = AuthPalette.placeholder, style = DSTypography.caption)
-        SupportLinkText(
-            text = "• 客服邮箱：$SUPPORT_EMAIL",
-            onClick = {
-                if (!context.openSupportEmail()) {
-                    Toast.makeText(context, "邮件应用暂时无法打开，请手动发送到 $SUPPORT_EMAIL", Toast.LENGTH_SHORT).show()
-                }
-            },
-        )
-        SupportLinkText(
-            text = "• 客服电话：二胡 $SUPPORT_PHONE",
-            onClick = {
-                if (!context.openSupportPhone()) {
-                    Toast.makeText(context, "拨号应用暂时无法打开，请手动拨打 $SUPPORT_PHONE", Toast.LENGTH_SHORT).show()
-                }
-            },
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Filled.Info, null, tint = AuthPalette.goldAccent, modifier = Modifier.size(12.dp))
+            Text("温馨提示", color = AuthPalette.labelText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        Text("• 如果账号未绑定手机号，请联系客服重置密码", color = Color(0xFF6B7280), fontSize = 11.5.sp)
+        Text("• 客服邮箱：372931693@qq.com", color = Color(0xFF6B7280), fontSize = 11.5.sp)
+        Text("• 客服电话：二胡 18851310088", color = Color(0xFF6B7280), fontSize = 11.5.sp)
     }
-}
-
-@Composable
-private fun SupportLinkText(text: String, onClick: () -> Unit) {
-    Text(
-        text = text,
-        color = DSColors.fairway,
-        style = DSTypography.caption.copy(textDecoration = TextDecoration.Underline),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 2.dp),
-    )
 }
 
 @Composable
@@ -381,9 +565,17 @@ private fun ResetSuccessOverlay() {
     ) {
         Column(
             modifier = Modifier
-                .padding(horizontal = 28.dp, vertical = 28.dp)
-                .fillMaxWidth(0.82f)
+                .padding(horizontal = 28.dp)
+                .fillMaxWidth()
+                .widthIn(max = 300.dp)
+                .shadow(
+                    elevation = 18.dp,
+                    shape = RoundedCornerShape(22.dp),
+                    ambientColor = Color.Black.copy(alpha = 0.22f),
+                    spotColor = Color.Black.copy(alpha = 0.22f),
+                )
                 .background(DSColors.cardWhite, RoundedCornerShape(22.dp))
+                .border(1.dp, AuthPalette.heroMid2.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
                 .padding(horizontal = 28.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -401,23 +593,14 @@ private fun ResetSuccessOverlay() {
                     modifier = Modifier.size(48.dp),
                 )
             }
-            Text("密码重置成功！", color = AuthPalette.labelText, style = DSTypography.bodyBold)
-            Text("已自动登录，正在进入主页…", color = AuthPalette.placeholder, style = DSTypography.caption)
+            Text("密码重置成功！", color = AuthPalette.labelText, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Text("已自动登录，正在进入主页…", color = AuthPalette.placeholder, fontSize = 13.sp)
             CircularProgressIndicator(color = DSColors.fairway, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
         }
     }
 }
 
-@Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = DSColors.fairway,
-    unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent,
-    focusedContainerColor = AuthPalette.inputBg,
-    unfocusedContainerColor = AuthPalette.inputBg,
-    cursorColor = DSColors.fairway,
-)
-
-private fun validate(phone: String, code: String, newPw: String, confirmPw: String): String? {
+internal fun resetPasswordValidationError(phone: String, code: String, newPw: String, confirmPw: String): String? {
     if (phone.length != 11) return "请输入正确的手机号"
     if (code.length != 6) return "请输入 6 位验证码"
     if (newPw.length < 8) return "新密码至少 8 位"
@@ -425,21 +608,3 @@ private fun validate(phone: String, code: String, newPw: String, confirmPw: Stri
     if (newPw != confirmPw) return "两次输入的密码不一致"
     return null
 }
-
-private const val SUPPORT_EMAIL = "372931693@qq.com"
-private const val SUPPORT_PHONE = "18851310088"
-
-private fun Context.openSupportEmail(): Boolean = runCatching {
-    val intent = Intent(Intent.ACTION_SENDTO).apply {
-        data = "mailto:$SUPPORT_EMAIL".toUri()
-        putExtra(Intent.EXTRA_SUBJECT, "挥呗账号密码重置协助")
-    }
-    startActivity(intent)
-}.isSuccess
-
-private fun Context.openSupportPhone(): Boolean = runCatching {
-    val intent = Intent(Intent.ACTION_DIAL).apply {
-        data = "tel:$SUPPORT_PHONE".toUri()
-    }
-    startActivity(intent)
-}.isSuccess

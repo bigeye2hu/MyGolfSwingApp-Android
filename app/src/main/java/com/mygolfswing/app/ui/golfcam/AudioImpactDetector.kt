@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import com.mygolfswing.app.ui.golfcam.model.ImpactCandidate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -60,6 +61,8 @@ object AudioImpactDetector {
             val safeEndSec = endSec.takeIf { it.isFinite() }?.coerceAtLeast(safeStartSec) ?: Double.MAX_VALUE
             val pcm = extractPcm(context, uri, safeStartSec, safeEndSec) ?: return@withContext emptyList()
             findPeaks(pcm.samples, pcm.sampleRate, pcm.baseTimeSec)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             emptyList()
         }

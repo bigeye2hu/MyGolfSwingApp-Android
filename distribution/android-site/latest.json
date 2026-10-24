@@ -1,0 +1,10 @@
+{
+  "applicationId": "com.mygolfswing.app",
+  "versionCode": 2,
+  "versionName": "2.6.1",
+  "minimumAndroid": "8.0",
+  "publishedAt": "2026-09-27T00:00:00+08:00",
+  "downloadUrl": "https://mygolfai.com.cn/android/latest.apk",
+  "sha256": "24f338087b7e081546b0ae0746804941d5d48d7e2e521e81a25dae5f57cdf300",
+  "sizeBytes": 38369823
+}

@@ -40,11 +40,14 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun V2PlazaHeroCard(video: V2PlazaVideo, onTap: () -> Unit) {
+fun V2PlazaHeroCard(
+    video: V2PlazaVideo,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = DSSpacing.lg, vertical = 8.dp)
             .height(200.dp)
             .shadow(
                 elevation = 12.dp,
@@ -96,7 +99,7 @@ fun V2PlazaHeroCard(video: V2PlazaVideo, onTap: () -> Unit) {
                 ) {
                     Text(
                         video.title,
-                        style = DSTypography.titleMedium,
+                        style = DSTypography.visualHeroTitle,
                         color = Color.White,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -105,7 +108,13 @@ fun V2PlazaHeroCard(video: V2PlazaVideo, onTap: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        CoachAvatar(video)
+                        V2PlazaCoachAvatar(
+                            coach = video.coach,
+                            size = 18.dp,
+                            fontSize = 8.sp,
+                            borderColor = Color.White.copy(alpha = 0.75f),
+                            borderWidth = 1.5.dp,
+                        )
                         Text(
                             video.coach.displayName,
                             fontSize = 12.sp,
@@ -155,19 +164,6 @@ private fun DurationChip(seconds: Int) {
     ) {
         Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(8.dp))
         Text(formatDuration(seconds), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
-    }
-}
-
-@Composable
-private fun CoachAvatar(video: V2PlazaVideo) {
-    Box(
-        modifier = Modifier
-            .size(16.dp)
-            .clip(CircleShape)
-            .background(Brush.linearGradient(listOf(DSColors.fairway, Color(0xFF4A8B6A)))),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(video.coach.initialChar, fontSize = 7.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
     }
 }
 

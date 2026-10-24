@@ -1,6 +1,7 @@
 package com.mygolfswing.app.ui.golfcam.render
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -34,18 +35,31 @@ import com.mygolfswing.app.ui.golfcam.model.TrajectoryTiming
 fun TrajectoryStaticOverlay(
     bezier: BezierPath,
     style: TrackStyle,
+    progress: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
-    val arcTable = remember(bezier) { ArcLengthTable(bezier) }
+    val safeProgress = progress.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 1f
 
-    Canvas(modifier = modifier.fillMaxSize()) {
-        drawTrajectoryPath(
-            bezier = bezier,
-            arcTable = arcTable,
-            headProgress = 1f,
-            tailProgress = 0f,
-            style = style,
-        )
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val renderWidth = maxWidth.value.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val renderHeight = maxHeight.value.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val arcTable = remember(bezier, renderWidth, renderHeight) {
+            ArcLengthTable(
+                bezier = bezier,
+                videoWidth = renderWidth,
+                videoHeight = renderHeight,
+                appliesIosApexCorrection = true,
+            )
+        }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawTrajectoryPath(
+                bezier = bezier,
+                arcTable = arcTable,
+                headProgress = safeProgress,
+                tailProgress = 0f,
+                style = style,
+            )
+        }
     }
 }
 
@@ -67,63 +81,73 @@ fun TrajectoryAnimationOverlay(
     elapsedMs: Long,
     modifier: Modifier = Modifier,
 ) {
-    val legacyProgressAtTime = remember(bezier, timing, style) {
-        if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
-            null
-        } else {
-            val model = TrajectoryMotionModel(
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val renderWidth = maxWidth.value.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val renderHeight = maxHeight.value.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val arcTable = remember(bezier, renderWidth, renderHeight) {
+            ArcLengthTable(
                 bezier = bezier,
-                timing = timing,
-                params = TrajectoryMotionModel.parametersFromStyle(style),
+                videoWidth = renderWidth,
+                videoHeight = renderHeight,
+                appliesIosApexCorrection = true,
             )
-            model::progressAtTime
         }
-    }
-
-    val arcTable = remember(bezier) { ArcLengthTable(bezier) }
-
-    val elapsedSec = elapsedMs / 1000.0
-    val snapshot = TrajectoryOverlayFrameSampler.sample(
-        bezier = bezier,
-        arcTable = arcTable,
-        timing = timing,
-        style = style,
-        elapsedSec = elapsedSec,
-        legacyProgressAtTime = legacyProgressAtTime,
-    )
-
-    val textMeasurer = rememberTextMeasurer()
-
-    Canvas(modifier = modifier.fillMaxSize()) {
-        snapshot?.let { frame ->
-            drawTrajectoryPath(
-                bezier = bezier,
-                arcTable = arcTable,
-                headProgress = frame.headProgress,
-                tailProgress = frame.tailProgress,
-                style = style,
-            )
-            if (TrajectoryOverlayRenderSpec.shouldDrawFlyingHead(frame.headProgress)) {
-                drawHeadGlow(
-                    headPoint = frame.headPoint,
-                    color = Color(style.primaryColorArgb()),
-                    radius = TrajectoryOverlayRenderSpec.headGlowRadius(
-                        style = style,
-                        videoHeight = size.height,
-                        headProgress = frame.headProgress,
-                        apexProgress = frame.apexProgress,
-                    ),
-                    alphaMultiplier = style.glowOpacity.toFloat(),
+        val legacyProgressAtTime = remember(bezier, timing, style, arcTable) {
+            if (style.activeTrajectoryAlgorithm == TrajectoryAlgorithmKind.GOLF_CAM_LIKE) {
+                null
+            } else {
+                val model = TrajectoryMotionModel(
+                    bezier = bezier,
+                    timing = timing,
+                    params = TrajectoryMotionModel.parametersFromStyle(style),
+                    arcTableOverride = arcTable,
                 )
+                model::progressAtTime
             }
-            frame.distance?.let { displayDist ->
-                drawDistanceLabel(
-                    headPoint = frame.headPoint,
-                    isFlyingLeft = frame.isFlyingLeft,
-                    distance = displayDist,
-                    unit = style.distanceUnit.abbreviation,
-                    textMeasurer = textMeasurer,
+        }
+
+        val elapsedSec = elapsedMs / 1000.0
+        val snapshot = TrajectoryOverlayFrameSampler.sample(
+            bezier = bezier,
+            arcTable = arcTable,
+            timing = timing,
+            style = style,
+            elapsedSec = elapsedSec,
+            legacyProgressAtTime = legacyProgressAtTime,
+        )
+        val textMeasurer = rememberTextMeasurer()
+
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            snapshot?.let { frame ->
+                drawTrajectoryPath(
+                    bezier = bezier,
+                    arcTable = arcTable,
+                    headProgress = frame.headProgress,
+                    tailProgress = frame.tailProgress,
+                    style = style,
                 )
+                if (TrajectoryOverlayRenderSpec.shouldDrawFlyingHead(frame.headProgress)) {
+                    drawHeadGlow(
+                        headPoint = frame.headPoint,
+                        color = Color(style.primaryColorArgb()),
+                        radius = TrajectoryOverlayRenderSpec.headGlowRadius(
+                            style = style,
+                            videoHeight = size.height,
+                            headProgress = frame.headProgress,
+                            apexProgress = frame.apexProgress,
+                        ),
+                        alphaMultiplier = style.glowOpacity.toFloat(),
+                    )
+                }
+                frame.distance?.let { displayDist ->
+                    drawDistanceLabel(
+                        headPoint = frame.headPoint,
+                        isFlyingLeft = frame.isFlyingLeft,
+                        distance = displayDist,
+                        unit = style.distanceUnit.abbreviation,
+                        textMeasurer = textMeasurer,
+                    )
+                }
             }
         }
     }

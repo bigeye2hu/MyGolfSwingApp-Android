@@ -26,11 +26,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -46,12 +50,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,8 +66,8 @@ import coil.compose.AsyncImage
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.designsystem.DSColors
-import com.mygolfswing.app.ui.designsystem.DSSpacing
 import kotlinx.coroutines.launch
 
 data class V2OnlineVideoSelection(
@@ -77,6 +84,9 @@ fun V2OnlineVideoSelectorScreen(
     onBack: () -> Unit,
     onConfirm: (V2OnlineVideoSelection) -> Unit,
     initialUrl: String = "",
+    fetchMetadata: suspend (String, String) -> com.mygolfswing.app.data.video.V2OnlineVideoMetadata =
+        V2OnlineVideoMetadataFetcher::fetch,
+    readClipboardText: (() -> String?)? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -118,7 +128,7 @@ fun V2OnlineVideoSelectorScreen(
         val token = fetchToken
         scope.launch {
             loading = true
-            val meta = V2OnlineVideoMetadataFetcher.fetch(cleaned, platform)
+            val meta = fetchMetadata(cleaned, platform)
             if (token != fetchToken) return@launch
             loading = false
             meta.title?.let { videoTitle = it }
@@ -150,11 +160,8 @@ fun V2OnlineVideoSelectorScreen(
         onBack()
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite),
-    ) {
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -225,7 +232,11 @@ fun V2OnlineVideoSelectorScreen(
                 platform = platform,
                 pasteMessage = pasteMessage,
                 onPaste = {
-                    val pasted = context.readClipboardText()
+                    val pasted = if (readClipboardText != null) {
+                        readClipboardText()
+                    } else {
+                        context.readClipboardText()
+                    }
                     if (pasted == null) {
                         pasteMessage = "剪贴板没有可用链接，请手动粘贴"
                     } else {
@@ -263,6 +274,7 @@ fun V2OnlineVideoSelectorScreen(
 
             DecorativeFooter(modifier = Modifier.padding(top = if (hasRecognized) 16.dp else 48.dp))
         }
+        }
     }
 }
 
@@ -290,7 +302,7 @@ private fun EmptyHero(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(16.dp))
         Text("粘贴视频链接", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
         Text(
-            "支持 B站、YouTube、小红书、抖音等平台",
+            "支持 B站、YouTube、小红书等平台",
             fontSize = 13.sp,
             color = DSColors.shadowGray,
             modifier = Modifier.padding(horizontal = 32.dp).padding(top = 6.dp),
@@ -342,11 +354,13 @@ private fun UrlInputCard(
             BasicTextField(
                 value = url,
                 onValueChange = onUrlChange,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("online-video-url-field"),
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = DSColors.inkGreen),
                 decorationBox = { inner ->
                     if (url.isEmpty()) {
-                        Text("粘贴或输入视频链接…", fontSize = 14.sp, color = DSColors.shadowGray)
+                        Text("粘贴或输入视频链接...", fontSize = 14.sp, color = DSColors.shadowGray)
                     }
                     inner()
                 },
@@ -386,7 +400,7 @@ private fun UrlInputCard(
 }
 
 @Composable
-private fun VideoPreviewCard(
+internal fun VideoPreviewCard(
     title: String,
     platform: String,
     thumbnailUrl: String?,
@@ -410,20 +424,15 @@ private fun VideoPreviewCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(192.dp)
-                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen))),
         ) {
             if (!thumbnailUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = thumbnailUrl,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().alpha(0.85f),
                     contentScale = ContentScale.Crop,
-                )
-            } else {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Brush.linearGradient(listOf(DSColors.fairway, DSColors.deepGreen))),
                 )
             }
             Box(
@@ -441,7 +450,12 @@ private fun VideoPreviewCard(
                     .padding(horizontal = 7.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PlatformBadgeText(platform = platform, compact = true)
+                Icon(
+                    imageVector = platformIcon(platform),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(9.dp),
+                )
                 Spacer(Modifier.width(5.dp))
                 Text(
                     platform,
@@ -480,10 +494,19 @@ private fun VideoPreviewCard(
                 )
             }
         }
-        Column(Modifier.padding(16.dp)) {
-            Text(title.ifBlank { "正在获取标题…" }, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                title.ifBlank { "正在获取标题..." },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = DSColors.inkGreen,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Row(
-                modifier = Modifier.padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
@@ -493,7 +516,12 @@ private fun VideoPreviewCard(
                         .background(platformColor(platform)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    PlatformBadgeText(platform = platform, compact = true)
+                    Icon(
+                        imageVector = platformIcon(platform),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(10.dp),
+                    )
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(platform, fontSize = 12.sp, color = DSColors.shadowGray)
@@ -503,7 +531,7 @@ private fun VideoPreviewCard(
 }
 
 @Composable
-private fun ConfirmButton(onClick: () -> Unit) {
+internal fun ConfirmButton(onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -521,7 +549,7 @@ private fun ConfirmButton(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(12.dp))
         Text("添加到 Memo", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
     }
@@ -536,9 +564,14 @@ private fun InvalidLinkCard() {
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.flagRed.copy(0.08f))
             .border(1.dp, DSColors.flagRed.copy(0.25f), RoundedCornerShape(16.dp))
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        Icon(Icons.Filled.Error, null, tint = DSColors.flagRed, modifier = Modifier.size(16.dp))
+        Icon(
+            Icons.Filled.Error,
+            null,
+            tint = DSColors.flagRed,
+            modifier = Modifier.padding(top = 2.dp).size(14.dp),
+        )
         Spacer(Modifier.width(12.dp))
         Column {
             Text("视频链接无效", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = DSColors.flagRed)
@@ -587,13 +620,11 @@ private fun SupportedPlatformsCard() {
                             .background(item.color),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            item.badge,
-                            color = Color.White,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
+                        Icon(
+                            imageVector = item.icon,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
                         )
                     }
                     Text(item.name, fontSize = 10.sp, color = DSColors.shadowGray, modifier = Modifier.padding(top = 6.dp))
@@ -611,9 +642,9 @@ private fun HelperCard() {
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.fairway.copy(0.06f))
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
-        Icon(Icons.Filled.Info, null, tint = DSColors.fairway, modifier = Modifier.padding(top = 2.dp).size(15.dp))
+        Icon(Icons.Filled.Info, null, tint = DSColors.fairway, modifier = Modifier.padding(top = 2.dp).size(13.dp))
         Spacer(Modifier.width(12.dp))
         Column {
             Text("如何获取视频链接？", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = DSColors.fairway)
@@ -663,27 +694,18 @@ private data class SupportedPlatformItem(
     val name: String,
     val platform: String,
     val color: Color,
-    val badge: String,
+    val icon: ImageVector,
 )
 
 private val supportedPlatformItems = listOf(
-    SupportedPlatformItem("B站", "哔哩哔哩", Color(0xFFFB7299), "TV"),
-    SupportedPlatformItem("YouTube", "YouTube", Color(0xFFFF0000), "YT"),
-    SupportedPlatformItem("小红书", "小红书", Color(0xFFFF2442), "RED"),
-    SupportedPlatformItem("抖音", "抖音", Color(0xFF1B2A21), "DY"),
+    SupportedPlatformItem("B站", "哔哩哔哩", Color(0xFFFB7299), Icons.Filled.Tv),
+    SupportedPlatformItem("YouTube", "YouTube", Color(0xFFFF0000), Icons.Filled.SmartDisplay),
+    SupportedPlatformItem("小红书", "小红书", Color(0xFFFF2442), Icons.Filled.Book),
+    SupportedPlatformItem("抖音", "抖音", Color(0xFF1B2A21), Icons.Filled.MusicNote),
 )
 
-@Composable
-private fun PlatformBadgeText(platform: String, compact: Boolean = false) {
-    Text(
-        supportedPlatformItems.firstOrNull { it.platform == platform }?.badge ?: "URL",
-        color = Color.White,
-        fontSize = if (compact) 7.sp else 10.sp,
-        fontWeight = FontWeight.Bold,
-        textAlign = TextAlign.Center,
-        maxLines = 1,
-    )
-}
+private fun platformIcon(platform: String): ImageVector =
+    supportedPlatformItems.firstOrNull { it.platform == platform }?.icon ?: Icons.Filled.Link
 
 private fun formatDuration(seconds: Double): String {
     val total = seconds.toInt()

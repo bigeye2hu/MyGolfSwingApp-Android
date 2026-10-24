@@ -342,7 +342,8 @@ class V2MemoRepository(
             platform = platform,
             plazaVideoId = plazaId,
             thumbnailUrl = cloudThumbBase64Url ?: cloudThumbUrl ?: base.thumbnailUrl,
-            pinState = if (o["isFavorite"]?.jsonPrimitive?.booleanOrNull == true) V2PinState.PINNED else V2PinState.NONE,
+            isFavorite = o["isFavorite"]?.jsonPrimitive?.booleanOrNull ?: false,
+            pinState = V2PinState.NONE,
         )
     }
 
@@ -364,6 +365,8 @@ class V2MemoRepository(
         val createdAt = java.time.Instant.ofEpochMilli(createdMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val updatedAt = java.time.Instant.ofEpochMilli(updatedMs).atZone(ZoneId.systemDefault()).toLocalDateTime()
         val tags = parseTagsJson(o["tagNames"]?.jsonPrimitive?.contentOrNull)
+        val attachedVideoIds = parseCloudUuidList(o["attachedVideoIds"])
+        val attachedImageIds = parseCloudUuidList(o["attachedImageIds"])
         val priority = o["priority"]?.jsonPrimitive?.contentOrNull ?: "medium"
         val pinnedAt = parseCloudMemoMillis(o["pinnedAt"])
         val topic = V2MemoBridge.inferTopic(category = null, tags = tags, title = title)
@@ -379,6 +382,8 @@ class V2MemoRepository(
             updatedAt = updatedAt,
             metaText = source.takeIf { it.equals("ai", ignoreCase = true) }?.let { "AI 洞察" },
             priorityRaw = priority,
+            attachedVideoIds = attachedVideoIds,
+            attachedImageIds = attachedImageIds,
             pinState = if (pinnedAt != null) V2PinState.PINNED else V2PinState.NONE,
         )
     }
@@ -386,6 +391,19 @@ class V2MemoRepository(
     private fun parseTagsJson(raw: String?): List<String> = runCatching {
         if (raw.isNullOrBlank()) return emptyList()
         net.json.parseToJsonElement(raw).jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull }
+    }.getOrDefault(emptyList())
+
+    private fun parseCloudUuidList(value: kotlinx.serialization.json.JsonElement?): List<UUID> = runCatching {
+        val array = when (value) {
+            is JsonArray -> value
+            is JsonPrimitive -> net.json.parseToJsonElement(value.content).jsonArray
+            else -> return emptyList()
+        }
+        array.mapNotNull { element ->
+            element.jsonPrimitive.contentOrNull?.let { raw ->
+                runCatching { UUID.fromString(raw) }.getOrNull()
+            }
+        }
     }.getOrDefault(emptyList())
 
     private fun cloudUpdatedMillis(o: JsonObject): Long =
@@ -454,7 +472,7 @@ class V2MemoRepository(
                 put("category", JsonPrimitive("training"))
                 put("categoryId", JsonPrimitive(""))
                 put("customCategory", JsonPrimitive(""))
-                put("isFavorite", JsonPrimitive(memo.isPinned))
+                put("isFavorite", JsonPrimitive(memo.isFavorite == true))
                 put("videoPath", JsonPrimitive(memo.videoUrl ?: ""))
                 put("originalURL", JsonPrimitive(""))
                 put("localFilePath", JsonPrimitive(if (isOnline) "" else (memo.videoUrl ?: "")))
@@ -494,8 +512,14 @@ class V2MemoRepository(
                 put("cardUpdatedAt", JsonPrimitive(updatedMs))
                 pinnedMs?.let { put("pinnedAt", JsonPrimitive(it)) }
                 put("sourceConversationId", JsonPrimitive(""))
-                put("attachedVideoIds", JsonPrimitive("[]"))
-                put("attachedImageIds", JsonPrimitive("[]"))
+                put(
+                    "attachedVideoIds",
+                    JsonPrimitive(JsonArray(memo.attachedVideoIds.map { JsonPrimitive(it.toString()) }).toString()),
+                )
+                put(
+                    "attachedImageIds",
+                    JsonPrimitive(JsonArray(memo.attachedImageIds.map { JsonPrimitive(it.toString()) }).toString()),
+                )
                 put("tagNames", JsonPrimitive(tagNamesJson))
                 put("parentCategoryId", JsonPrimitive(""))
             },

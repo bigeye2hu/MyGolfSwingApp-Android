@@ -3,6 +3,8 @@ package com.mygolfswing.app.ui.swing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
@@ -43,7 +45,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SportsGolf
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,6 +69,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -80,6 +82,7 @@ import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.designsystem.DSLayout
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -239,23 +242,26 @@ fun V2JustSwingCalendarScreen(
                 },
             )
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.Black.copy(alpha = 0.08f)))
 
-        RetentionFilterBar(
-            selectedFilter = selectedFilter,
-            clips = dayClips,
-            onFilterChange = {
-                selectedFilter = it
-                selectionMode = false
-                selectedClipIds = emptySet()
-            },
-        )
+        if (initialFilter != null) {
+            RetentionFilterBar(
+                selectedFilter = selectedFilter,
+                clips = dayClips,
+                onFilterChange = {
+                    selectedFilter = it
+                    selectionMode = false
+                    selectedClipIds = emptySet()
+                },
+            )
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = DSSpacing.lg, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(filterTitle(selectedFilter), fontWeight = FontWeight.Bold, color = DSColors.inkGreen, fontSize = 16.sp)
-            Spacer(Modifier.weight(1f))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = DSSpacing.lg, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(filterTitle(selectedFilter), fontWeight = FontWeight.Bold, color = DSColors.inkGreen, fontSize = 16.sp)
+                Spacer(Modifier.weight(1f))
+            }
         }
 
         if (clips.isEmpty()) {
@@ -286,7 +292,10 @@ fun V2JustSwingCalendarScreen(
                     )
                 }
                 item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
-                    RetentionBanner(clips = clips, modifier = Modifier.padding(10.dp))
+                    RetentionBanner(
+                        clips = clips,
+                        modifier = Modifier.padding(horizontal = 8.dp).padding(top = 8.dp, bottom = 16.dp),
+                    )
                 }
             }
         }
@@ -311,27 +320,22 @@ fun V2JustSwingCalendarScreen(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除挥杆视频？") },
-            text = { Text("将删除已选 ${selectedClipIds.size} 段视频和缩略图，此操作不可撤销。") },
-            confirmButton = {
-                TextButton(onClick = {
+        SwingBulkDeleteConfirmationSheet(
+            count = selectedClipIds.size,
+            onConfirm = {
                     V2SwingSessionStore.deleteClips(selectedClipIds)
                     selectedClipIds = emptySet()
                     selectionMode = false
                     showDeleteConfirm = false
-                }) { Text("删除", color = DSColors.flagRed) }
             },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
-            },
+            onDismiss = { showDeleteConfirm = false },
         )
     }
 
     if (showInfoSheet) {
         SwingInfoSheet(onDismiss = { showInfoSheet = false })
     }
+
 }
 
 @Composable
@@ -348,8 +352,9 @@ private fun SwingCalendarTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .v2StatusBarPadding()
-            .height(56.dp)
-            .padding(horizontal = DSSpacing.sm),
+            .height(DSLayout.topBarHeight)
+            .padding(horizontal = DSSpacing.sm)
+            .testTag("swing-calendar-top-bar"),
     ) {
         if (selectionMode) {
             TextButton(
@@ -406,8 +411,70 @@ private fun SwingCalendarTopBar(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwingInfoSheet(onDismiss: () -> Unit) {
+internal fun SwingBulkDeleteConfirmationSheet(
+    count: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFFF4F3F1),
+        scrimColor = Color.Black.copy(alpha = 0.45f),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = null,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
+                .v2NavigationBarPadding(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "确认删除 $count 个挥杆视频？",
+                    color = DSColors.shadowGray,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 14.dp),
+                )
+                Text(
+                    text = "视频文件将被永久删除，无法恢复",
+                    color = DSColors.shadowGray,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 4.dp, bottom = 14.dp),
+                )
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.Black.copy(alpha = 0.08f)))
+                Text(
+                    text = "删除",
+                    color = DSColors.flagRed,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onConfirm).padding(vertical = 16.dp),
+                )
+            }
+            Text(
+                text = "取消",
+                color = DSColors.fairway,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
+                    .clickable(onClick = onDismiss).padding(vertical = 16.dp),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SwingInfoSheet(onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -415,44 +482,49 @@ private fun SwingInfoSheet(onDismiss: () -> Unit) {
         scrimColor = Color.Black.copy(alpha = 0.45f),
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .v2NavigationBarPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Text("关于挥杆记录", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            SwingInfoRow(
-                icon = Icons.Filled.PhoneAndroid,
-                iconColor = Color(0xFFF59E0B),
-                title = "本地存储",
-                description = "挥杆记录仅保存在本设备上。删除 App 或更换设备后，数据将无法恢复。建议将重要视频收藏或保存到相册。",
-            )
-            SwingInfoRow(
-                icon = Icons.Filled.Schedule,
-                iconColor = Color(0xFF8B5CF6),
-                title = "自动清理",
-                description = "为节省存储空间，普通视频 14 天后自动清理。收藏或存入成长池的视频永久保留。",
-            )
-            SwingInfoRow(
-                icon = Icons.Filled.Videocam,
-                iconColor = Color(0xFF10B981),
-                title = "遥控录制",
-                description = "配合录制入口使用，可快速开始或停止拍摄，并把值得复盘的挥杆收藏或加入成长池。",
-            )
-            SwingInfoRow(
-                icon = Icons.Filled.SaveAlt,
-                iconColor = Color(0xFF3B82F6),
-                title = "保存到相册",
-                description = "在挥杆详情页点击保存按钮，可将视频导出到系统相册永久保存。",
-            )
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.align(Alignment.End),
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
+                Text("关于挥杆记录", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
+                ) {
+                    Text("完成", color = DSColors.fairway, fontSize = 16.sp)
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.12f)))
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    .v2NavigationBarPadding().padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                SwingInfoRow(
+                    icon = Icons.Filled.PhoneAndroid,
+                    iconColor = Color(0xFFF59E0B),
+                    title = "本地存储",
+                    description = "挥杆记录仅保存在本设备上。删除 App 或更换设备后，数据将无法恢复。建议将重要视频收藏或保存到相册。",
+                )
+                SwingInfoRow(
+                    icon = Icons.Filled.Schedule,
+                    iconColor = Color(0xFF8B5CF6),
+                    title = "自动清理",
+                    description = "为节省存储空间，普通视频 14 天后自动清理。收藏或存入成长池的视频永久保留。",
+                )
+                SwingInfoRow(
+                    icon = Icons.Filled.Videocam,
+                    iconColor = Color(0xFF10B981),
+                    title = "遥控录制",
+                    description = "配合录制入口使用，可快速开始或停止拍摄，并把值得复盘的挥杆收藏或加入成长池。",
+                )
+                SwingInfoRow(
+                    icon = Icons.Filled.SaveAlt,
+                    iconColor = Color(0xFF3B82F6),
+                    title = "保存到相册",
+                    description = "在挥杆详情页点击保存按钮，可将视频导出到系统相册永久保存。",
+                )
             }
         }
     }
@@ -490,13 +562,13 @@ private fun DateHeader(day: LocalDate, clipCount: Int, expanded: Boolean, onTogg
     ) {
         Text(monthDayString(day), color = DSColors.inkGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(Modifier.weight(1f))
-        if (clipCount > 0) Text("$clipCount 杆", color = DSColors.shadowGray, fontSize = 12.sp)
+        if (clipCount > 0) Text("$clipCount 条记录", color = DSColors.shadowGray, fontSize = 12.sp)
         IconButton(
             onClick = onToggleCalendar,
-            modifier = Modifier.padding(start = 8.dp).size(36.dp).clip(RoundedCornerShape(10.dp))
+            modifier = Modifier.padding(start = 8.dp).size(32.dp).clip(RoundedCornerShape(8.dp))
                 .background(if (expanded) DSColors.fairway.copy(alpha = 0.14f) else DSColors.mistGreen),
         ) {
-            Icon(Icons.Filled.CalendarMonth, null, tint = if (expanded) DSColors.fairway else DSColors.shadowGray, modifier = Modifier.size(18.dp))
+            Icon(Icons.Filled.CalendarMonth, null, tint = if (expanded) DSColors.fairway else DSColors.shadowGray, modifier = Modifier.size(15.dp))
         }
     }
 }
@@ -583,7 +655,7 @@ private fun DateStrip(selectedDate: LocalDate, clipDays: Set<LocalDate>, onSelec
             LocalDate.now().minusDays((89 - offset).toLong())
         }
     }
-    val listState = rememberLazyListState()
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = days.lastIndex)
     val density = LocalDensity.current
     var skipCenterOnFirstSelection by remember { mutableStateOf(true) }
 
@@ -609,9 +681,10 @@ private fun DateStrip(selectedDate: LocalDate, clipDays: Set<LocalDate>, onSelec
 
     LazyRow(
         state = listState,
-        modifier = Modifier.fillMaxWidth().height(64.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth().height(DSLayout.dateStripHeight).testTag("swing-date-strip"),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(DSLayout.monthCellSpacing),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         itemsIndexed(days, key = { _, day -> day.toString() }) { idx, day ->
             val showMonth = idx == 0 || day.month != days[idx - 1].month
@@ -695,7 +768,7 @@ private fun MonthCalendar(
             listOf("一", "二", "三", "四", "五", "六", "日").forEach {
                 Text(it, modifier = Modifier.width(cellWidth), textAlign = TextAlign.Center, fontSize = 11.sp, color = DSColors.shadowGray)
             }
-            repeat(leading) { Spacer(Modifier.width(cellWidth).height(36.dp)) }
+            repeat(leading) { Spacer(Modifier.width(cellWidth).height(DSLayout.monthCellHeight)) }
             (1..daysInMonth).forEach { dayNumber ->
                 val day = first.withDayOfMonth(dayNumber)
                 DateCell(
@@ -733,7 +806,11 @@ private fun DateCell(
     val cornerRadius = if (compact) 8.dp else 10.dp
     Column(
         modifier = Modifier
-            .size(width = cellWidth ?: if (compact) 44.dp else 42.dp, height = if (compact) 36.dp else 54.dp)
+            .size(
+                width = cellWidth ?: if (compact) DSLayout.dateCellWidth else DSLayout.dateCellWidth,
+                height = if (compact) DSLayout.monthCellHeight else DSLayout.dateCellHeight,
+            )
+            .then(if (!compact && day == LocalDate.now()) Modifier.testTag("swing-date-cell-today") else Modifier)
             .clip(RoundedCornerShape(cornerRadius))
             .background(
                 if (selected) {
@@ -774,12 +851,22 @@ private fun DateCell(
 }
 
 @Composable
-private fun SwingClipGridCell(clip: V2SwingClip, selected: Boolean, selectionMode: Boolean, onTap: () -> Unit) {
+private fun SwingClipGridCell(
+    clip: V2SwingClip,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onTap: () -> Unit,
+) {
     val previewModel = remember(clip.thumbnailPath, clip.videoPath) {
         swingClipPreviewModel(clip.thumbnailPath, clip.videoPath)
     }
     Box(
-        modifier = Modifier.aspectRatio(9f / 16f).clip(RoundedCornerShape(4.dp)).background(DSColors.deepGreen).clickable(onClick = onTap),
+        modifier = Modifier
+            .aspectRatio(DSLayout.swingThumbAspectWidth / DSLayout.swingThumbAspectHeight)
+            .testTag("swing-thumb")
+            .clip(RoundedCornerShape(4.dp))
+            .background(DSColors.deepGreen)
+            .clickable(onClick = onTap),
     ) {
         if (previewModel != null) {
             AsyncImage(
@@ -801,8 +888,8 @@ private fun SwingClipGridCell(clip: V2SwingClip, selected: Boolean, selectionMod
             )
         }
         if (selectionMode) {
-            Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = if (selected) 0.32f else 0.08f)))
             if (selected) {
+                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.30f)))
                 Box(
                     Modifier
                         .matchParentSize()
@@ -817,28 +904,21 @@ private fun SwingClipGridCell(clip: V2SwingClip, selected: Boolean, selectionMod
             )
         }
         RetentionBadge(clip.retention, Modifier.align(Alignment.TopEnd).padding(6.dp))
-        clip.sourceLabel?.takeIf { it.isNotBlank() }?.let { source ->
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 6.dp, bottom = 28.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.Black.copy(alpha = 0.58f))
-                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-            ) {
-                Text(source, color = Color.White.copy(alpha = 0.9f), fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-            }
-        }
         Row(
             modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))))
-                .padding(horizontal = 6.dp, vertical = 6.dp),
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.60f))))
+                .padding(horizontal = 5.dp, vertical = 3.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            Text(clip.timestamp.format(DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA)), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                clip.timestamp.format(DateTimeFormatter.ofPattern("HH:mm", Locale.CHINA)),
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
             Spacer(Modifier.weight(1f))
-            Text(durationShort(clip.durationSec), color = Color.White.copy(alpha = 0.9f), fontSize = 9.sp)
+            Text(durationShort(clip.durationSec), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -893,7 +973,10 @@ private fun RetentionBanner(clips: List<V2SwingClip>, modifier: Modifier = Modif
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.06f))
+            // iOS uses white-at-6% over its dark calendar surface. Android's calendar is
+            // intentionally fixed to warm white, so preserve the resulting dark card rather
+            // than applying the translucent fill directly and losing the white labels.
+            .background(Color(0xFF1C1C1E))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {

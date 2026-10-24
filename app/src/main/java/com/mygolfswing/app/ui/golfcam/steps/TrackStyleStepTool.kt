@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -26,16 +27,17 @@ import androidx.compose.material.icons.filled.SocialDistance
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.LinearScale
 import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,11 +49,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.ui.designsystem.DSColors
@@ -63,7 +67,11 @@ import com.mygolfswing.app.ui.golfcam.model.TrackStyleCloudConfigLoader
 import com.mygolfswing.app.ui.golfcam.model.TrackStyleSelection
 import com.mygolfswing.app.ui.golfcam.model.trackStyleAfterCloudConfigLoaded
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
+internal const val TRACK_STYLE_STEP_TOOL_PANEL_HEIGHT_DP = 152
 internal const val TRACK_STYLE_CATEGORY_HEIGHT_DP = 36
 internal const val TRACK_STYLE_CONTENT_HEIGHT_DP = 108
 internal const val TRACK_STYLE_CATEGORY_HORIZONTAL_PADDING_DP = 12
@@ -103,7 +111,7 @@ internal fun formatTrackStyleInteger(value: Double): String {
 
 internal fun formatTrackStyleOpacityPercent(alpha: Double): String {
     val safeAlpha = alpha.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0) ?: 0.75
-    return "${(safeAlpha * 100).toInt()}%"
+    return "${(safeAlpha * 100).roundToInt()}%"
 }
 
 internal fun trackStyleSliderValue(
@@ -174,6 +182,52 @@ internal fun trackStyleDistanceVisibilityChange(
     )
 }
 
+internal data class TrackStyleHsv(
+    val hue: Float,
+    val saturation: Float,
+    val brightness: Float,
+)
+
+internal fun trackStyleArgbToHsv(argb: Long): TrackStyleHsv {
+    val red = ((argb shr 16) and 0xFF).toFloat() / 255f
+    val green = ((argb shr 8) and 0xFF).toFloat() / 255f
+    val blue = (argb and 0xFF).toFloat() / 255f
+    val maximum = maxOf(red, green, blue)
+    val minimum = minOf(red, green, blue)
+    val delta = maximum - minimum
+    val rawHue = when {
+        delta <= 0.000001f -> 0f
+        maximum == red -> 60f * (((green - blue) / delta) % 6f)
+        maximum == green -> 60f * (((blue - red) / delta) + 2f)
+        else -> 60f * (((red - green) / delta) + 4f)
+    }
+    val hue = if (rawHue < 0f) rawHue + 360f else rawHue
+    val saturation = if (maximum <= 0.000001f) 0f else delta / maximum
+    return TrackStyleHsv(hue, saturation.coerceIn(0f, 1f), maximum.coerceIn(0f, 1f))
+}
+
+internal fun trackStyleHsvToArgb(hsv: TrackStyleHsv): Long {
+    val hue = hsv.hue.takeIf { it.isFinite() }?.let { ((it % 360f) + 360f) % 360f } ?: 0f
+    val saturation = hsv.saturation.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+    val brightness = hsv.brightness.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+    val chroma = brightness * saturation
+    val x = chroma * (1f - abs((hue / 60f) % 2f - 1f))
+    val (redPrime, greenPrime, bluePrime) = when {
+        hue < 60f -> Triple(chroma, x, 0f)
+        hue < 120f -> Triple(x, chroma, 0f)
+        hue < 180f -> Triple(0f, chroma, x)
+        hue < 240f -> Triple(0f, x, chroma)
+        hue < 300f -> Triple(x, 0f, chroma)
+        else -> Triple(chroma, 0f, x)
+    }
+    val match = brightness - chroma
+    fun channel(value: Float): Long = ((value + match) * 255f).roundToInt().coerceIn(0, 255).toLong()
+    return (0xFFL shl 24) or
+        (channel(redPrime) shl 16) or
+        (channel(greenPrime) shl 8) or
+        channel(bluePrime)
+}
+
 // ── 样式类别 ──────────────────────────────────────────────────
 
 private enum class StyleCategory(val label: String, val icon: ImageVector) {
@@ -198,13 +252,18 @@ internal fun visibleTrackStyleCategoryLabels(): List<String> {
  * 颜色 / 宽度 / 速度 / 拖尾 / 距离 分类 Tab。
  */
 @Composable
-fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelection) -> Unit) {
+fun TrackStyleStepTool(
+    state: GolfCamWorkflowState,
+    onResult: (TrackStyleSelection) -> Unit,
+    onSpeedPreviewModeChanged: (Boolean) -> Unit = {},
+) {
     val flightCurve = state.flightCurve ?: return
     val prev = state.trackStyle?.style
     val fallbackConfig = remember { TrackStyleCloudConfigLoader.localFallback() }
     var style by remember { mutableStateOf(prev ?: fallbackConfig.defaultStyle) }
     var colorPresets by remember { mutableStateOf(fallbackConfig.presets) }
     var selectedCategory by remember { mutableStateOf(StyleCategory.COLOR) }
+    var emittedInitialStyle by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         TrackStyleCloudConfigLoader.fetch()
@@ -220,55 +279,70 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
     }
 
     LaunchedEffect(style, flightCurve) {
+        if (emittedInitialStyle) delay(80L)
         onResult(TrackStyleSelection(style = style, flightCurve = flightCurve))
+        emittedInitialStyle = true
+    }
+
+    LaunchedEffect(selectedCategory) {
+        onSpeedPreviewModeChanged(selectedCategory == StyleCategory.SPEED)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onSpeedPreviewModeChanged(false) }
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("golfcam-track-style-tool"),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         // ── 类别选择 Tab 行 ──
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(STYLE_CATEGORY_HEIGHT)
                 .padding(horizontal = TRACK_STYLE_CATEGORY_HORIZONTAL_PADDING_DP.dp)
                 .padding(top = TRACK_STYLE_CATEGORY_TOP_PADDING_DP.dp),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            StyleCategory.userVisibleCases.forEach { category ->
-                val isSelected = category == selectedCategory
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(TRACK_STYLE_CATEGORY_TAB_HEIGHT_DP.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(
-                            if (isSelected) DSColors.mistGreen.copy(alpha = 0.72f) else Color.Transparent,
+            Row(
+                modifier = Modifier.fillMaxWidth().height(STYLE_CATEGORY_HEIGHT),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                StyleCategory.userVisibleCases.forEach { category ->
+                    val isSelected = category == selectedCategory
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(TRACK_STYLE_CATEGORY_TAB_HEIGHT_DP.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (isSelected) DSColors.mistGreen.copy(alpha = 0.72f) else Color.Transparent,
+                            )
+                            .border(
+                                width = if (isSelected) 1.dp else 0.dp,
+                                color = if (isSelected) DSColors.fairway.copy(alpha = 0.28f) else Color.Transparent,
+                                shape = RoundedCornerShape(16.dp),
+                            )
+                            .clickable { selectedCategory = category }
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                            .testTag("golfcam-style-category-${category.name.lowercase()}"),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            category.icon,
+                            contentDescription = null,
+                            tint = if (isSelected) DSColors.fairway else DSColors.shadowGray,
+                            modifier = Modifier.size(TRACK_STYLE_CATEGORY_ICON_SIZE_DP.dp),
                         )
-                        .border(
-                            width = if (isSelected) 1.dp else 0.dp,
-                            color = if (isSelected) DSColors.fairway.copy(alpha = 0.28f) else Color.Transparent,
-                            shape = RoundedCornerShape(16.dp),
+                        Text(
+                            category.label,
+                            color = if (isSelected) DSColors.inkGreen else DSColors.shadowGray,
+                            fontSize = TRACK_STYLE_CATEGORY_LABEL_FONT_SP.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         )
-                        .clickable { selectedCategory = category }
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Icon(
-                        category.icon,
-                        contentDescription = null,
-                        tint = if (isSelected) DSColors.fairway else DSColors.shadowGray,
-                        modifier = Modifier.size(TRACK_STYLE_CATEGORY_ICON_SIZE_DP.dp),
-                    )
-                    Text(
-                        category.label,
-                        color = if (isSelected) DSColors.inkGreen else DSColors.shadowGray,
-                        fontSize = TRACK_STYLE_CATEGORY_LABEL_FONT_SP.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                    )
+                    }
                 }
             }
         }
@@ -277,11 +351,11 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(STYLE_CONTENT_HEIGHT)
                 .padding(vertical = 2.dp),
             contentAlignment = Alignment.Center,
         ) {
-            when (selectedCategory) {
+            Box(modifier = Modifier.fillMaxWidth().height(STYLE_CONTENT_HEIGHT), contentAlignment = Alignment.Center) {
+                when (selectedCategory) {
                 StyleCategory.COLOR -> ColorContent(style = style, presets = colorPresets, onChange = { style = it })
                 StyleCategory.WIDTH -> SliderContent(
                     label = "细  ←  轨迹宽度  →  粗",
@@ -307,6 +381,7 @@ fun TrackStyleStepTool(state: GolfCamWorkflowState, onResult: (TrackStyleSelecti
                     onChange = { style = style.copy(tailHalfLife = it.toDouble()) },
                 )
                 StyleCategory.DISTANCE -> DistanceContent(style = style, onChange = { style = it })
+                }
             }
         }
     }
@@ -321,6 +396,20 @@ private fun ColorContent(
     onChange: (TrackStyle) -> Unit,
 ) {
     val opacityValue = trackStyleSliderValue(style.colorAlpha, 0f, 1f, 0.75f)
+    var showCustomColorPicker by remember { mutableStateOf(false) }
+    val pickerBrush: Brush = style.colorHex?.let { SolidColor(Color(it)) }
+        ?: Brush.linearGradient(style.colorPreset.gradientColors.map { Color(it) })
+
+    if (showCustomColorPicker) {
+        CustomTrackColorDialog(
+            initialArgb = style.primaryColorArgb(),
+            onDismiss = { showCustomColorPicker = false },
+            onConfirm = { argb ->
+                onChange(style.copy(colorHex = argb))
+                showCustomColorPicker = false
+            },
+        )
+    }
     Column(
         modifier = Modifier.padding(vertical = 7.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -343,8 +432,10 @@ private fun ColorContent(
                         spotColor = Color(style.colorPreset.bandOuterColor()).copy(alpha = 0.24f),
                     )
                     .clip(CircleShape)
-                    .background(Brush.linearGradient(style.colorPreset.gradientColors.map { Color(it) }))
-                    .border(2.dp, Color.White.copy(alpha = 0.92f), CircleShape),
+                    .background(pickerBrush)
+                    .border(2.dp, Color.White.copy(alpha = 0.92f), CircleShape)
+                    .clickable { showCustomColorPicker = true }
+                    .testTag("golfcam-style-custom-color"),
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -358,7 +449,7 @@ private fun ColorContent(
                     value = opacityValue,
                     onValueChange = { onChange(style.copy(colorAlpha = it.toDouble())) },
                     valueRange = 0f..1f,
-                    modifier = Modifier.fillMaxWidth().height(24.dp),
+                    modifier = Modifier.fillMaxWidth().height(24.dp).testTag("golfcam-style-opacity"),
                     colors = SliderDefaults.colors(
                         thumbColor = DSColors.fairway,
                         activeTrackColor = DSColors.fairway,
@@ -403,7 +494,8 @@ private fun ColorContent(
                                     glowOpacity = preset.glowAlpha.toDouble(),
                                 ),
                             )
-                        },
+                        }
+                        .testTag("golfcam-style-preset-${preset.name}"),
                 ) {
                     if (selected) {
                         Icon(
@@ -422,12 +514,89 @@ private fun ColorContent(
 // ── 通用滑块内容 ─────────────────────────────────────────────
 
 @Composable
+private fun CustomTrackColorDialog(
+    initialArgb: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    val initial = remember(initialArgb) { trackStyleArgbToHsv(initialArgb) }
+    var hue by remember(initialArgb) { mutableStateOf(initial.hue) }
+    var saturation by remember(initialArgb) { mutableStateOf(initial.saturation) }
+    var brightness by remember(initialArgb) { mutableStateOf(initial.brightness) }
+    val currentArgb = trackStyleHsvToArgb(TrackStyleHsv(hue, saturation, brightness))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("轨迹颜色", color = DSColors.inkGreen, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.testTag("golfcam-style-color-dialog"),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(currentArgb)),
+                )
+                ColorChannelSlider("色相", hue, 0f..360f, "golfcam-style-hue") { hue = it }
+                ColorChannelSlider("饱和度", saturation, 0f..1f, "golfcam-style-saturation") { saturation = it }
+                ColorChannelSlider("亮度", brightness, 0f..1f, "golfcam-style-brightness") { brightness = it }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = DSColors.shadowGray) }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(currentArgb) },
+                modifier = Modifier.testTag("golfcam-style-color-confirm"),
+            ) {
+                Text("完成", color = DSColors.fairway, fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color.White,
+    )
+}
+
+@Composable
+private fun ColorChannelSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    tag: String,
+    onChange: (Float) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(label, color = DSColors.shadowGray, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            modifier = Modifier.fillMaxWidth().height(30.dp).testTag(tag),
+            colors = SliderDefaults.colors(
+                thumbColor = DSColors.fairway,
+                activeTrackColor = DSColors.fairway,
+                inactiveTrackColor = DSColors.fairway.copy(alpha = 0.25f),
+            ),
+        )
+    }
+}
+
+@Composable
 private fun SliderContent(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     onChange: (Float) -> Unit,
 ) {
+    val sliderTag = when {
+        label.contains("宽度") -> "golfcam-style-width"
+        label.contains("速度") -> "golfcam-style-speed"
+        label.contains("拖尾") -> "golfcam-style-tail"
+        else -> "golfcam-style-slider"
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -450,7 +619,8 @@ private fun SliderContent(
             valueRange = range,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = TRACK_STYLE_CONTENT_HORIZONTAL_PADDING_DP.dp),
+                .padding(horizontal = TRACK_STYLE_CONTENT_HORIZONTAL_PADDING_DP.dp)
+                .testTag(sliderTag),
             colors = SliderDefaults.colors(
                 thumbColor = DSColors.fairway,
                 activeTrackColor = DSColors.fairway,
@@ -495,6 +665,7 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                     uncheckedThumbColor = Color.White,
                     uncheckedTrackColor = DSColors.shadowGray.copy(alpha = 0.38f),
                 ),
+                modifier = Modifier.testTag("golfcam-style-distance-toggle"),
             )
             Text(
                 "显示距离标注",
@@ -522,7 +693,7 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
             ) {
-                TextField(
+                BasicTextField(
                     value = distanceText,
                     onValueChange = { text ->
                         distanceText = GolfCamDistanceConfig.inputText(text)
@@ -540,15 +711,18 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                         textAlign = TextAlign.Center,
                         color = if (style.showDistance) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.40f),
                     ),
-                    modifier = Modifier.width(TRACK_STYLE_DISTANCE_INPUT_WIDTH_DP.dp),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        disabledContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                    ),
+                    cursorBrush = SolidColor(DSColors.fairway),
+                    modifier = Modifier
+                        .width(TRACK_STYLE_DISTANCE_INPUT_WIDTH_DP.dp)
+                        .testTag("golfcam-style-distance-input"),
+                    decorationBox = { innerTextField ->
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            innerTextField()
+                        }
+                    },
                 )
                 Text(
                     style.distanceUnit.abbreviation,
@@ -563,7 +737,8 @@ private fun DistanceContent(style: TrackStyle, onChange: (TrackStyle) -> Unit) {
                     modifier = Modifier
                         .padding(start = 4.dp)
                         .size(TRACK_STYLE_DISTANCE_CONFIRM_ICON_SIZE_DP.dp)
-                        .clickable(enabled = style.showDistance) { commitDistance() },
+                        .clickable(enabled = style.showDistance) { commitDistance() }
+                        .testTag("golfcam-style-distance-confirm"),
                 )
             }
 
@@ -593,12 +768,13 @@ private fun UnitToggleButton(
             .size(TRACK_STYLE_DISTANCE_UNIT_TOGGLE_SIZE_DP.dp)
             .clip(RoundedCornerShape(TRACK_STYLE_DISTANCE_UNIT_TOGGLE_CORNER_RADIUS_DP.dp))
             .background(DSColors.mistGreen.copy(alpha = if (enabled) 0.55f else 0.28f))
-            .clickable(enabled = enabled) { onClick() },
+            .clickable(enabled = enabled) { onClick() }
+            .testTag("golfcam-style-distance-unit"),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(unitLabel, color = DSColors.inkGreen.copy(alpha = if (enabled) 1f else 0.35f), fontSize = TRACK_STYLE_DISTANCE_UNIT_TOGGLE_LABEL_FONT_SP.sp, fontWeight = FontWeight.Bold)
-            Icon(Icons.Filled.SwapHoriz, contentDescription = null, tint = DSColors.fairway.copy(alpha = if (enabled) 1f else 0.35f), modifier = Modifier.size(TRACK_STYLE_DISTANCE_UNIT_TOGGLE_ICON_SIZE_DP.dp))
+            Icon(Icons.Filled.SwapVert, contentDescription = null, tint = DSColors.fairway.copy(alpha = if (enabled) 1f else 0.35f), modifier = Modifier.size(TRACK_STYLE_DISTANCE_UNIT_TOGGLE_ICON_SIZE_DP.dp))
             Text(nextUnitLabel, color = DSColors.shadowGray.copy(alpha = if (enabled) 1f else 0.42f), fontSize = TRACK_STYLE_DISTANCE_UNIT_TOGGLE_LABEL_FONT_SP.sp, fontWeight = FontWeight.Bold)
         }
     }

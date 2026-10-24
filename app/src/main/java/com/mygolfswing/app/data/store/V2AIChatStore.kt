@@ -28,6 +28,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
@@ -36,10 +37,11 @@ import java.util.UUID
  *
  * 一个全局当前会话 + 历史会话列表，UI 通过 [currentSession] / [statusBar] 订阅。
  */
+internal const val AI_CHAT_STREAM_TIMEOUT_MS = 75_000L
+
 object V2AIChatStore {
 
-    private const val STREAM_TIMEOUT_MS = 75_000L
-    internal const val AI_REFLECTION_STATUS = "正在沉淀到训练档案…"
+    internal const val AI_THINKING_STATUS = "正在思考中"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -66,29 +68,27 @@ object V2AIChatStore {
     val sessions: StateFlow<List<V2AISession>> = _sessions.asStateFlow()
 
     private val _currentSession = MutableStateFlow(
-        V2AISession(title = "新对话", messages = listOf(welcomeMessage())),
+        freshAIChatSession(),
     )
     val currentSession: StateFlow<V2AISession> = _currentSession.asStateFlow()
 
     private val _statusBar = MutableStateFlow<String?>(null)
     val statusBar: StateFlow<String?> = _statusBar.asStateFlow()
 
-    private val _recordedBanner = MutableStateFlow<String?>(null)
-    val recordedBanner: StateFlow<String?> = _recordedBanner.asStateFlow()
-
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft.asStateFlow()
 
     private var streamJob: Job? = null
     private var statusAutoHideJob: Job? = null
+    private var sessionRoundCount: Int = 0
+    @Volatile private var streamTimeoutOverrideForTesting: Long? = null
+    @Volatile private var deleteSessionOverrideForTesting: (suspend (UUID) -> Unit)? = null
+    @Volatile private var reflectionOverrideForTesting: (suspend (UUID) -> Unit)? = null
+    @Volatile private var loadSessionsOverrideForTesting: (suspend () -> List<V2AISession>)? = null
+    @Volatile private var quotaOverrideForTesting: (suspend () -> Pair<Int, Int>?)? = null
     @Volatile private var observingSession = false
 
     val isReplying: Boolean get() = streamJob?.isActive == true
-
-    private fun welcomeMessage(): V2ChatMessage = V2ChatMessage(
-        role = V2AIMessageRole.ASSISTANT,
-        text = "嗨，我是你的 AI 高尔夫教练。今天想聊挥杆、推杆、还是练球计划？",
-    )
 
     fun loadPersisted() {
         if (observingSession) return
@@ -103,20 +103,32 @@ object V2AIChatStore {
                     resetInMemory()
                     return@collect
                 }
-                val list = try {
-                    ServiceLocator.aiChatRepo.loadAllSessions()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    setStatusBar(aiUserError("历史会话加载失败，请稍后重试", e.message), autoHideMs = 4_000L)
-                    return@collect
-                }
-                if (list.isNotEmpty()) {
-                    _currentSession.value = list.first()
-                    _sessions.value = list.drop(1)
-                } else {
-                    resetInMemory()
-                }
+                restorePersistedSessions()
+            }
+        }
+    }
+
+    private suspend fun restorePersistedSessions() {
+        val list = try {
+            loadSessionsOverrideForTesting?.invoke() ?: ServiceLocator.aiChatRepo.loadAllSessions()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            setStatusBar(aiUserError("历史会话加载失败，请稍后重试", e.message), autoHideMs = 4_000L)
+            return
+        }
+        if (list.isNotEmpty()) {
+            _currentSession.value = list.first()
+            _sessions.value = list.drop(1)
+            sessionRoundCount = 0
+        } else {
+            resetInMemory()
+            try {
+                ServiceLocator.aiChatRepo.saveSession(_currentSession.value)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                setStatusBar(aiUserError("新对话创建失败，请稍后重试", e.message), autoHideMs = 4_000L)
             }
         }
     }
@@ -137,42 +149,98 @@ object V2AIChatStore {
 
     fun resetInMemory() {
         streamJob?.cancel()
+        deleteSessionOverrideForTesting = null
+        streamTimeoutOverrideForTesting = null
+        reflectionOverrideForTesting = null
+        loadSessionsOverrideForTesting = null
+        quotaOverrideForTesting = null
+        sessionRoundCount = 0
         _sessions.value = emptyList()
-        _currentSession.value = V2AISession(title = "新对话", messages = listOf(welcomeMessage()))
+        _currentSession.value = freshAIChatSession()
         _draft.value = ""
         setStatusBar(null)
         _requestOpenConfig.value = false
     }
 
+    internal fun replaceInMemoryForTesting(
+        current: V2AISession,
+        sessions: List<V2AISession>,
+    ) {
+        streamJob?.cancel()
+        _currentSession.value = current
+        _sessions.value = sessions.filterNot { it.id == current.id }
+            .distinctBy(V2AISession::id)
+            .sortedByDescending(V2AISession::updatedAt)
+        _draft.value = ""
+        setStatusBar(null)
+        sessionRoundCount = 0
+    }
+
+    internal fun setDeleteSessionOverrideForTesting(
+        override: (suspend (UUID) -> Unit)?,
+    ) {
+        deleteSessionOverrideForTesting = override
+    }
+
+    internal fun setStreamTimeoutOverrideForTesting(timeoutMs: Long?) {
+        streamTimeoutOverrideForTesting = timeoutMs
+    }
+
+    internal fun setQuotaOverrideForTesting(
+        override: (suspend () -> Pair<Int, Int>?)?,
+    ) {
+        quotaOverrideForTesting = override
+    }
+
+    internal fun setReflectionOverrideForTesting(override: (suspend (UUID) -> Unit)?) {
+        reflectionOverrideForTesting = override
+    }
+
+    internal fun setLoadSessionsOverrideForTesting(override: (suspend () -> List<V2AISession>)?) {
+        loadSessionsOverrideForTesting = override
+    }
+
+    internal fun reloadPersistedForTesting() {
+        scope.launch { restorePersistedSessions() }
+    }
+
+    internal fun setSessionRoundCountForTesting(rounds: Int) {
+        sessionRoundCount = rounds.coerceAtLeast(0)
+    }
+
     fun startNewSession() {
+        triggerReflectionIfNeeded()
         streamJob?.cancel()
         setStatusBar(null)
         _draft.value = ""
         val cur = _currentSession.value
-        if (cur.messages.size > 1) {
-            scope.launch { ServiceLocator.aiChatRepo.saveSession(cur) }
-            _sessions.update { listOf(cur) + it }
+        val replacement = freshAIChatSession()
+        _sessions.update { history ->
+            (listOf(cur) + history)
+                .distinctBy(V2AISession::id)
+                .sortedByDescending(V2AISession::updatedAt)
         }
-        _currentSession.value = V2AISession(title = "新对话", messages = listOf(welcomeMessage()))
+        _currentSession.value = replacement
+        sessionRoundCount = 0
+        scope.launch {
+            ServiceLocator.aiChatRepo.saveSession(cur)
+            ServiceLocator.aiChatRepo.saveSession(replacement)
+        }
     }
 
     fun switchSession(toId: UUID) {
         val target = _sessions.value.firstOrNull { it.id == toId } ?: return
+        triggerReflectionIfNeeded()
         streamJob?.cancel()
         setStatusBar(null)
         val current = _currentSession.value
-        if (current.hasPersistableMessages()) {
-            scope.launch { ServiceLocator.aiChatRepo.saveSession(current) }
-        }
+        scope.launch { ServiceLocator.aiChatRepo.saveSession(current) }
         _sessions.update { list ->
             val retained = list.filterNot { s -> s.id == toId || s.id == current.id }
-            if (current.hasPersistableMessages()) {
-                (listOf(current) + retained).sortedByDescending { it.updatedAt }
-            } else {
-                retained
-            }
+            (listOf(current) + retained).sortedByDescending { it.updatedAt }
         }
         _currentSession.value = target
+        sessionRoundCount = 0
     }
 
     fun updateDraft(value: String) {
@@ -184,12 +252,48 @@ object V2AIChatStore {
     }
 
     fun deleteSession(sessionId: UUID) {
+        val current = _currentSession.value
+        if (current.id == sessionId) {
+            streamJob?.cancel()
+            setStatusBar(null)
+            _draft.value = ""
+            val replacement = freshAIChatSession()
+            _currentSession.value = replacement
+            sessionRoundCount = 0
+            scope.launch {
+                try {
+                    deletePersistedSession(sessionId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    if (_currentSession.value.id == replacement.id && !_currentSession.value.hasPersistableMessages()) {
+                        _currentSession.value = current
+                    } else {
+                        _sessions.update { history ->
+                            (listOf(current) + history)
+                                .distinctBy(V2AISession::id)
+                                .sortedByDescending(V2AISession::updatedAt)
+                        }
+                    }
+                    setStatusBar(aiUserError("删除对话失败，请稍后重试", e.message), autoHideMs = 4_000L)
+                    return@launch
+                }
+                try {
+                    ServiceLocator.aiChatRepo.saveSession(replacement)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    setStatusBar(aiUserError("新对话创建失败，请稍后重试", e.message), autoHideMs = 4_000L)
+                }
+            }
+            return
+        }
         val previous = _sessions.value
         previous.firstOrNull { it.id == sessionId } ?: return
         _sessions.value = previous.filterNot { it.id == sessionId }
         scope.launch {
             try {
-                ServiceLocator.aiChatRepo.deleteSession(sessionId)
+                deletePersistedSession(sessionId)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -197,6 +301,11 @@ object V2AIChatStore {
                 setStatusBar(aiUserError("删除对话失败，请稍后重试", e.message), autoHideMs = 4_000L)
             }
         }
+    }
+
+    private suspend fun deletePersistedSession(sessionId: UUID) {
+        val override = deleteSessionOverrideForTesting
+        if (override != null) override(sessionId) else ServiceLocator.aiChatRepo.deleteSession(sessionId)
     }
 
     /** 用户发送 + 流式回复（同步更新 currentSession） */
@@ -228,7 +337,11 @@ object V2AIChatStore {
 
             _currentSession.update { s ->
                 s.copy(
-                    title = if (s.messages.size <= 1) trimmed.take(16) else s.title,
+                    title = if (s.messages.none { it.role == V2AIMessageRole.USER }) {
+                        aiConversationTitle(trimmed)
+                    } else {
+                        s.title
+                    },
                     messages = s.messages
                         .filterNot { it.role == V2AIMessageRole.ASSISTANT && it.text.isBlank() && !it.isStreaming }
                         .plus(userMsg)
@@ -236,22 +349,25 @@ object V2AIChatStore {
                     updatedAt = LocalDateTime.now(),
                 )
             }
-            setStatusBar("AI 正在思考…")
+            sessionRoundCount += 1
+            setStatusBar(AI_THINKING_STATUS)
 
             val buffer = StringBuilder()
+            var completed = false
             try {
                 val flow = if (shouldUseAIChatMockProvider(useMockProvider, ServiceLocator.isDebuggable)) {
                     provider.streamReply(trimmed, outboundHistory)
                 } else {
                     ServiceLocator.aiService.streamChat(outboundHistory)
                 }
-                withTimeout(STREAM_TIMEOUT_MS) {
+                withTimeout(streamTimeoutOverrideForTesting ?: AI_CHAT_STREAM_TIMEOUT_MS) {
                     flow.collect { chunk ->
                         buffer.append(chunk)
                         appendToLast(buffer.toString(), streaming = true)
                     }
                 }
                 appendToLast(buffer.toString(), streaming = false)
+                completed = true
             } catch (e: TimeoutCancellationException) {
                 appendToLast(
                     buffer.toString().ifBlank { "（请求超时，请检查 AI 配置或网络）" },
@@ -264,10 +380,10 @@ object V2AIChatStore {
                 appendToLast("（${aiUserError("生成失败，请检查 AI 配置或稍后重试", e.message)}）", streaming = false)
                 setStatusBar("AI 请求失败，请检查配置", autoHideMs = 4_000L)
             } finally {
-                clearStatusBarIf("AI 正在思考…")
+                clearStatusBarIf(AI_THINKING_STATUS)
                 if (providerId == V2AIService.ProviderId.BUILTIN) refreshConfigState()
                 persistCurrent()
-                if (buffer.isNotBlank()) triggerReplyReflectionIfDue()
+                if (completed) triggerReplyReflectionIfDue()
             }
         }
     }
@@ -297,59 +413,31 @@ object V2AIChatStore {
     }
 
     fun triggerReflectionIfNeeded() {
-        val session = _currentSession.value
-        val hasConversation = session.messages.count {
-            (it.role == V2AIMessageRole.USER || it.role == V2AIMessageRole.ASSISTANT) &&
-                it.text.isNotBlank() &&
-                !it.isStreaming
-        } >= 2
-        if (!hasConversation) return
-        launchReflection()
-    }
-
-    fun consumeRecordedBanner() {
-        _recordedBanner.value = null
+        if (!shouldTriggerAIExitReflection(
+                sessionRounds = sessionRoundCount,
+                profileEmpty = V2GolfProfileStore.isProfileEmpty,
+            )
+        ) return
+        launchReflection(_currentSession.value.id)
     }
 
     private fun triggerReplyReflectionIfDue() {
-        val userTurns = _currentSession.value.messages.count {
-            it.role == V2AIMessageRole.USER && it.text.isNotBlank()
-        }
-        if (userTurns == 1 || userTurns % 5 == 0) {
-            launchReflection()
+        if (shouldTriggerAIReplyReflection(sessionRoundCount)) {
+            launchReflection(_currentSession.value.id)
         }
     }
 
-    private fun launchReflection() {
+    private fun launchReflection(sessionId: UUID) {
         scope.launch {
-            setStatusBar(AI_REFLECTION_STATUS)
-            val result = try {
-                V2ProfileReflector.reflectAll(_currentSession.value.id)
+            try {
+                val override = reflectionOverrideForTesting
+                if (override != null) override(sessionId) else V2ProfileReflector.reflectAll(sessionId)
             } catch (e: CancellationException) {
-                if (shouldClearAIChatReflectionStatusOnCancellation(_statusBar.value)) {
-                    setStatusBar(null)
-                }
                 throw e
             } catch (e: Throwable) {
+                // Current iOS reflection runs silently in a detached Task.
+                // Keep chat available even if this best-effort background sync fails.
                 profileReflectionFailureResult(e)
-            }
-            when (result) {
-                is V2ProfileReflector.Result.Updated -> {
-                    _recordedBanner.value = when {
-                        result.itemsAdded > 0 -> "已记录到档案 · +${result.itemsAdded} 条心得"
-                        result.summaryChanged -> "已记录到档案 · 状态已更新"
-                        else -> "已记录到档案"
-                    }
-                    setStatusBar(null)
-                }
-                is V2ProfileReflector.Result.Failed -> {
-                    setStatusBar(aiUserError("档案同步失败，请稍后重试", result.message), autoHideMs = 4_000L)
-                }
-                V2ProfileReflector.Result.Empty,
-                V2ProfileReflector.Result.NoChange,
-                V2ProfileReflector.Result.Skipped -> {
-                    setStatusBar(null)
-                }
             }
         }
     }
@@ -379,10 +467,16 @@ object V2AIChatStore {
 
     private suspend fun modelDisplayFor(providerId: V2AIService.ProviderId, model: String): String {
         if (providerId != V2AIService.ProviderId.BUILTIN) return model
-        val quota = runAIQuotaCatching { ServiceLocator.net.downloadApi.aiQuota() }.getOrNull()
-        val remaining = quota?.get("remaining")?.jsonPrimitive?.intOrNull
-        val limit = quota?.get("daily_limit")?.jsonPrimitive?.intOrNull
-        if (remaining != null && limit != null) {
+        val quota = runAIQuotaCatching {
+            quotaOverrideForTesting?.invoke() ?: run {
+                val response = ServiceLocator.net.downloadApi.aiQuota()
+                val remaining = response["remaining"]?.jsonPrimitive?.intOrNull
+                val limit = response["daily_limit"]?.jsonPrimitive?.intOrNull
+                if (remaining != null && limit != null) remaining to limit else null
+            }
+        }.getOrNull()
+        if (quota != null) {
+            val (remaining, limit) = quota
             return if (remaining <= 0) "$model · 今日额度已用完" else "$model ($remaining/$limit)"
         }
         return model
@@ -539,6 +633,31 @@ object V2AIChatStore {
         }
 }
 
+internal fun freshAIChatSession(now: LocalDateTime = LocalDateTime.now()): V2AISession =
+    V2AISession(
+        title = "新对话 ${now.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))}",
+        updatedAt = now,
+    )
+
+internal fun aiConversationTitle(prompt: String): String {
+    val normalized = prompt.trim()
+    return if (normalized.length > 20) "${normalized.take(20)}..." else normalized
+}
+
+internal fun shouldTriggerAIReplyReflection(
+    sessionRounds: Int,
+    aggressive: Boolean = false,
+): Boolean = sessionRounds > 0 && (aggressive || sessionRounds % 5 == 0)
+
+internal fun shouldTriggerAIExitReflection(
+    sessionRounds: Int,
+    profileEmpty: Boolean,
+    aggressive: Boolean = false,
+): Boolean {
+    val minimumRounds = if (aggressive || profileEmpty) 1 else 3
+    return sessionRounds >= minimumRounds
+}
+
 /** 简洁 update 扩展（与其它 store 一致） */
 private inline fun <T> MutableStateFlow<T>.update(transform: (T) -> T) {
     while (true) {
@@ -547,9 +666,6 @@ private inline fun <T> MutableStateFlow<T>.update(transform: (T) -> T) {
         if (compareAndSet(current, next)) return
     }
 }
-
-internal fun shouldClearAIChatReflectionStatusOnCancellation(currentStatus: String?): Boolean =
-    currentStatus == V2AIChatStore.AI_REFLECTION_STATUS
 
 internal suspend inline fun <T> runAIQuotaCatching(
     crossinline block: suspend () -> T,

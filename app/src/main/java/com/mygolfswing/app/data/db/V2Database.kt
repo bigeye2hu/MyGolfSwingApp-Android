@@ -79,7 +79,7 @@ abstract class V2Database : RoomDatabase() {
             }
         }
 
-        private val MIGRATION_4_5 = object : Migration(4, 5) {
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE v2_ai_message ADD COLUMN attachmentsJson TEXT NOT NULL DEFAULT '[]'")
             }

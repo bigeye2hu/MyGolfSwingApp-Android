@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,23 +39,15 @@ fun V2AIChatInputBar(
     onDraftChange: (String) -> Unit,
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
-    isReplying: Boolean = false,
-    onStop: () -> Unit = {},
     enabled: Boolean = true,
+    placeholder: String = "向 AI 教练提问…",
     disabledPlaceholder: String = "登录后向 AI 教练提问…",
     onDisabledClick: () -> Unit = {},
 ) {
-    val canSend = enabled && draft.trim().isNotEmpty() && !isReplying
-    val canTapAction = isReplying || canSend || !enabled
-    val actionColor = when {
-        isReplying -> DSColors.flagRed
-        canSend -> DSColors.fairway
-        else -> DSColors.fairway.copy(alpha = 0.4f)
-    }
-    val actionShadowColor = when {
-        isReplying -> DSColors.flagRed.copy(alpha = 0.20f)
-        else -> DSColors.fairway.copy(alpha = 0.25f)
-    }
+    val canSend = enabled && draft.trim().isNotEmpty()
+    val canTapAction = canSend || !enabled
+    val actionColor = if (canSend) DSColors.fairway else DSColors.fairway.copy(alpha = 0.4f)
+    val actionShadowColor = DSColors.fairway.copy(alpha = 0.25f)
 
     Column(
         modifier = modifier
@@ -88,7 +80,7 @@ fun V2AIChatInputBar(
             ) {
                 if (draft.isEmpty()) {
                     Text(
-                        text = if (enabled) "向 AI 教练提问…" else disabledPlaceholder,
+                        text = if (enabled) placeholder else disabledPlaceholder,
                         fontSize = 14.sp,
                         color = DSColors.shadowGray,
                     )
@@ -96,7 +88,9 @@ fun V2AIChatInputBar(
                 BasicTextField(
                     value = draft,
                     onValueChange = onDraftChange,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ai-chat-input"),
                     enabled = enabled,
                     textStyle = TextStyle(
                         fontSize = 14.sp,
@@ -117,20 +111,17 @@ fun V2AIChatInputBar(
                     )
                     .clip(CircleShape)
                     .background(actionColor)
+                    .testTag("ai-chat-send")
                     .clickable(enabled = canTapAction) {
-                        when {
-                            isReplying -> onStop()
-                            !enabled -> onDisabledClick()
-                            else -> onSend()
-                        }
+                        if (!enabled) onDisabledClick() else onSend()
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = if (isReplying) Icons.Filled.Stop else Icons.AutoMirrored.Filled.Send,
-                    contentDescription = if (isReplying) "停止" else "发送",
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "发送",
                     tint = Color.White,
-                    modifier = Modifier.size(if (isReplying) 18.dp else 16.dp),
+                    modifier = Modifier.size(16.dp),
                 )
             }
         }

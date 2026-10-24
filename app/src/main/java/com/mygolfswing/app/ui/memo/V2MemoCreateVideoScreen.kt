@@ -2,6 +2,7 @@ package com.mygolfswing.app.ui.memo
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,7 +10,6 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,8 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,32 +36,34 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OndemandVideo
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.store.V2GoalStore
 import java.util.UUID
 import androidx.compose.ui.Modifier
@@ -75,12 +75,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -97,6 +102,7 @@ import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
 import com.mygolfswing.app.data.video.V2VideoFileStore
 import com.mygolfswing.app.data.video.deleteFileCountingFreedBytes
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.isPermissionPermanentlyDenied
 import com.mygolfswing.app.ui.common.openAppSettings
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
@@ -104,7 +110,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Locale
-import kotlin.math.roundToInt
 
 /**
  * 视频 Memo 创建页（对齐 iOS `V2MemoCreateVideoView`，3 个视频源）。
@@ -125,9 +130,18 @@ fun V2MemoCreateVideoScreen(
     pendingOnline: V2OnlineVideoSelection? = null,
     onPendingOnlineConsumed: () -> Unit = {},
     editingMemoId: UUID? = null,
-    allowSourceReplacement: Boolean = false,
+    launchAlbumPicker: (((Uri?) -> Unit) -> Unit)? = null,
+    cameraPermissionGranted: (() -> Boolean)? = null,
+    launchCameraCapture: ((File, Uri, (Boolean) -> Unit) -> Unit)? = null,
+    requestCameraPermission: ((String) -> Unit)? = null,
+    adoptCameraVideo: (suspend (File) -> V2VideoFileStore.ImportResult?)? = null,
+    importAlbumVideo: (suspend (Uri) -> V2VideoFileStore.ImportResult?)? = null,
+    persistCreatedMemo: (suspend (V2Memo) -> Unit)? = null,
+    persistUpdatedMemo: (suspend (V2Memo) -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
     val allMemos by V2MemoStore.allMemos.collectAsState()
     val editingMemo = remember(allMemos, editingMemoId) {
@@ -136,34 +150,56 @@ fun V2MemoCreateVideoScreen(
     val isEditing = editingMemoId != null
 
     if (isEditing && editingMemo == null) {
-        V2MissingEntityScreen(message = "视频 Memo 不存在或已被删除", onBack = onClose, title = "编辑视频 Memo")
+        V2MissingEntityScreen(message = "视频 Memo 不存在或已被删除", onBack = onClose, title = "编辑记录")
         return
     }
 
     // 视频源状态
-    var sourceKind by remember(editingMemo?.id) { mutableStateOf(initialSourceKind(editingMemo)) }
-    var localAbsolutePath by remember(editingMemo?.id) { mutableStateOf(initialLocalPath(editingMemo)) }
-    var localThumbPath by remember(editingMemo?.id) { mutableStateOf(initialLocalThumbPath(editingMemo)) }
-    var localDurationSec by remember(editingMemo?.id) { mutableStateOf(editingMemo?.durationSec) }
-    var onlineUrl by remember(editingMemo?.id) { mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.videoUrl else null) }
-    var onlinePlatform by remember(editingMemo?.id) { mutableStateOf(editingMemo?.platform) }
-    var onlineThumbUrl by remember(editingMemo?.id) { mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.thumbnailUrl else null) }
+    var sourceKind by rememberSaveable(editingMemo?.id) { mutableStateOf(initialSourceKind(editingMemo)) }
+    var localAbsolutePath by rememberSaveable(editingMemo?.id) { mutableStateOf(initialLocalPath(editingMemo)) }
+    var localThumbPath by rememberSaveable(editingMemo?.id) { mutableStateOf(initialLocalThumbPath(editingMemo)) }
+    var localDurationSec by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.durationSec) }
+    var onlineUrl by rememberSaveable(editingMemo?.id) {
+        mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.videoUrl else null)
+    }
+    var onlinePlatform by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.platform) }
+    var onlineThumbUrl by rememberSaveable(editingMemo?.id) {
+        mutableStateOf(if (editingMemo?.isOnlineVideo == true) editingMemo.thumbnailUrl else null)
+    }
+    var onlineSourceTitle by rememberSaveable(editingMemo?.id) {
+        mutableStateOf(
+            if (editingMemo?.isOnlineVideo == true) {
+                editingMemo.displayTitle ?: editingMemo.title
+            } else {
+                null
+            },
+        )
+    }
     val originalLocalPath = remember(editingMemo?.id) { initialLocalPath(editingMemo) }
     val originalLocalThumbPath = remember(editingMemo?.id) { initialLocalThumbPath(editingMemo) }
-    var showOnlineDialog by remember { mutableStateOf(false) }
-    var selectedTagIds by remember(editingMemo?.id) { mutableStateOf(editingMemo?.tagIds.orEmpty().toSet()) }
-    var selectedGoalIds by remember(editingMemo?.id) { mutableStateOf(editingMemo?.linkedGoalIds.orEmpty().toSet()) }
-    var didAutoSelectGoal by remember(editingMemo?.id) { mutableStateOf(false) }
-    var showDiscardConfirm by remember { mutableStateOf(false) }
+    var showOnlineDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedTagIds by rememberSaveable(
+        editingMemo?.id,
+        stateSaver = listSaver<Set<String>, String>(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) { mutableStateOf(editingMemo?.tagIds.orEmpty().toSet()) }
+    var selectedGoalIds by rememberSaveable(
+        editingMemo?.id,
+        stateSaver = listSaver<Set<UUID>, String>(
+            save = { ids -> ids.map(UUID::toString) },
+            restore = { values -> values.mapTo(mutableSetOf(), UUID::fromString) },
+        ),
+    ) { mutableStateOf(editingMemo?.linkedGoalIds.orEmpty().toSet()) }
+    var showDiscardConfirm by rememberSaveable { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
 
-    val activeGoals by V2GoalStore.goals.collectAsState()
-
     var importing by remember { mutableStateOf(false) }
     var importError by remember { mutableStateOf<String?>(null) }
-    var pendingCameraFile by remember { mutableStateOf<File?>(null) }
-    var cameraPermissionDeniedPermanently by remember { mutableStateOf(false) }
+    var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var cameraPermissionDeniedPermanently by rememberSaveable { mutableStateOf(false) }
 
     fun protectedOriginalLocalMedia(): Set<String> =
         if (isEditing) setOfNotNull(originalLocalPath, originalLocalThumbPath) else emptySet()
@@ -178,17 +214,19 @@ fun V2MemoCreateVideoScreen(
     }
 
     // 系统相机
-    val captureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CaptureVideo(),
-    ) { ok ->
-        val file = pendingCameraFile
-        pendingCameraFile = null
+    fun handleCameraCaptureResult(ok: Boolean) {
+        val file = pendingCameraPath?.let(::File)
+        pendingCameraPath = null
         if (ok && file != null) {
             scope.launch {
                 importing = true
                 importError = null
                 val r = try {
-                    V2VideoFileStore.adoptLocalFile(context, file)
+                    if (adoptCameraVideo != null) {
+                        adoptCameraVideo(file)
+                    } else {
+                        V2VideoFileStore.adoptLocalFile(context, file)
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -208,6 +246,7 @@ fun V2MemoCreateVideoScreen(
                     localThumbPath = r.thumbnailPath
                     localDurationSec = r.durationSec
                     onlineUrl = null
+                    onlineSourceTitle = null
                     deleteDraftLocalMedia(
                         videoPath = previousVideoPath,
                         thumbnailPath = previousThumbPath,
@@ -220,13 +259,22 @@ fun V2MemoCreateVideoScreen(
         }
     }
 
-    fun launchCameraCapture() {
+    val captureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CaptureVideo(),
+        onResult = ::handleCameraCaptureResult,
+    )
+
+    fun startCameraCapture() {
         val (file, uri) = V2VideoFileStore.createCameraOutputUri(context)
-        pendingCameraFile = file
+        pendingCameraPath = file.absolutePath
         runCatching {
-            captureLauncher.launch(uri)
+            if (launchCameraCapture != null) {
+                launchCameraCapture(file, uri, ::handleCameraCaptureResult)
+            } else {
+                captureLauncher.launch(uri)
+            }
         }.onFailure {
-            pendingCameraFile = null
+            pendingCameraPath = null
             deleteFileCountingFreedBytes(file)
             importError = memoVideoSaveError("无法打开相机，请稍后重试或改从相册选择", it.message)
         }
@@ -237,7 +285,7 @@ fun V2MemoCreateVideoScreen(
     ) { granted ->
         if (granted) {
             cameraPermissionDeniedPermanently = false
-            launchCameraCapture()
+            startCameraCapture()
         } else {
             cameraPermissionDeniedPermanently = context.isPermissionPermanentlyDenied(Manifest.permission.CAMERA)
             importError = if (cameraPermissionDeniedPermanently) {
@@ -248,9 +296,13 @@ fun V2MemoCreateVideoScreen(
         }
     }
 
-    fun requestCameraPermission() {
+    fun startCameraPermissionRequest() {
         runCatching {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            if (requestCameraPermission != null) {
+                requestCameraPermission(Manifest.permission.CAMERA)
+            } else {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
         }.onFailure {
             importError = memoVideoSaveError("无法请求相机权限，请稍后重试或改从相册选择", it.message)
         }
@@ -259,7 +311,9 @@ fun V2MemoCreateVideoScreen(
     // 表单状态
     var title by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.displayTitle ?: editingMemo?.title ?: "") }
     var note by rememberSaveable(editingMemo?.id) { mutableStateOf(editingMemo?.text ?: "") }
-    var noteExpanded by remember(editingMemo?.id) { mutableStateOf(!editingMemo?.text.isNullOrBlank()) }
+    var noteExpanded by rememberSaveable(editingMemo?.id) {
+        mutableStateOf(!editingMemo?.text.isNullOrBlank())
+    }
 
     androidx.compose.runtime.LaunchedEffect(pendingOnline) {
         val pick = pendingOnline ?: return@LaunchedEffect
@@ -268,6 +322,7 @@ fun V2MemoCreateVideoScreen(
         onlineUrl = pick.url
         onlinePlatform = pick.platform
         onlineThumbUrl = pick.thumbnailUrl
+        onlineSourceTitle = pick.title.trim().ifBlank { null }
         localDurationSec = pick.durationSec
         if (title.isBlank()) {
             title = prefilledOnlineVideoMemoTitle(pick).take(VideoMemoTitleMaxLength)
@@ -287,15 +342,17 @@ fun V2MemoCreateVideoScreen(
     }
 
     // 系统相册
-    val pickLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
+    fun handleAlbumPickerResult(uri: Uri?) {
         if (uri != null) {
             scope.launch {
                 importing = true
                 importError = null
                 val r = try {
-                    V2VideoFileStore.importVideo(context, uri)
+                    if (importAlbumVideo != null) {
+                        importAlbumVideo(uri)
+                    } else {
+                        V2VideoFileStore.importVideo(context, uri)
+                    }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
@@ -314,6 +371,7 @@ fun V2MemoCreateVideoScreen(
                     localThumbPath = r.thumbnailPath
                     localDurationSec = r.durationSec
                     onlineUrl = null
+                    onlineSourceTitle = null
                     deleteDraftLocalMedia(
                         videoPath = previousVideoPath,
                         thumbnailPath = previousThumbPath,
@@ -324,8 +382,12 @@ fun V2MemoCreateVideoScreen(
         }
     }
 
+    val pickLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = ::handleAlbumPickerResult,
+    )
+
     val hasVideo = localAbsolutePath != null || onlineUrl != null
-    val canReplaceSource = !isEditing || allowSourceReplacement
     val isOnline = onlineUrl != null
     val videoStringForStore = onlineUrl ?: localAbsolutePath?.let { "file://$it" }
     val thumbStringForStore = localThumbPath?.let { "file://$it" }
@@ -335,15 +397,6 @@ fun V2MemoCreateVideoScreen(
         SourceKind.ONLINE -> "在线视频"
         null -> null
     }
-    LaunchedEffect(isEditing, hasVideo, activeGoals, selectedGoalIds, didAutoSelectGoal) {
-        if (!isEditing && hasVideo && selectedGoalIds.isEmpty() && !didAutoSelectGoal) {
-            defaultLinkedGoalIdForVideoMemo(activeGoals)?.let { goalId ->
-                selectedGoalIds = setOf(goalId)
-                didAutoSelectGoal = true
-            }
-        }
-    }
-
     val canSave = hasVideo && title.isNotBlank() && !importing && !saving
     val hasDraft = if (isEditing) {
         title != (editingMemo?.displayTitle ?: editingMemo?.title ?: "") ||
@@ -363,11 +416,17 @@ fun V2MemoCreateVideoScreen(
 
     fun attemptClose() {
         if (saving) return
-        if (hasDraft) showDiscardConfirm = true else onClose()
+        if (hasDraft) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            showDiscardConfirm = true
+        } else {
+            onClose()
+        }
     }
 
     fun buildAndSave() {
-        if (!canSave) return
+        if (saving || !canSave) return
         if (!isOnline && !memoVideoPlayable(videoStringForStore)) {
             importError = "视频文件已不可用，请重新选择或录制"
             localAbsolutePath = null
@@ -376,81 +435,79 @@ fun V2MemoCreateVideoScreen(
             sourceKind = null
             return
         }
-        if (editingMemo != null) {
-            scope.launch {
-                saving = true
-                saveError = null
-                try {
-                    val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
-                    val tagIds = selectedTagIds.toList()
-                    val topic = V2MemoBridge.inferTopic(
-                        category = V2CategoryStore.groupForItemId(tagIds.firstOrNull() ?: "")?.name,
-                        tags = tagNames,
-                        title = title.trim(),
-                    )
-                    V2MemoStore.updateAndWait(
-                        editingMemo.copy(
-                            title = title.trim().ifBlank { "视频 Memo" },
-                            displayTitle = title.trim().ifBlank { "视频 Memo" },
-                            text = note.trim(),
-                            videoUrl = videoStringForStore,
-                            durationSec = localDurationSec,
-                            topic = topic,
-                            tags = tagNames,
-                            tagIds = tagIds,
-                            linkedGoalIds = selectedGoalIds.toList(),
-                            thumbnailUrl = if (isOnline) onlineThumbUrl else thumbStringForStore,
-                            trainingMethod = training,
-                            isOnlineVideo = isOnline,
-                            platform = if (isOnline) onlinePlatform else null,
-                            metaText = buildMetaText(isOnline = isOnline, durationSec = localDurationSec),
-                            thumbnailKind = V2MemoBridge.thumbnailKindFor(topic),
-                        ),
-                    )
-                    V2GoalStore.replaceMemoLinks(editingMemo.id, selectedGoalIds)
-                    cleanupReplacedOriginalLocalMedia()
-                    onSaved?.invoke(editingMemo.id) ?: onClose()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Throwable) {
-                    saveError = memoVideoThrowableError("保存失败，请稍后重试", e)
-                } finally {
-                    saving = false
-                }
-            }
-            return
-        }
-        val tagNames = V2CategoryStore.tagNamesFor(selectedTagIds)
-        val tagIds = selectedTagIds.toList()
-        val topic = V2MemoBridge.inferTopic(
-            category = V2CategoryStore.groupForItemId(tagIds.firstOrNull() ?: "")?.name,
-            tags = tagNames,
-            title = title.trim(),
-        )
-        val memo = V2Memo.mixedMemo(
-            displayTitle = title.trim().ifBlank { "视频 Memo" },
-            body = note.trim(),
-            videoUrl = videoStringForStore,
-            durationSec = localDurationSec,
-            topic = topic,
-            tags = tagNames,
-            metaText = buildMetaText(isOnline = isOnline, durationSec = localDurationSec),
-        ).apply {
-            this.tagIds = tagIds
-            thumbnailUrl = if (isOnline) onlineThumbUrl else thumbStringForStore
-            trainingMethod = training
-            isOnlineVideo = isOnline
-            platform = if (isOnline) onlinePlatform else null
-            linkedGoalIds = selectedGoalIds.toList()
-            thumbnailKind = V2MemoBridge.thumbnailKindFor(topic)
-        }
+        saving = true
+        saveError = null
+        val draftTitle = title.trim().ifBlank { "视频 Memo" }
+        val draftNote = note.trim()
+        val draftTagIds = selectedTagIds.toList()
+        val draftGoalIds = selectedGoalIds.toSet()
+        val draftVideoUrl = videoStringForStore
+        val draftThumbnailUrl = if (isOnline) onlineThumbUrl else thumbStringForStore
+        val draftDurationSec = localDurationSec
+        val draftTraining = training
+        val draftIsOnline = isOnline
+        val draftPlatform = if (isOnline) onlinePlatform else null
+        val editingSnapshot = editingMemo
         scope.launch {
-            saving = true
-            saveError = null
             try {
-                V2MemoStore.createAndWait(memo)
-                selectedGoalIds.forEach { goalId -> V2GoalStore.linkMemo(memo.id, goalId) }
-                onSaved?.invoke(memo.id) ?: onClose()
+                val tagNames = V2CategoryStore.tagNamesFor(draftTagIds.toSet())
+                val topic = V2MemoBridge.inferTopic(
+                    category = V2CategoryStore.groupForItemId(draftTagIds.firstOrNull() ?: "")?.name,
+                    tags = tagNames,
+                    title = draftTitle,
+                )
+                if (editingSnapshot != null) {
+                    val updatedMemo = editingSnapshot.copy(
+                        title = draftTitle,
+                        displayTitle = draftTitle,
+                        text = draftNote,
+                        videoUrl = draftVideoUrl,
+                        durationSec = draftDurationSec,
+                        topic = topic,
+                        tags = tagNames,
+                        tagIds = draftTagIds,
+                        linkedGoalIds = draftGoalIds.toList(),
+                        thumbnailUrl = draftThumbnailUrl,
+                        trainingMethod = draftTraining,
+                        isOnlineVideo = draftIsOnline,
+                        platform = draftPlatform,
+                        metaText = buildMetaText(isOnline = draftIsOnline, durationSec = draftDurationSec),
+                        thumbnailKind = V2MemoBridge.thumbnailKindFor(topic),
+                    )
+                    if (persistUpdatedMemo != null) {
+                        persistUpdatedMemo(updatedMemo)
+                    } else {
+                        V2MemoStore.updateAndWait(updatedMemo)
+                    }
+                    V2GoalStore.replaceMemoLinks(editingSnapshot.id, draftGoalIds)
+                    cleanupReplacedOriginalLocalMedia()
+                    onSaved?.invoke(editingSnapshot.id) ?: onClose()
+                } else {
+                    val memo = V2Memo.mixedMemo(
+                        displayTitle = draftTitle,
+                        body = draftNote,
+                        videoUrl = draftVideoUrl,
+                        durationSec = draftDurationSec,
+                        topic = topic,
+                        tags = tagNames,
+                        metaText = buildMetaText(isOnline = draftIsOnline, durationSec = draftDurationSec),
+                    ).apply {
+                        tagIds = draftTagIds
+                        thumbnailUrl = draftThumbnailUrl
+                        trainingMethod = draftTraining
+                        isOnlineVideo = draftIsOnline
+                        platform = draftPlatform
+                        linkedGoalIds = draftGoalIds.toList()
+                        thumbnailKind = V2MemoBridge.thumbnailKindFor(topic)
+                    }
+                    if (persistCreatedMemo != null) {
+                        persistCreatedMemo(memo)
+                    } else {
+                        V2MemoStore.createAndWait(memo)
+                    }
+                    draftGoalIds.forEach { goalId -> V2GoalStore.linkMemo(memo.id, goalId) }
+                    onSaved?.invoke(memo.id) ?: onClose()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -466,9 +523,10 @@ fun V2MemoCreateVideoScreen(
             .fillMaxSize()
             .background(Color(0xFFFAF7F0)),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             NavBar(
-                title = if (isEditing) "编辑视频 Memo" else "新建视频 Memo",
+                title = if (isEditing) "编辑记录" else "新建记录",
                 onClose = ::attemptClose,
             )
 
@@ -486,29 +544,37 @@ fun V2MemoCreateVideoScreen(
                     localThumbPath = localThumbPath,
                     onlineUrl = onlineUrl,
                     onlineThumbUrl = onlineThumbUrl,
+                    onlineSourceTitle = onlineSourceTitle,
                     durationSec = localDurationSec,
                     importing = importing,
                     editing = isEditing,
-                    canReplaceSource = canReplaceSource,
                     onPickCamera = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-                            == PackageManager.PERMISSION_GRANTED
-                        ) {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        val permissionGranted = cameraPermissionGranted?.invoke()
+                            ?: (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+                        if (permissionGranted) {
                             cameraPermissionDeniedPermanently = false
-                            launchCameraCapture()
+                            startCameraCapture()
                         } else if (cameraPermissionDeniedPermanently) {
                             importError = "请在系统设置中开启相机权限后再录制视频"
                         } else {
-                            requestCameraPermission()
+                            startCameraPermissionRequest()
                         }
                     },
                     onPickAlbum = {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
                         runCatching {
-                            pickLauncher.launch(
-                                androidx.activity.result.PickVisualMediaRequest(
-                                    ActivityResultContracts.PickVisualMedia.VideoOnly,
-                                ),
-                            )
+                            if (launchAlbumPicker != null) {
+                                launchAlbumPicker(::handleAlbumPickerResult)
+                            } else {
+                                pickLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        ActivityResultContracts.PickVisualMedia.VideoOnly,
+                                    ),
+                                )
+                            }
                         }.onFailure {
                             importError = memoVideoSaveError("无法打开相册，请稍后重试", it.message)
                         }
@@ -516,16 +582,6 @@ fun V2MemoCreateVideoScreen(
                     onPickOnline = {
                         if (onOpenOnlinePicker != null) onOpenOnlinePicker()
                         else showOnlineDialog = true
-                    },
-                    onClear = {
-                        deleteDraftLocalMedia(localAbsolutePath, localThumbPath, protectedPaths = protectedOriginalLocalMedia())
-                        sourceKind = null
-                        localAbsolutePath = null
-                        localThumbPath = null
-                        localDurationSec = null
-                        onlineUrl = null
-                        onlinePlatform = null
-                        onlineThumbUrl = null
                     },
                 )
                 TitleSection(title = title, onChange = { if (it.length <= VideoMemoTitleMaxLength) title = it })
@@ -538,13 +594,6 @@ fun V2MemoCreateVideoScreen(
                 V2MemoTagPicker(
                     selectedTagIds = selectedTagIds,
                     onSelectedTagIdsChange = { selectedTagIds = it },
-                )
-                LinkedGoalsSection(
-                    goals = activeGoals.filter { it.status == V2Goal.Status.ACTIVE },
-                    selected = selectedGoalIds,
-                    onToggle = { id ->
-                        selectedGoalIds = if (id in selectedGoalIds) selectedGoalIds - id else selectedGoalIds + id
-                    },
                 )
             }
         }
@@ -564,6 +613,7 @@ fun V2MemoCreateVideoScreen(
                 deleteDraftLocalMedia(localAbsolutePath, localThumbPath, protectedPaths = protectedOriginalLocalMedia())
                 onlineUrl = url
                 onlinePlatform = detectPlatform(url)
+                onlineSourceTitle = null
                 sourceKind = SourceKind.ONLINE
                 localAbsolutePath = null
                 localThumbPath = null
@@ -574,83 +624,126 @@ fun V2MemoCreateVideoScreen(
     }
 
     if (importError != null) {
-        AlertDialog(
-            onDismissRequest = { importError = null },
-            title = { Text("出错了") },
-            text = { Text(importError ?: "") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val openSettings = cameraPermissionDeniedPermanently
-                        importError = null
-                        if (openSettings && !context.openAppSettings()) {
-                            Toast.makeText(context, "系统设置暂时无法打开，请稍后重试", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                ) {
-                    Text(if (cameraPermissionDeniedPermanently) "打开设置" else "好")
+        VideoMemoOperationFailureDialog(
+            message = importError.orEmpty(),
+            primaryLabel = if (cameraPermissionDeniedPermanently) "打开设置" else "好",
+            secondaryLabel = if (cameraPermissionDeniedPermanently) "取消" else null,
+            onPrimary = {
+                val openSettings = cameraPermissionDeniedPermanently
+                importError = null
+                if (openSettings && !context.openAppSettings()) {
+                    Toast.makeText(context, "系统设置暂时无法打开，请稍后重试", Toast.LENGTH_SHORT).show()
                 }
             },
-            dismissButton = if (cameraPermissionDeniedPermanently) {
-                {
-                    TextButton(onClick = { importError = null }) { Text("取消") }
-                }
-            } else {
-                null
-            },
+            onDismiss = { importError = null },
         )
     }
 
     saveError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { saveError = null },
-            title = { Text("保存失败") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { saveError = null }) {
-                    Text("好", color = Color(0xFF2D6A4F))
-                }
-            },
+        VideoMemoOperationFailureDialog(
+            message = message,
+            primaryLabel = "好",
+            onPrimary = { saveError = null },
+            onDismiss = { saveError = null },
         )
     }
 
     if (showDiscardConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDiscardConfirm = false },
-            title = { Text("放弃编辑？") },
-            text = { Text("当前内容尚未保存，确定要离开吗？") },
-            confirmButton = {
-                TextButton(onClick = {
+        VideoMemoDiscardSheet(
+            editing = isEditing,
+            onContinue = { showDiscardConfirm = false },
+            onDiscard = {
                 showDiscardConfirm = false
                 if (!isEditing) {
                     deleteDraftLocalMedia(localAbsolutePath, localThumbPath)
-                    deleteFileCountingFreedBytes(pendingCameraFile)
+                    deleteFileCountingFreedBytes(pendingCameraPath?.let(::File))
                 } else {
                     deleteDraftLocalMedia(localAbsolutePath, localThumbPath, protectedPaths = protectedOriginalLocalMedia())
                 }
                 onClose()
-            }) { Text("放弃", color = Color(0xFFC0392B)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardConfirm = false }) { Text("继续编辑") }
             },
         )
     }
 }
 
-private enum class SourceKind { CAMERA, ALBUM, ONLINE }
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun VideoMemoDiscardSheet(
+    editing: Boolean,
+    onContinue: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onContinue,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.34f),
+        dragHandle = null,
+        tonalElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = if (editing) "放弃未保存的修改？" else "放弃这条 Memo？",
+                        color = Color(0xFF6B7280),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        text = if (editing) "已修改的内容将丢失" else "未保存的内容将丢失",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 12.sp,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE5E7EB)))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clickable(onClick = onDiscard),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("放弃", color = Color(0xFFC0392B), fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White)
+                    .clickable(onClick = onContinue),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("继续编辑", color = Color(0xFF2D6A4F), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+internal enum class SourceKind { CAMERA, ALBUM, ONLINE }
 
 private const val VideoMemoTitleMaxLength = 24
 private const val VideoMemoNoteMaxLength = 240
-
-private enum class VideoCreateScrubFeel(
-    val title: String,
-    val pixelsPerSecond: Float,
-) {
-    Balanced("稳", 180f),
-    Precise("细", 280f),
-    Frame("帧", 420f),
-}
 
 private fun initialSourceKind(memo: V2Memo?): SourceKind? = when {
     memo == null -> null
@@ -757,16 +850,16 @@ private fun TitleSection(title: String, onChange: (String) -> Unit) {
                 cursorBrush = SolidColor(Color(0xFF2D6A4F)),
                 modifier = Modifier
                     .weight(1f)
-                    .onFocusChanged { titleFocused = it.isFocused },
+                    .onFocusChanged { titleFocused = it.isFocused }
+                    .testTag("video-memo-title-field"),
                 singleLine = true,
                 decorationBox = { inner ->
                     if (title.isEmpty()) {
-                        Text("给这条 Memo 起个标题…", fontSize = 15.sp, color = Color(0xFF9CA3AF))
+                        Text("给这条记录起个标题…", fontSize = 15.sp, color = Color(0xFF9CA3AF))
                     }
                     inner()
                 },
             )
-            Text("${title.length}/24", fontSize = 11.sp, color = Color(0xFF9CA3AF))
         }
         Box(
             Modifier
@@ -774,6 +867,88 @@ private fun TitleSection(title: String, onChange: (String) -> Unit) {
                 .height(1.dp)
                 .background(if (titleFocused) Color(0xFF2D6A4F) else Color(0xFFE5E7EB)),
         )
+    }
+}
+
+@Composable
+internal fun VideoMemoOperationFailureDialog(
+    message: String,
+    title: String = "操作失败",
+    tagPrefix: String = if (title == "保存失败") {
+        "text-memo-save-failure"
+    } else {
+        "video-memo-operation-failure"
+    },
+    primaryLabel: String,
+    secondaryLabel: String? = null,
+    onPrimary: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val dialogTag = "$tagPrefix-dialog"
+    val secondaryTag = "$tagPrefix-secondary"
+    val primaryTag = "$tagPrefix-primary"
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(onClick = onDismiss),
+            )
+            Column(
+                modifier = Modifier.width(270.dp).clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF2F2F7).copy(alpha = 0.98f))
+                    .testTag(dialogTag),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        title,
+                        color = Color(0xFF1C1C1E),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        message,
+                        color = Color(0xFF3A3A3C),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFD1D1D6)))
+                Row(Modifier.fillMaxWidth().height(44.dp)) {
+                    if (secondaryLabel != null) {
+                        Box(
+                            modifier = Modifier.weight(1f).fillMaxSize().clickable(onClick = onDismiss)
+                                .testTag(secondaryTag),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(secondaryLabel, color = Color(0xFF007AFF), fontSize = 17.sp)
+                        }
+                        Box(Modifier.width(1.dp).fillMaxSize().background(Color(0xFFD1D1D6)))
+                    }
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxSize().clickable(onClick = onPrimary)
+                            .testTag(primaryTag),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            primaryLabel,
+                            color = Color(0xFF007AFF),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -818,6 +993,7 @@ private fun NoteSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .defaultMinSize(minHeight = 100.dp)
+                    .offset(y = (-1).dp)
                     .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
                     .background(Color(0xFFFAF7F0))
                     .border(1.dp, Color(0xFFE5E7EB), RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
@@ -840,12 +1016,6 @@ private fun NoteSection(
                         modifier = Modifier.padding(start = 4.dp, top = 8.dp),
                     )
                 }
-                Text(
-                    "${note.length}/240",
-                    fontSize = 11.sp,
-                    color = Color(0xFF9CA3AF),
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                )
             }
         }
     }
@@ -875,21 +1045,22 @@ private fun BottomSaveBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(top = 12.dp, bottom = 32.dp),
+                .padding(top = 8.dp, bottom = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                if (editing) "将更新到 视频笔记 · 视频 Memo" else "将保存到 视频笔记 · 视频 Memo",
+                if (editing) "保存修改，不会自动分享" else "先保存。分享到空间是另一步",
                 fontSize = 11.sp,
                 color = Color(0xFF9CA3AF),
             )
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(40.dp)
                     .clip(RoundedCornerShape(50))
                     .background(if (canSave) Color(0xFF2D6A4F) else Color(0xFF2D6A4F).copy(alpha = 0.4f))
+                    .testTag("video-memo-save")
                     .clickable(enabled = canSave, onClick = onSave),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center,
@@ -904,7 +1075,7 @@ private fun BottomSaveBar(
                     } else if (editing) {
                         "保存修改"
                     } else {
-                        "保存视频 Memo"
+                        "保存"
                     },
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
@@ -968,84 +1139,45 @@ private fun NavBar(
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun VideoSourceBlock(
+internal fun VideoSourceBlock(
     sourceKind: SourceKind?,
     localPath: String?,
     localThumbPath: String?,
     onlineUrl: String?,
     onlineThumbUrl: String?,
+    onlineSourceTitle: String?,
     durationSec: Double?,
     importing: Boolean,
     editing: Boolean,
-    canReplaceSource: Boolean,
     onPickCamera: () -> Unit,
     onPickAlbum: () -> Unit,
     onPickOnline: () -> Unit,
-    onClear: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("视频来源", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
-            Spacer(Modifier.weight(1f))
-            if (canReplaceSource && sourceKind != null && !importing) {
+        Text("视频来源", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
+
+        if (editing) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = Color(0xFF9CA3AF),
+                    modifier = Modifier.size(13.dp),
+                )
                 Text(
-                    text = if (editing) "更换视频" else "重新选择",
+                    "视频源已锁定，编辑模式下不可更换",
                     fontSize = 12.sp,
-                    color = Color(0xFFC0392B),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable { onClear() }
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    color = Color(0xFF9CA3AF),
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
 
-        if (editing) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (canReplaceSource) {
-                    Text(
-                        text = when (sourceKind) {
-                            SourceKind.CAMERA -> "拍摄"
-                            SourceKind.ALBUM -> "本地上传"
-                            SourceKind.ONLINE -> "在线视频"
-                            null -> "视频源"
-                        },
-                        fontSize = 12.sp,
-                        color = Color(0xFF7B8A82),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color(0xFFE8F5E9))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                    Text(
-                        "当前视频源可在恢复模式下更换，保存成功后会替换原视频。",
-                        fontSize = 12.sp,
-                        color = Color(0xFF9CA3AF),
-                    )
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(
-                            imageVector = Icons.Filled.Lock,
-                            contentDescription = null,
-                            tint = Color(0xFF9CA3AF),
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Text(
-                            "视频源已锁定，编辑模式下不可更换",
-                            fontSize = 12.sp,
-                            color = Color(0xFF9CA3AF),
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
-        }
-
-        if (canReplaceSource) {
+        if (!editing) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 SourceChip(
                     icon = Icons.Filled.Videocam,
@@ -1077,53 +1209,10 @@ private fun VideoSourceBlock(
             localThumbPath = localThumbPath,
             onlineUrl = onlineUrl,
             onlineThumbUrl = onlineThumbUrl,
+            onlineSourceTitle = onlineSourceTitle,
             durationSec = durationSec,
             importing = importing,
         )
-    }
-}
-
-@Composable
-private fun LinkedGoalsSection(
-    goals: List<com.mygolfswing.app.data.model.V2Goal>,
-    selected: Set<UUID>,
-    onToggle: (UUID) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("关联到目标", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B2A21))
-        if (goals.isEmpty()) {
-            Text("还没有进行中的目标", fontSize = 12.sp, color = Color(0xFF9CA3AF), modifier = Modifier.padding(vertical = 8.dp))
-        } else {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(goals, key = { it.id }) { goal ->
-                    val on = goal.id in selected
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(if (on) Color(0xFFE8F5E9) else Color.White)
-                            .border(1.dp, if (on) Color(0xFF2D6A4F) else Color(0xFFE5E7EB), RoundedCornerShape(50))
-                            .clickable { onToggle(goal.id) }
-                            .padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Flag,
-                            contentDescription = null,
-                            tint = if (on) Color(0xFF2D6A4F) else Color(0xFF9CA3AF),
-                            modifier = Modifier.size(10.dp),
-                        )
-                        Text(
-                            text = goal.title,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = if (on) Color(0xFF2D6A4F) else Color(0xFF1B2A21),
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1174,6 +1263,7 @@ private fun PreviewArea(
     localThumbPath: String?,
     onlineUrl: String?,
     onlineThumbUrl: String?,
+    onlineSourceTitle: String?,
     durationSec: Double?,
     importing: Boolean,
 ) {
@@ -1193,8 +1283,11 @@ private fun PreviewArea(
                     Text("处理视频中…", color = Color.White, fontSize = 12.sp)
                 }
             }
-            localPath != null -> LocalPreview(localPath, durationSec)
-            onlineUrl != null -> OnlinePreview(onlineUrl, onlineThumbUrl)
+            localPath != null -> LocalPreview(localPath)
+            onlineUrl != null -> OnlinePreview(
+                thumbnailUrl = onlineThumbUrl,
+                sourceTitle = onlineSourceTitle,
+            )
             else -> EmptyPlaceholder()
         }
 
@@ -1202,7 +1295,19 @@ private fun PreviewArea(
             VideoPreviewPlayButton(modifier = Modifier.align(Alignment.Center))
         }
 
-        if (durationSec != null && durationSec > 0 && localPath == null) {
+        if (!importing && (localPath != null || onlineUrl != null)) {
+            Icon(
+                imageVector = Icons.Filled.OpenInFull,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp)
+                    .size(12.dp),
+            )
+        }
+
+        if (durationSec != null && durationSec > 0) {
             val total = durationSec.toInt()
             val m = total / 60
             val s = total % 60
@@ -1224,13 +1329,9 @@ private fun PreviewArea(
 
 @OptIn(UnstableApi::class)
 @Composable
-private fun LocalPreview(absolutePath: String, durationSec: Double?) {
+private fun LocalPreview(absolutePath: String) {
     val context = LocalContext.current
     var isPlaying by remember(absolutePath) { mutableStateOf(false) }
-    var currentTime by remember(absolutePath) { mutableFloatStateOf(0f) }
-    var duration by remember(absolutePath, durationSec) { mutableFloatStateOf(durationSec?.toFloat() ?: 0f) }
-    var scrubFeel by remember { mutableStateOf(VideoCreateScrubFeel.Precise) }
-    var wasPlayingBeforeScrub by remember { mutableStateOf(false) }
     val player = remember(absolutePath) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri("file://$absolutePath"))
@@ -1242,12 +1343,15 @@ private fun LocalPreview(absolutePath: String, durationSec: Double?) {
     }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     player.pause()
                     player.seekTo(0)
                     isPlaying = false
-                    currentTime = 0f
                 }
             }
         }
@@ -1257,30 +1361,13 @@ private fun LocalPreview(absolutePath: String, durationSec: Double?) {
             player.release()
         }
     }
-    LaunchedEffect(player) {
-        while (true) {
-            currentTime = (player.currentPosition / 1000f).coerceAtLeast(0f)
-            player.duration.takeIf { it > 0 }?.let { duration = it / 1000f }
-            isPlaying = player.isPlaying
-            kotlinx.coroutines.delay(120)
-        }
-    }
-
     Box(Modifier.fillMaxSize()) {
         AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable {
-                    if (player.isPlaying) {
-                        player.pause()
-                    } else {
-                        player.play()
-                    }
-                },
+            modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     this.player = player
-                    useController = false
+                    useController = true
                 }
             },
             update = { it.player = player },
@@ -1288,138 +1375,31 @@ private fun LocalPreview(absolutePath: String, durationSec: Double?) {
         if (!isPlaying) {
             VideoPreviewPlayButton(modifier = Modifier.align(Alignment.Center))
         }
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.68f)),
-                    ),
-                )
-                .padding(horizontal = 12.dp)
-                .padding(top = 20.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            VideoCreateScrubFeelControl(selected = scrubFeel, onSelected = { scrubFeel = it })
-            VideoCreateMiniScrubBar(
-                currentTime = currentTime,
-                duration = duration,
-                scrubFeel = scrubFeel,
-                onScrubStart = {
-                    wasPlayingBeforeScrub = player.isPlaying
-                    player.pause()
-                },
-                onScrubEnd = {
-                    if (wasPlayingBeforeScrub) player.play()
-                    wasPlayingBeforeScrub = false
-                },
-                onSeek = { seconds ->
-                    val targetMs = (seconds * 1000).roundToInt().toLong()
-                    player.seekTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
-                    currentTime = seconds
-                },
-            )
-        }
     }
 }
 
 @Composable
-private fun VideoCreateScrubFeelControl(
-    selected: VideoCreateScrubFeel,
-    onSelected: (VideoCreateScrubFeel) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.42f))
-            .padding(horizontal = 9.dp, vertical = 5.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("手感", color = Color.White.copy(alpha = 0.68f), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-        VideoCreateScrubFeel.entries.forEach { feel ->
+private fun OnlinePreview(thumbnailUrl: String?, sourceTitle: String?) {
+    if (!thumbnailUrl.isNullOrBlank()) {
+        Box(Modifier.fillMaxSize()) {
+            coil.compose.AsyncImage(
+                model = thumbnailUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
             Box(
                 modifier = Modifier
-                    .size(width = 30.dp, height = 22.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (selected == feel) Color.White else Color.White.copy(alpha = 0.14f))
-                    .clickable { onSelected(feel) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = feel.title,
-                    color = if (selected == feel) Color.Black else Color.White.copy(alpha = 0.82f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.Black.copy(alpha = 0.35f),
+                            0.5f to Color.Transparent,
+                            1.0f to Color.Transparent,
+                        ),
+                    ),
+            )
         }
-    }
-}
-
-@Composable
-private fun VideoCreateMiniScrubBar(
-    currentTime: Float,
-    duration: Float,
-    scrubFeel: VideoCreateScrubFeel,
-    onScrubStart: () -> Unit,
-    onScrubEnd: () -> Unit,
-    onSeek: (Float) -> Unit,
-) {
-    val progress = if (duration > 0f) (currentTime / duration).coerceIn(0f, 1f) else 0f
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(26.dp)
-            .pointerInput(duration, currentTime, scrubFeel) {
-                var startTime = currentTime
-                var accumulatedX = 0f
-                detectDragGestures(
-                    onDragStart = {
-                        onScrubStart()
-                        startTime = currentTime
-                        accumulatedX = 0f
-                    },
-                    onDragEnd = onScrubEnd,
-                    onDragCancel = onScrubEnd,
-                    onDrag = { change, dragAmount ->
-                        accumulatedX += dragAmount.x
-                        val target = (startTime + accumulatedX / scrubFeel.pixelsPerSecond)
-                            .coerceIn(0f, duration.coerceAtLeast(0f))
-                        onSeek(target)
-                        change.consume()
-                    },
-                )
-            },
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.28f)))
-        Box(
-            Modifier
-                .fillMaxWidth(progress.coerceAtLeast(0.001f))
-                .height(4.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.White),
-        )
-        Box(
-            modifier = Modifier.fillMaxWidth(progress.coerceAtLeast(0.001f)),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            Box(Modifier.size(14.dp).clip(CircleShape).background(Color.White))
-        }
-    }
-}
-
-@Composable
-private fun OnlinePreview(url: String, thumbnailUrl: String?) {
-    if (!thumbnailUrl.isNullOrBlank()) {
-        coil.compose.AsyncImage(
-            model = thumbnailUrl,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-        )
     } else {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -1427,17 +1407,25 @@ private fun OnlinePreview(url: String, thumbnailUrl: String?) {
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Link,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(36.dp),
-                )
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Link,
+                        contentDescription = null,
+                        tint = Color(0xFF1A2E22),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = url,
+                    text = sourceTitle?.takeIf { it.isNotBlank() } ?: "在线视频",
                     color = Color.White.copy(alpha = 0.9f),
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                 )
@@ -1528,12 +1516,6 @@ private fun OnlineUrlDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) 
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
-}
-
-private fun defaultLinkedGoalIdForVideoMemo(goals: List<V2Goal>): UUID? {
-    val active = goals.filter { it.status == V2Goal.Status.ACTIVE }
-    return active.firstOrNull { it.todayFocus }?.id
-        ?: active.singleOrNull()?.id
 }
 
 internal fun memoVideoSaveError(base: String, debugDetail: String?): String {

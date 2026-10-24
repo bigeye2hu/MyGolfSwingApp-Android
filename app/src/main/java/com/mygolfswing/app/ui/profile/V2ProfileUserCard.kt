@@ -1,5 +1,6 @@
 package com.mygolfswing.app.ui.profile
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,10 +31,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.store.V2UserProfile
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
@@ -45,6 +48,7 @@ fun V2ProfileUserCard(
     onAvatarTap: () -> Unit = {},
     onEditTap: () -> Unit = {},
 ) {
+    val genderIconRes = profileGenderIconDrawableRes(profile.gender)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -77,13 +81,27 @@ fun V2ProfileUserCard(
                 )
                 EditButton(onTap = onEditTap)
             }
-            if (profile.username.isNotBlank()) {
-                Text(
-                    text = profile.username,
-                    fontSize = 13.sp,
-                    color = DSColors.shadowGray,
-                    maxLines = 1,
-                )
+            if (profile.username.isNotBlank() || genderIconRes != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (profile.username.isNotBlank()) {
+                        Text(
+                            text = profile.username,
+                            fontSize = 13.sp,
+                            color = DSColors.shadowGray,
+                            maxLines = 1,
+                        )
+                    }
+                    if (genderIconRes != null) {
+                        Image(
+                            painter = painterResource(genderIconRes),
+                            contentDescription = if (profile.gender == "男") "男性" else "女性",
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.size(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(DSSpacing.sm)) {
@@ -92,6 +110,12 @@ fun V2ProfileUserCard(
             }
         }
     }
+}
+
+internal fun profileGenderIconDrawableRes(gender: String?): Int? = when (gender) {
+    "男" -> R.drawable.complete_profile_gender_boy
+    "女" -> R.drawable.complete_profile_gender_girl
+    else -> null
 }
 
 @Composable

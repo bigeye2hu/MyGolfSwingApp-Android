@@ -597,7 +597,6 @@ require_evidence_terms QA_SWING_RECORDING_EVIDENCE "replay-analysis proof" repla
 require_evidence_terms QA_HOME_ANALYSIS_SOURCE_EVIDENCE "home analysis source proof" "home analysis" analysis source 首页 分析 来源
 require_evidence_terms QA_HOME_ANALYSIS_SOURCE_EVIDENCE "realtime recording source proof" realtime "real time" recording record 实时 录制 拍摄
 require_evidence_terms QA_HOME_ANALYSIS_SOURCE_EVIDENCE "album trim source proof" album trim gallery picker 相册 剪裁 截取
-require_evidence_terms QA_HOME_ANALYSIS_SOURCE_EVIDENCE "existing library source proof" library existing history saved 素材库 已有 历史
 require_evidence_terms QA_GOLFCAM_EXPORT_EVIDENCE "GolfCam proof" golfcam "golf cam" 轨迹
 require_evidence_terms QA_GOLFCAM_EXPORT_EVIDENCE "video import proof" import imported video 导入 视频
 require_evidence_terms QA_GOLFCAM_EXPORT_EVIDENCE "workflow completion proof" workflow step steps complete completed finish finished 流程 步骤 完成

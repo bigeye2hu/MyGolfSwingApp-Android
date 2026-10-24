@@ -27,7 +27,7 @@ object V2GolfProfileStore {
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
 
-    val isProfileEmpty: Boolean get() = _profile.value.isEmpty
+    val isProfileEmpty: Boolean get() = isGolfProfileEmptyForReflection(_profile.value)
 
     @Volatile private var collecting = false
 
@@ -190,6 +190,13 @@ object V2GolfProfileStore {
         }
     }
 }
+
+internal fun isGolfProfileEmptyForReflection(profile: V2GolfProfileData): Boolean =
+    profile.currentFocus.isEmpty() &&
+        profile.painPoints.isEmpty() &&
+        profile.strengths.isEmpty() &&
+        profile.trainingGoals.isEmpty() &&
+        profile.coachNotes.isEmpty()
 
 internal suspend fun runGolfProfilePersistCatching(block: suspend () -> Unit): Result<Unit> = try {
     block()

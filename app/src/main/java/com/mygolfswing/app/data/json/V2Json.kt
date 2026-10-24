@@ -176,6 +176,7 @@ object V2Json {
         o["tags"] = JsonArray(memo.tags.map { JsonPrimitive(it) })
         o["tagIds"] = JsonArray(memo.tagIds.map { JsonPrimitive(it) })
         o["pinState"] = JsonPrimitive(memo.pinState.rawValue)
+        memo.isFavorite?.let { o["isFavorite"] = JsonPrimitive(it) }
         o["linkedGoalIds"] = JsonArray(memo.linkedGoalIds.map { JsonPrimitive(it.toString()) })
         o["createdAt"] = JsonPrimitive(memo.createdAt.toEpochMillis())
         o["updatedAt"] = JsonPrimitive(memo.updatedAt.toEpochMillis())
@@ -190,6 +191,8 @@ object V2Json {
         memo.platform?.let { o["platform"] = JsonPrimitive(it) }
         memo.plazaVideoId?.let { o["plazaVideoId"] = JsonPrimitive(it.toString()) }
         o["priorityRaw"] = JsonPrimitive(memo.priorityRaw)
+        o["attachedVideoIds"] = JsonArray(memo.attachedVideoIds.map { JsonPrimitive(it.toString()) })
+        o["attachedImageIds"] = JsonArray(memo.attachedImageIds.map { JsonPrimitive(it.toString()) })
         return JsonObject(o)
     }
 
@@ -206,6 +209,7 @@ object V2Json {
         tags = json["tags"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
         tagIds = json["tagIds"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
         pinState = json["pinState"]?.jsonPrimitive?.contentOrNull?.let { pinStateFromRaw(it) } ?: V2PinState.NONE,
+        isFavorite = json["isFavorite"]?.jsonPrimitive?.booleanOrNull,
         linkedGoalIds = json.uuidArray("linkedGoalIds"),
         createdAt = json["createdAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
         updatedAt = json["updatedAt"]?.jsonPrimitive?.longOrNull?.toLocalDateTime() ?: LocalDateTime.now(),
@@ -221,6 +225,8 @@ object V2Json {
         platform = json["platform"]?.jsonPrimitive?.contentOrNull,
         plazaVideoId = json["plazaVideoId"]?.jsonPrimitive?.contentOrNull?.let { runCatching { UUID.fromString(it) }.getOrNull() },
         priorityRaw = json["priorityRaw"]?.jsonPrimitive?.contentOrNull ?: "medium",
+        attachedVideoIds = json.uuidArray("attachedVideoIds"),
+        attachedImageIds = json.uuidArray("attachedImageIds"),
     )
 
     /** iOS `JSONEncoder.dateEncodingStrategy = .millisecondsSince1970` 可能编码为 Long 或 Double */

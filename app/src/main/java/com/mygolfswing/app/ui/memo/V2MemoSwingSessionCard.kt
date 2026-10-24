@@ -3,6 +3,7 @@ package com.mygolfswing.app.ui.memo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,11 +35,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.mygolfswing.app.R
 import com.mygolfswing.app.data.model.V2SwingDayItem
 import com.mygolfswing.app.ui.designsystem.DSColors
 import java.util.UUID
@@ -49,6 +52,7 @@ fun V2MemoSwingSessionCard(
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
     onClipTap: (UUID) -> Unit = {},
+    guestPreview: Boolean = false,
 ) {
     Row(
         modifier = modifier
@@ -172,7 +176,7 @@ fun V2MemoSwingSessionCard(
                     SwingMetaLine(icon = Icons.Filled.Layers, text = "${item.sessionCount} 次会话")
                 }
             }
-            V2SwingClipThumbnailStack(item = item, onClipTap = onClipTap)
+            V2SwingClipThumbnailStack(item = item, onClipTap = onClipTap, guestPreview = guestPreview)
             Icon(
                 Icons.Filled.ChevronRight,
                 contentDescription = null,
@@ -206,12 +210,14 @@ private fun SwingMetaLine(
 }
 
 @Composable
-private fun V2SwingClipThumbnailStack(item: V2SwingDayItem, onClipTap: (UUID) -> Unit) {
+private fun V2SwingClipThumbnailStack(item: V2SwingDayItem, onClipTap: (UUID) -> Unit, guestPreview: Boolean) {
     val urls = item.clipPreviewUrls.take(3)
-    if (urls.isEmpty()) return
-    val stackWidth = 44.dp + ((urls.size - 1) * 36).dp
+    if (urls.isEmpty() && !guestPreview) return
+    val visibleCount = if (guestPreview) 3 else urls.size
+    val stackWidth = 44.dp + ((visibleCount - 1) * 36).dp
     Box(modifier = Modifier.width(stackWidth).height(44.dp)) {
-        urls.forEachIndexed { index, url ->
+        repeat(visibleCount) { index ->
+            val url = urls.getOrNull(index)
             val clipId = item.clipPreviewIds.getOrNull(index)
             Box(
                 modifier = Modifier
@@ -221,9 +227,18 @@ private fun V2SwingClipThumbnailStack(item: V2SwingDayItem, onClipTap: (UUID) ->
                     .border(1.5.dp, Color.White, RoundedCornerShape(8.dp))
                     .then(if (clipId != null) Modifier.clickable { onClipTap(clipId) } else Modifier),
             ) {
-                SwingClipThumbnailFallback(Modifier.fillMaxSize())
-                AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                if (index == urls.lastIndex && item.extraClipCount > 0) {
+                if (guestPreview) {
+                    Image(
+                        painter = painterResource(R.drawable.v2_quickadd_swing),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    SwingClipThumbnailFallback(Modifier.fillMaxSize())
+                    AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                }
+                if (index == visibleCount - 1 && item.extraClipCount > 0) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()

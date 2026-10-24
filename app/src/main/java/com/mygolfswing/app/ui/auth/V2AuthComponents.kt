@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,7 +34,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -86,8 +86,75 @@ internal fun authUserError(base: String, debugDetail: String?): String {
 }
 
 internal fun authUserError(base: String, debugDetail: String?, isDebuggable: Boolean): String {
+    authSafeRecoveryMessage(debugDetail)?.let { return it }
+    if (!isDebuggable) authSafeTransportRecoveryMessage(debugDetail)?.let { return it }
     val detail = debugDetail.takeIf { isDebuggable && !it.isNullOrBlank() }
     return if (detail == null) base else "$base（$detail）"
+}
+
+/** Only exposes backend messages that are curated, actionable, and free of implementation detail. */
+internal fun authSafeRecoveryMessage(detail: String?): String? {
+    val normalized = detail?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    if (Regex("""请\d+秒后再试""").matches(normalized)) return normalized
+    return normalized.takeIf {
+        it in setOf(
+            "请输入正确的手机号",
+            "请输入6位验证码",
+            "验证码错误或已过期",
+            "今日验证码发送次数已达上限，请明天再试",
+            "用户名和密码不能为空",
+            "用户名或密码错误",
+            "用户不存在",
+            "用户名已被注册",
+            "邮箱已被注册",
+            "用户名长度需要在3-20个字符之间",
+            "密码长度至少6个字符",
+            "密码至少需要8位字符",
+            "密码必须包含字母",
+            "密码必须包含数字",
+            "当前密码错误",
+            "手机号与账号不匹配",
+            "当前账号已绑定其他手机号，请先换绑",
+            "该手机号已绑定其他账号，请先完成账号合并",
+            "该手机号未绑定任何账号",
+            "绑定凭证已失效，请重新获取验证码",
+            "登录已过期，请重新登录",
+            "登录状态已失效，请重新登录",
+            "请升级应用并重新登录",
+            "系统初始化中，请稍后重试",
+        )
+    }
+}
+
+/** Converts common client/network diagnostics into actionable copy without exposing raw internals. */
+internal fun authSafeTransportRecoveryMessage(detail: String?): String? {
+    val normalized = detail?.trim()?.lowercase()?.takeIf(String::isNotEmpty) ?: return null
+    return when {
+        listOf("sockettimeoutexception", "timed out", "timeout", "deadline exceeded")
+            .any(normalized::contains) -> "网络请求超时，请检查网络后重试"
+        listOf("ssl", "certificate", "certpath", "trust anchor", "handshake")
+            .any(normalized::contains) -> "安全连接失败，请检查系统时间或网络后重试"
+        listOf(
+            "unknownhostexception",
+            "unable to resolve host",
+            "failed to connect",
+            "connectexception",
+            "network is unreachable",
+            "no route to host",
+            "connection reset",
+            "unexpected end of stream",
+        ).any(normalized::contains) -> "网络连接失败，请检查网络后重试"
+        Regex("""\bhttp 5\d{2}\b""").containsMatchIn(normalized) ->
+            "登录服务暂时不可用，请稍后重试"
+        listOf(
+            "serializationexception",
+            "jsondecodingerror",
+            "jsonexception",
+            "malformed json",
+            "expected a json",
+        ).any(normalized::contains) -> "登录服务返回异常，请稍后重试"
+        else -> null
+    }
 }
 
 internal fun authThrowableError(base: String, error: Throwable): String {
@@ -116,16 +183,42 @@ internal fun AuthHeroBackground(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(height)
-            .background(authHeroBrush)
-            .drawBehind {
-                drawCircle(
-                    color = AuthPalette.goldAccent.copy(alpha = 0.18f),
-                    radius = size.minDimension * 0.36f,
-                    center = androidx.compose.ui.geometry.Offset(size.width * 0.95f, size.height * 0.12f),
-                )
-            },
+            .height(height),
     ) {
+        Image(
+            painter = painterResource(R.drawable.golf_course_background),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to AuthPalette.heroTop.copy(alpha = 0.86f),
+                            0.34f to AuthPalette.heroMid1.copy(alpha = 0.70f),
+                            0.62f to AuthPalette.heroMid2.copy(alpha = 0.44f),
+                            0.82f to AuthPalette.heroBottom.copy(alpha = 0.20f),
+                            1.00f to DSColors.warmWhite.copy(alpha = 0.84f),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0.00f to Color.Black.copy(alpha = 0.16f),
+                            0.50f to Color.Transparent,
+                            1.00f to Color.Black.copy(alpha = 0.12f),
+                        ),
+                    ),
+                ),
+        )
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -155,7 +248,8 @@ internal fun AuthLogoBadge(
     rainbow: Boolean = true,
 ) {
     Box(
-        modifier = modifier.size(size + 14.dp),
+        // iOS 的光晕绘制在 80pt 布局框之外；不能让它把 Hero 纵向节奏撑到 94dp。
+        modifier = modifier.size(size),
         contentAlignment = Alignment.Center,
     ) {
         if (rainbow) {
@@ -204,9 +298,20 @@ internal fun AuthCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(16.dp, RoundedCornerShape(24.dp), clip = false)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(24.dp),
+                clip = false,
+                ambientColor = AuthPalette.heroMid2.copy(alpha = 0.12f),
+                spotColor = AuthPalette.heroMid2.copy(alpha = 0.12f),
+            )
             .background(DSColors.cardWhite, RoundedCornerShape(24.dp))
-            .padding(horizontal = 20.dp, vertical = 24.dp),
+            .border(
+                BorderStroke(1.dp, AuthPalette.heroMid2.copy(alpha = 0.12f)),
+                RoundedCornerShape(24.dp),
+            )
+            .padding(horizontal = 20.dp)
+            .padding(top = 20.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         content = content,
     )

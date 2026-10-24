@@ -19,15 +19,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,12 +37,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
 import com.mygolfswing.app.data.store.V2PlazaStore
 import com.mygolfswing.app.data.store.V2PlazaWatchHistoryItem
 import com.mygolfswing.app.data.store.V2ProfileStore
@@ -65,6 +66,28 @@ fun V2PlazaWatchHistoryScreen(
 ) {
     val items by V2PlazaStore.watchHistory.collectAsState()
     val profile by V2ProfileStore.profile.collectAsState()
+
+    V2PlazaWatchHistoryContent(
+        items = items,
+        isLoggedIn = profile.isLoggedIn,
+        onBack = onBack,
+        onOpenVideo = onOpenVideo,
+        onRemove = V2PlazaStore::removeWatchHistory,
+        onClear = V2PlazaStore::clearWatchHistory,
+        onRequestLogin = onRequestLogin,
+    )
+}
+
+@Composable
+internal fun V2PlazaWatchHistoryContent(
+    items: List<V2PlazaWatchHistoryItem>,
+    isLoggedIn: Boolean,
+    onBack: () -> Unit,
+    onOpenVideo: (UUID) -> Unit,
+    onRemove: (String) -> Unit,
+    onClear: () -> Unit,
+    onRequestLogin: () -> Unit,
+) {
     var showClearConfirm by remember { mutableStateOf(false) }
 
     Column(
@@ -73,14 +96,14 @@ fun V2PlazaWatchHistoryScreen(
             .background(Color.Black),
     ) {
         HistoryTopBar(
-            hasItems = profile.isLoggedIn && items.isNotEmpty(),
+            hasItems = isLoggedIn && items.isNotEmpty(),
             onBack = onBack,
             onClear = { showClearConfirm = true },
         )
-        if (!profile.isLoggedIn) {
-            LoginRequiredHistory(onLogin = onRequestLogin)
+        if (!isLoggedIn) {
+            EmptyHistory(isLoggedIn = false, onLogin = onRequestLogin)
         } else if (items.isEmpty()) {
-            EmptyHistory()
+            EmptyHistory(isLoggedIn = true, onLogin = onRequestLogin)
         } else {
             LazyColumn(
                 modifier = Modifier
@@ -93,7 +116,7 @@ fun V2PlazaWatchHistoryScreen(
                     HistoryRow(
                         item = item,
                         onOpen = { onOpenVideo(item.videoId) },
-                        onRemove = { V2PlazaStore.removeWatchHistory(item.saveKey) },
+                        onRemove = { onRemove(item.saveKey) },
                     )
                 }
             }
@@ -101,66 +124,76 @@ fun V2PlazaWatchHistoryScreen(
     }
 
     if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            title = { Text("清空观看历史") },
-            text = { Text("清空后无法恢复，确定要清空吗？") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        V2PlazaStore.clearWatchHistory()
-                        showClearConfirm = false
-                    },
-                ) { Text("清空", color = DSColors.flagRed) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) { Text("取消", color = DSColors.shadowGray) }
+        WatchHistoryClearConfirmDialog(
+            onDismiss = { showClearConfirm = false },
+            onConfirm = {
+                onClear()
+                showClearConfirm = false
             },
         )
     }
 }
 
 @Composable
-private fun LoginRequiredHistory(onLogin: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .v2NavigationBarPadding()
-            .padding(horizontal = 36.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+internal fun WatchHistoryClearConfirmDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Box(
-            modifier = Modifier
-                .size(54.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.08f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Login, null, tint = Color(0xFFC084FC), modifier = Modifier.size(26.dp))
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(onClick = onDismiss),
+            )
+            Column(
+                modifier = Modifier.width(270.dp).clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF2F2F7).copy(alpha = 0.98f))
+                    .testTag("watch-history-clear-dialog"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        "清空观看历史",
+                        color = Color(0xFF1C1C1E),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        "清空后无法恢复，确定要清空吗？",
+                        color = Color(0xFF3A3A3C),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFD1D1D6)))
+                Row(modifier = Modifier.fillMaxWidth().height(44.dp)) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxSize().clickable(onClick = onDismiss)
+                            .testTag("watch-history-clear-cancel"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("取消", color = Color(0xFF007AFF), fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    }
+                    Box(Modifier.width(1.dp).fillMaxSize().background(Color(0xFFD1D1D6)))
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxSize().clickable(onClick = onConfirm)
+                            .testTag("watch-history-clear-confirm"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("清空", color = Color(0xFFFF3B30), fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
         }
-        Spacer(modifier = Modifier.height(14.dp))
-        Text("登录后查看观看历史", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            "观看进度和历史列表会跟随账号保存，换设备也能继续找到看过的视频",
-            color = Color(0xFF9CA3AF),
-            fontSize = 13.sp,
-            lineHeight = 20.sp,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(modifier = Modifier.height(18.dp))
-        Text(
-            "去登录",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(Color(0xFFC084FC))
-                .clickable(onClick = onLogin)
-                .padding(horizontal = 28.dp, vertical = 10.dp),
-        )
     }
 }
 
@@ -186,13 +219,17 @@ private fun HistoryTopBar(
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .size(36.dp)
+                .size(44.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.08f))
                 .clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.KeyboardArrowDown, null, tint = Color(0xFFC084FC), modifier = Modifier.size(22.dp))
+            Icon(
+                Icons.Filled.KeyboardArrowDown,
+                contentDescription = "关闭观看历史",
+                tint = Color(0xFFC084FC),
+                modifier = Modifier.size(16.dp),
+            )
         }
         if (hasItems) {
             Text(
@@ -223,7 +260,7 @@ private fun HistoryRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         HistoryThumb(item)
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 item.title,
                 color = Color.White,
@@ -232,8 +269,10 @@ private fun HistoryRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(item.coachName, color = Color(0xFF9CA3AF), fontSize = 11.sp, maxLines = 1)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (item.coachName.isNotBlank()) {
+                    Text(item.coachName, color = Color(0xFF9CA3AF), fontSize = 11.sp, maxLines = 1)
+                }
                 Text("·", color = Color(0xFF6B7280), fontSize = 11.sp)
                 Text(formatWatchDate(item.watchedAtMs), color = Color(0xFF6B7280), fontSize = 11.sp)
             }
@@ -241,18 +280,18 @@ private fun HistoryRow(
         }
         Box(
             modifier = Modifier
-                .size(30.dp)
+                .size(28.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onRemove),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Close, null, tint = Color(0xFF6B7280), modifier = Modifier.size(14.dp))
+            Icon(Icons.Filled.Close, "删除这条观看记录", tint = Color(0xFF6B7280), modifier = Modifier.size(12.dp))
         }
     }
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 108.dp)
+            .padding(start = 92.dp)
             .height(1.dp)
             .background(Color(0xFF1F2937)),
     )
@@ -265,24 +304,22 @@ private fun HistoryThumb(item: V2PlazaWatchHistoryItem) {
             .width(80.dp)
             .height(60.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF374151), Color(0xFF111827)))),
+            .background(Color(0xFF374151)),
     ) {
-        item.thumbnailUrl?.takeIf { it.isNotBlank() }?.let {
-            AsyncImage(
-                model = it,
+        val thumbnailUrl = item.thumbnailUrl?.takeIf { it.isNotBlank() }
+        if (thumbnailUrl == null) {
+            HistoryThumbnailFallback()
+        } else {
+            SubcomposeAsyncImage(
+                model = thumbnailUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
+                loading = { HistoryThumbnailFallback() },
+                error = { HistoryThumbnailFallback() },
+                success = { SubcomposeAsyncImageContent() },
             )
         }
-        Icon(
-            Icons.Filled.PlayArrow,
-            null,
-            tint = Color.White.copy(alpha = 0.78f),
-            modifier = Modifier
-                .align(Alignment.Center)
-                .size(28.dp),
-        )
         if (item.progress > 0.0 && item.progress < 0.95) {
             Box(
                 modifier = Modifier
@@ -296,28 +333,77 @@ private fun HistoryThumb(item: V2PlazaWatchHistoryItem) {
 }
 
 @Composable
-private fun WatchProgressText(progress: Double) {
-    when {
-        progress >= 0.95 -> Text("已看完", color = Color(0xFF10B981), fontSize = 10.sp)
-        progress > 0.0 -> Text("已看 ${(progress * 100).toInt()}%", color = Color(0xFFC084FC), fontSize = 10.sp)
-        else -> Text("刚开始观看", color = Color(0xFF6B7280), fontSize = 10.sp)
+private fun HistoryThumbnailFallback() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Icon(
+            Icons.Filled.OndemandVideo,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.3f),
+            modifier = Modifier.size(24.dp),
+        )
     }
 }
 
 @Composable
-private fun EmptyHistory() {
+private fun WatchProgressText(progress: Double) {
+    when {
+        progress >= 0.95 -> Text("已看完", color = Color(0xFF10B981), fontSize = 10.sp)
+        progress > 0.0 -> Text(
+            "已看 ${(progress * 100).toInt()}%",
+            color = Color(0xFFC084FC).copy(alpha = 0.8f),
+            fontSize = 10.sp,
+        )
+        else -> Unit
+    }
+}
+
+@Composable
+private fun EmptyHistory(
+    isLoggedIn: Boolean,
+    onLogin: () -> Unit,
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .v2NavigationBarPadding(),
+            .v2NavigationBarPadding()
+            .padding(horizontal = 40.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
-        Icon(Icons.Filled.History, null, tint = Color(0xFF374151), modifier = Modifier.size(42.dp))
-        Spacer(modifier = Modifier.height(14.dp))
-        Text("还没有观看记录", color = Color(0xFF9CA3AF), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("在视频广场观看教学视频后，会自动记录在这里", color = Color(0xFF6B7280), fontSize = 13.sp)
+        Icon(Icons.Filled.History, null, tint = Color(0xFF374151), modifier = Modifier.size(40.dp))
+        Text(
+            if (isLoggedIn) "还没有观看记录" else "登录后保存观看历史",
+            color = Color(0xFF9CA3AF),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            if (isLoggedIn) {
+                "在视频广场观看教学视频后，会自动记录在这里"
+            } else {
+                "游客可以继续播放公开视频，但不会写入观看历史；登录后才能保留复习进度。"
+            },
+            color = Color(0xFF6B7280),
+            fontSize = 13.sp,
+            textAlign = TextAlign.Center,
+        )
+        if (!isLoggedIn) {
+            Text(
+                "登录/注册后保存历史",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF9333EA), Color(0xFF2563EB)),
+                        ),
+                    )
+                    .clickable(onClick = onLogin)
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+            )
+        }
     }
 }
 

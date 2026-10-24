@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -44,6 +45,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.R
 import kotlinx.coroutines.delay
+
+internal const val V2_SPLASH_MIN_DURATION_MS = 800L
+
+internal fun splashRemainingDelayMillis(
+    startedAtMillis: Long,
+    nowMillis: Long,
+    minimumDurationMillis: Long = V2_SPLASH_MIN_DURATION_MS,
+): Long = (minimumDurationMillis - (nowMillis - startedAtMillis)).coerceAtLeast(0L)
 
 @Composable
 fun V2SplashScreen(message: String = "正在初始化...") {
@@ -54,48 +63,48 @@ fun V2SplashScreen(message: String = "正在初始化...") {
 
     LaunchedEffect(Unit) {
         logoVisible = true
-        delay(300)
+        delay(120)
         glowVisible = true
-        delay(200)
-        particlesVisible = true
         delay(100)
+        particlesVisible = true
+        delay(60)
         textVisible = true
     }
 
     val infinite = rememberInfiniteTransition(label = "v2-splash")
     val logoScale by animateFloatAsState(
         targetValue = if (logoVisible) 1f else 0.6f,
-        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "logoScale",
     )
     val logoOpacity by animateFloatAsState(
         targetValue = if (logoVisible) 1f else 0f,
-        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "logoOpacity",
     )
     val glowOpacity by animateFloatAsState(
         targetValue = if (glowVisible) 1f else 0f,
-        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
         label = "glowOpacity",
     )
     val sunburstOpacity by animateFloatAsState(
         targetValue = if (glowVisible) 0.6f else 0f,
-        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
         label = "sunburstOpacity",
     )
     val particlesOpacity by animateFloatAsState(
         targetValue = if (particlesVisible) 1f else 0f,
-        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
         label = "particlesOpacity",
     )
     val textOpacity by animateFloatAsState(
         targetValue = if (textVisible) 1f else 0f,
-        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "textOpacity",
     )
     val textOffset by animateFloatAsState(
         targetValue = if (textVisible) 0f else 30f,
-        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
         label = "textOffset",
     )
     val rotation by infinite.animateFloat(
@@ -108,7 +117,8 @@ fun V2SplashScreen(message: String = "正在初始化...") {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .testTag("splash-screen"),
     ) {
         Image(
             painter = painterResource(id = R.drawable.golf_course_background),
@@ -136,7 +146,8 @@ fun V2SplashScreen(message: String = "正在初始化...") {
                     ),
                     shape = CircleShape,
                 )
-                .padding(horizontal = 34.dp, vertical = 42.dp),
+                .padding(horizontal = 34.dp, vertical = 42.dp)
+                .testTag("splash-brand"),
         ) {
             Text(
                 "朝着更好的一杆",
@@ -180,7 +191,8 @@ fun V2SplashScreen(message: String = "正在初始化...") {
                 color = Color.White.copy(alpha = 0.40f),
                 modifier = Modifier
                     .padding(top = 12.dp)
-                    .graphicsLayerAlpha(textOpacity),
+                    .graphicsLayerAlpha(textOpacity)
+                    .testTag("splash-loading"),
             )
         }
     }

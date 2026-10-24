@@ -79,7 +79,7 @@ class V2CreditsBillingManager(
         )
         .build()
 
-    fun loadProducts() {
+    fun loadProducts(showEmptyRestoreMessage: Boolean = false) {
         scope.launch(Dispatchers.Main) {
             _state.value = _state.value.copy(loadingProducts = true, error = null, message = null)
             val connected = ensureConnected()
@@ -104,18 +104,22 @@ class V2CreditsBillingManager(
                 val next = V2CreditProductCatalog.products.map { product ->
                     product.copy(productDetails = detailsById[product.productId])
                 }
-                val missing = next.count { it.productDetails == null }
                 _state.value = _state.value.copy(
                     products = next,
                     loadingProducts = false,
-                    error = if (missing == next.size) {
+                    error = if (!result.isOk) {
                         result.userFacingMessage("未能加载积分商品，请确认 Google Play 已登录并稍后刷新")
                     } else {
                         null
                     },
-                    message = if (missing in 1 until next.size) "部分商品暂不可购买" else null,
+                    // Missing/partial Play Console configuration is rendered as a non-blocking
+                    // recovery card by the purchase page. Do not also present it as a green
+                    // success notice or obscure the card with a failure dialog.
+                    message = null,
                 )
-                restorePendingPurchases(showEmptyMessage = false)
+                // Keep product loading and pending-order restore ordered. Running both from the
+                // screen at once can race and replace a real restore/grant notice with catalog UI.
+                restorePendingPurchases(showEmptyMessage = showEmptyRestoreMessage)
             }
         }
     }
@@ -180,26 +184,18 @@ class V2CreditsBillingManager(
         billingResult: BillingResult,
         purchases: MutableList<Purchase>?,
     ) {
-        when (billingResult.responseCode) {
-            BillingClient.BillingResponseCode.OK -> {
-                val updatedPurchases = purchases.orEmpty()
-                if (updatedPurchases.isEmpty()) {
-                    _state.value = _state.value.copy(
-                        purchasingProductId = null,
-                        message = "购买未完成，如已支付请点“刷新/恢复”同步订单",
-                    )
-                } else {
-                    updatedPurchases.forEach(::handlePurchase)
-                }
-            }
-            BillingClient.BillingResponseCode.USER_CANCELED ->
-                _state.value = _state.value.copy(purchasingProductId = null, message = "已取消购买")
-            else ->
-                _state.value = _state.value.copy(
-                    purchasingProductId = null,
-                    error = billingResult.userFacingMessage("购买失败，请稍后重试"),
-                )
+        val updatedPurchases = purchases.orEmpty()
+        val terminalState = terminalPurchaseCallbackState(
+            current = _state.value,
+            responseCode = billingResult.responseCode,
+            purchaseCount = updatedPurchases.size,
+            failureMessage = billingResult.userFacingMessage("购买失败，请稍后重试"),
+        )
+        if (terminalState != null) {
+            _state.value = terminalState
+            return
         }
+        updatedPurchases.forEach(::handlePurchase)
     }
 
     fun clearNotice() {
@@ -226,14 +222,26 @@ class V2CreditsBillingManager(
             )
             return
         }
-        if (purchase.purchaseState == Purchase.PurchaseState.PENDING) {
-            processingPurchaseTokens.remove(purchase.purchaseToken)
-            _state.value = _state.value.copy(purchasingProductId = null, message = "购买待确认，到账后会同步积分")
-            return
-        }
-        if (purchase.purchaseState != Purchase.PurchaseState.PURCHASED) {
-            processingPurchaseTokens.remove(purchase.purchaseToken)
-            return
+        when (purchaseStateDisposition(purchase.purchaseState)) {
+            V2PurchaseStateDisposition.Pending -> {
+                processingPurchaseTokens.remove(purchase.purchaseToken)
+                _state.value = _state.value.copy(
+                    purchasingProductId = null,
+                    message = "购买待确认，到账后会同步积分",
+                    error = null,
+                )
+                return
+            }
+            V2PurchaseStateDisposition.Incomplete -> {
+                processingPurchaseTokens.remove(purchase.purchaseToken)
+                _state.value = _state.value.copy(
+                    purchasingProductId = null,
+                    message = "购买未完成，如已支付请点“刷新/恢复”同步订单",
+                    error = null,
+                )
+                return
+            }
+            V2PurchaseStateDisposition.Purchased -> Unit
         }
         if (isGrantedPurchaseTokenRecorded(purchase.purchaseToken)) {
             _state.value = _state.value.copy(
@@ -392,6 +400,47 @@ internal fun billingObfuscatedAccountId(packageName: String, userId: String?): S
 
 internal fun billingCreditProductId(products: List<String>): String? =
     products.firstOrNull { V2CreditProductCatalog.productFor(it) != null }
+
+/**
+ * Returns a terminal UI state for Billing callbacks that have no purchases to process.
+ * A null result means the successful purchase list must continue through grant/consume handling.
+ */
+internal fun terminalPurchaseCallbackState(
+    current: V2CreditsPurchaseState,
+    responseCode: Int,
+    purchaseCount: Int,
+    failureMessage: String,
+): V2CreditsPurchaseState? = when {
+    responseCode == BillingClient.BillingResponseCode.OK && purchaseCount > 0 -> null
+    responseCode == BillingClient.BillingResponseCode.OK -> current.copy(
+        purchasingProductId = null,
+        message = "购买未完成，如已支付请点“刷新/恢复”同步订单",
+        error = null,
+    )
+    responseCode == BillingClient.BillingResponseCode.USER_CANCELED -> current.copy(
+        purchasingProductId = null,
+        // Match iOS StoreKit cancellation: close the purchasing posture quietly.
+        message = null,
+        error = null,
+    )
+    else -> current.copy(
+        purchasingProductId = null,
+        message = null,
+        error = failureMessage,
+    )
+}
+
+internal enum class V2PurchaseStateDisposition {
+    Purchased,
+    Pending,
+    Incomplete,
+}
+
+internal fun purchaseStateDisposition(purchaseState: Int): V2PurchaseStateDisposition = when (purchaseState) {
+    Purchase.PurchaseState.PURCHASED -> V2PurchaseStateDisposition.Purchased
+    Purchase.PurchaseState.PENDING -> V2PurchaseStateDisposition.Pending
+    else -> V2PurchaseStateDisposition.Incomplete
+}
 
 internal inline fun runBillingCloseCatching(block: () -> Unit): Result<Unit> = try {
     block()

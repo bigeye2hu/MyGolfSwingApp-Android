@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Snackbar
@@ -29,6 +30,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
@@ -56,12 +59,15 @@ import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.data.store.V2SwingSessionStore
 import com.mygolfswing.app.data.store.V2UserProfile
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 enum class V2ProfileLoginTarget {
     EDIT_PROFILE,
@@ -96,16 +102,21 @@ fun V2ProfileScreen(
     onOpenFeedback: () -> Unit = {},
     onOpenTerms: () -> Unit = {},
     onOpenPrivacy: () -> Unit = {},
-    onOpenCloudAudit: () -> Unit = {},
     onOpenAllGoals: () -> Unit = {},
     onOpenVideoMemoList: () -> Unit = {},
     onOpenSwingCalendar: () -> Unit = {},
+    onBrowsePlaza: () -> Unit = {},
+    onBrowseMemo: () -> Unit = {},
     onLogoutComplete: () -> Unit = {},
+    showRoleSwitcher: Boolean = false,
+    roleSwitchBlocked: Boolean = false,
+    onSwitchRole: () -> Unit = {},
 ) {
     val profile by V2ProfileStore.profile.collectAsState()
     val goals by V2GoalStore.goals.collectAsState()
     val memos by V2MemoStore.allMemos.collectAsState()
     val swingSessions by V2SwingSessionStore.sessions.collectAsState()
+    val isRefreshing by V2ProfileStore.isRefreshing.collectAsState()
     var confirmLogout by remember { mutableStateOf(false) }
     var logoutError by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -136,84 +147,77 @@ fun V2ProfileScreen(
         it.kind == V2MemoKind.VIDEO || it.kind == V2MemoKind.MIXED
     }
     val swingCount = if (profile.isLoggedIn) swingSessions.sumOf { it.clips.size } else 0
-    val isTestUser = V2DeveloperToolsAccess.isCloudAuditEnabled(profile)
 
     Box(modifier = Modifier.fillMaxSize().background(DSColors.warmWhite)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .v2NavigationBarPadding()
-                .padding(horizontal = DSSpacing.lg)
-                .padding(top = DSSpacing.sm, bottom = DSSpacing.xxl + DSSpacing.lg),
-            verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { V2ProfileStore.refresh(force = true) },
+            modifier = Modifier.fillMaxSize(),
         ) {
-            Header()
-            if (!profile.isLoggedIn) {
-                LoginPromptBanner(onClick = onRequestLogin)
-            }
-            V2ProfileUserCard(
-                profile = profile,
-                onAvatarTap = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.EDIT_PROFILE) else onOpenEditProfile()
-                },
-                onEditTap = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.EDIT_PROFILE) else onOpenEditProfile()
-                },
-            )
-            V2ProfileStatsCard(
-                activeGoals = activeGoals,
-                completedGoals = completedGoals,
-                videoMemoCount = videoMemoCount,
-                swingCount = swingCount,
-                onTapActive = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.ALL_GOALS) else onOpenAllGoals()
-                },
-                onTapCompleted = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.ALL_GOALS) else onOpenAllGoals()
-                },
-                onTapVideoMemo = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.VIDEO_MEMOS) else onOpenVideoMemoList()
-                },
-                onTapSwing = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.SWING_CALENDAR) else onOpenSwingCalendar()
-                },
-            )
-            GolfRecordCard(
-                profile = profile,
-                onEditTap = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.EDIT_PROFILE) else onOpenEditProfile()
-                },
-            )
-            AIArchiveCard(
-                subtitle = if (profile.isLoggedIn) {
-                    "AI 已了解你的练习习惯与短板"
+            V2RoomBackground(Modifier.fillMaxSize())
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .v2NavigationBarPadding()
+                    .padding(horizontal = DSSpacing.lg)
+                    .padding(top = DSSpacing.sm, bottom = DSSpacing.xxl + DSSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
+            ) {
+                ProfileHeader(
+                    isLoggedIn = profile.isLoggedIn,
+                    onLogin = onRequestLogin,
+                )
+                if (!profile.isLoggedIn) {
+                    V2ProfileGuestContent(
+                        onLogin = onRequestLogin,
+                        onBrowsePlaza = onBrowsePlaza,
+                        onBrowseMemo = onBrowseMemo,
+                        onFeedback = onRequestLogin,
+                        onTerms = onOpenTerms,
+                        onPrivacy = onOpenPrivacy,
+                    )
                 } else {
-                    "登录后同步目标、Memo 与 AI 训练档案"
-                },
-                onTap = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.AI_ARCHIVE) else onOpenAIArchive()
-                },
-            )
-            V2ProfileMoreList(
-                isLoggedIn = profile.isLoggedIn,
-                onStorageTap = onOpenStorage,
-                onResetCreditsTap = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.CREDITS) else onOpenResetCredits()
-                },
-                onAIConfigTap = onOpenAIConfig,
-                onFeedbackTap = onOpenFeedback,
-                onUserAgreementTap = onOpenTerms,
-                onPrivacyPolicyTap = onOpenPrivacy,
-                onAccountSecurityTap = {
-                    if (!profile.isLoggedIn) onRequestLoginForTarget(V2ProfileLoginTarget.ACCOUNT_SECURITY) else onOpenAccountSecurity()
-                },
-                onCloudAuditTap = onOpenCloudAudit,
-                onLogoutTap = {
-                    if (profile.isLoggedIn) confirmLogout = true else onRequestLogin()
-                },
-                isTestUser = isTestUser,
-            )
+                    V2ProfileUserCard(
+                        profile = profile,
+                        onAvatarTap = onOpenEditProfile,
+                        onEditTap = onOpenEditProfile,
+                    )
+                    V2ProfilePersonalInfoCard(
+                        birthday = profileBirthdayText(profile.birthday),
+                        location = profileOptionalText(profile.location),
+                        bio = profile.bio?.trim().orEmpty(),
+                        onEditTap = onOpenEditProfile,
+                    )
+                    V2ProfileStatsCard(
+                        activeGoals = activeGoals,
+                        completedGoals = completedGoals,
+                        videoMemoCount = videoMemoCount,
+                        swingCount = swingCount,
+                        onTapActive = onOpenAllGoals,
+                        onTapCompleted = onOpenAllGoals,
+                        onTapVideoMemo = onOpenVideoMemoList,
+                        onTapSwing = onOpenSwingCalendar,
+                    )
+                    GolfRecordCard(profile = profile, onEditTap = onOpenEditProfile)
+                    AIArchiveCard(subtitle = "AI 已了解你的练习习惯与短板", onTap = onOpenAIArchive)
+                    V2ProfileMoreList(
+                        isLoggedIn = true,
+                        accountSecuritySubtitle = profileAccountSecurityText(profile.phone, profile.hasPassword),
+                        onStorageTap = onOpenStorage,
+                        onResetCreditsTap = onOpenResetCredits,
+                        onAIConfigTap = onOpenAIConfig,
+                        onFeedbackTap = onOpenFeedback,
+                        onUserAgreementTap = onOpenTerms,
+                        onPrivacyPolicyTap = onOpenPrivacy,
+                        onAccountSecurityTap = onOpenAccountSecurity,
+                        onLogoutTap = { confirmLogout = true },
+                        showsRoleSwitcher = showRoleSwitcher,
+                        accountActionsDisabled = roleSwitchBlocked,
+                        onRoleSwitchTap = onSwitchRole,
+                    )
+                }
+            }
         }
 
         SnackbarHost(
@@ -230,30 +234,19 @@ fun V2ProfileScreen(
     }
 
     if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            title = { Text("确认退出登录？", style = DSTypography.titleMedium) },
-            text = { Text("退出后本地视频与笔记将保留在本机，云端数据不会被删除。", style = DSTypography.body) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmLogout = false
-                    scope.launch {
-                        try {
-                            V2ProfileStore.logoutAndWait()
-                            onLogoutComplete()
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Throwable) {
-                            logoutError = profileLogoutThrowableError(e)
-                        }
+        ProfileLogoutDialog(
+            onDismiss = { confirmLogout = false },
+            onConfirm = {
+                confirmLogout = false
+                scope.launch {
+                    try {
+                        V2ProfileStore.logoutAndWait()
+                        onLogoutComplete()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        logoutError = profileLogoutThrowableError(e)
                     }
-                }) {
-                    Text("退出登录", color = DSColors.flagRed)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmLogout = false }) {
-                    Text("取消", color = DSColors.shadowGray)
                 }
             },
         )
@@ -285,8 +278,27 @@ internal fun profileLogoutThrowableError(error: Throwable): String {
     return "退出登录失败，请稍后重试"
 }
 
+internal fun profileOptionalText(raw: String?): String = raw?.trim()?.takeIf(String::isNotEmpty) ?: "未设置"
+
+internal fun profileBirthdayText(raw: String?): String {
+    val value = raw?.trim()?.takeIf(String::isNotEmpty) ?: return "未设置"
+    if ('月' in value && '日' in value) return value
+    return runCatching {
+        LocalDate.parse(value.take(10)).format(DateTimeFormatter.ofPattern("MM月dd日"))
+    }.getOrDefault(value)
+}
+
+internal fun profileAccountSecurityText(phone: String?, hasPassword: Boolean): String {
+    val phoneStatus = if (phone.isNullOrBlank()) "手机号未绑定" else "手机号已绑定"
+    val passwordStatus = if (hasPassword) "密码已设置" else "密码未设置"
+    return "$phoneStatus · $passwordStatus"
+}
+
 @Composable
-private fun Header() {
+internal fun ProfileHeader(
+    isLoggedIn: Boolean,
+    onLogin: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -299,10 +311,42 @@ private fun Header() {
         ) {
             Text(text = "我的", style = DSTypography.titleLarge, color = DSColors.inkGreen)
             Text(
-                text = "My 高尔夫之路",
+                text = if (isLoggedIn) "My 高尔夫之路" else "游客只读体验 · 保存需登录",
                 fontSize = 11.sp,
                 color = DSColors.shadowGray,
             )
+        }
+        if (!isLoggedIn) {
+            Row(
+                modifier = Modifier
+                    .height(32.dp)
+                    .shadow(
+                        elevation = 6.dp,
+                        shape = RoundedCornerShape(50),
+                        ambientColor = DSColors.fairway.copy(alpha = 0.18f),
+                        spotColor = DSColors.fairway.copy(alpha = 0.18f),
+                    )
+                    .clip(RoundedCornerShape(50))
+                    .background(DSColors.deepGreen)
+                    .clickable(onClick = onLogin)
+                    .testTag("profile-header-guest-login")
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Person,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp),
+                )
+                Text(
+                    "登录/注册",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
     }
 }
@@ -368,8 +412,8 @@ private fun GolfRecordCard(profile: V2UserProfile, onEditTap: () -> Unit) {
             )
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.cardWhite, RoundedCornerShape(16.dp))
-            .padding(DSSpacing.lg),
-        verticalArrangement = Arrangement.spacedBy(DSSpacing.md),
+            .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
+        verticalArrangement = Arrangement.spacedBy(DSSpacing.sm),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(
@@ -408,11 +452,11 @@ private fun RecordChip(
     primary: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    var valueFontSize by remember(value) { mutableStateOf(18.sp) }
+    var valueFontSize by remember(value) { mutableStateOf(16.sp) }
     Column(
         modifier = modifier
             .background(DSColors.mistGreen, RoundedCornerShape(12.dp))
-            .padding(DSSpacing.md),
+            .padding(horizontal = DSSpacing.md, vertical = DSSpacing.sm),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(label, fontSize = 10.sp, color = DSColors.shadowGray)
@@ -459,8 +503,8 @@ private fun AIArchiveCard(
                 ),
                 RoundedCornerShape(20.dp),
             )
-            .heightIn(min = 124.dp)
-            .padding(horizontal = 20.dp, vertical = 20.dp),
+            .heightIn(min = 96.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Text(
             text = "🧠",
@@ -484,7 +528,7 @@ private fun AIArchiveCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text("🧠", fontSize = 18.sp)
-                    Text("AI 训练档案", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = DSColors.warmWhite)
+                    Text("AI 训练档案", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = DSColors.warmWhite)
                 }
                 Text(
                     text = subtitle,

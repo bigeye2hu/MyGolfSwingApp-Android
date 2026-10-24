@@ -34,9 +34,19 @@ class V2NetClient(
 
     private val tcAuthInterceptor = Interceptor { chain ->
         val s = runBlocking { session.current() }
-        val builder = chain.request().newBuilder()
+        val request = chain.request()
+        val builder = request.newBuilder()
         s.userId?.let { builder.header("X-TC-UID", it) }
         s.userSig?.let { builder.header("X-TC-UserSig", it) }
+        s.authToken?.let { token ->
+            // External AI requests already carry their provider API key in
+            // Authorization. Keep that credential intact while still sending
+            // the app session through the dedicated X-Auth-Token header.
+            resolvedAuthorizationHeader(request.header("Authorization"), token)?.let {
+                builder.header("Authorization", it)
+            }
+            builder.header("X-Auth-Token", token)
+        }
         chain.proceed(builder.build())
     }
 
@@ -94,3 +104,7 @@ class V2NetClient(
 
 internal fun networkLoggingLevel(enableHttpLogging: Boolean): HttpLoggingInterceptor.Level? =
     if (enableHttpLogging) HttpLoggingInterceptor.Level.BASIC else null
+
+internal fun resolvedAuthorizationHeader(existing: String?, authToken: String?): String? =
+    existing?.takeIf { it.isNotBlank() }
+        ?: authToken?.takeIf { it.isNotBlank() }?.let { "Bearer $it" }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Byte-identical iOS SVG audit authorities; runtime uses lossless Android PNG renders. -->
+    <issue id="UnusedResources">
+        <ignore path="src/main/res/raw/complete_profile_gender_boy.svg" />
+        <ignore path="src/main/res/raw/complete_profile_gender_girl.svg" />
+    </issue>
+    <!-- Default universal builds keep x86_64; the opt-in ABI filter is for device-specific sideload packages. -->
+    <issue id="ChromeOsAbiSupport">
+        <ignore path="build.gradle.kts" />
+    </issue>
+</lint>

@@ -21,3 +21,6 @@ local.properties
 *.keystore
 *.p12
 *.pfx
+
+# Local release outputs. The signed APK stays outside the repo.
+/app/release/

@@ -1,17 +1,24 @@
 package com.mygolfswing.app.ui.goals
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,17 +40,13 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.outlined.CheckCircle as OutlinedCheckCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,17 +55,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mygolfswing.app.data.model.V2Goal
 import com.mygolfswing.app.data.store.V2GoalStore
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.designsystem.DSColors
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
@@ -81,6 +88,11 @@ fun V2AllGoalsScreen(
     onSelectGoal: (UUID) -> Unit = {},
 ) {
     val goals by V2GoalStore.goals.collectAsState()
+    val activeCount = goals.count { it.status == V2Goal.Status.ACTIVE }
+    val completedGoals = goals.filter { it.status == V2Goal.Status.COMPLETED }
+    val weeklyCheckInCount = goals.sumOf { it.weekCheckInCount }
+    val totalLinkedMemoCount = goals.sumOf { it.derivedFromMemoIds.size }
+    val groupedActiveByPriority = V2GoalStore.groupedActiveByPriority
     var completedExpanded by rememberSaveable { mutableStateOf(false) }
     var pendingDeleteGoal by remember { mutableStateOf<V2Goal?>(null) }
     var deletingGoalId by remember { mutableStateOf<UUID?>(null) }
@@ -118,6 +130,7 @@ fun V2AllGoalsScreen(
                 ),
             ),
     ) {
+        V2RoomBackground(Modifier.fillMaxSize())
         Column(modifier = Modifier.fillMaxSize()) {
             AllGoalsNavBar(onBack = onBack, onCreate = onCreate)
 
@@ -134,27 +147,15 @@ fun V2AllGoalsScreen(
                         ),
                     ) {
                         AllGoalsStatsBento(
-                            activeCount = V2GoalStore.activeCount,
-                            completedCount = V2GoalStore.completedCount,
-                            weeklyCheckIn = V2GoalStore.weeklyCheckInCount,
-                            totalMemo = V2GoalStore.totalLinkedMemoCount,
+                            activeCount = activeCount,
+                            completedCount = completedGoals.size,
+                            weeklyCheckIn = weeklyCheckInCount,
+                            totalMemo = totalLinkedMemoCount,
                         )
                     }
                 }
 
-                if (goals.isEmpty()) {
-                    item {
-                        AllGoalsEmptyState(
-                            onCreate = onCreate,
-                            modifier = Modifier.padding(
-                                horizontal = DSSpacing.lg,
-                                vertical = DSSpacing.md,
-                            ),
-                        )
-                    }
-                }
-
-                V2GoalStore.groupedActiveByPriority.forEach { group ->
+                groupedActiveByPriority.forEach { group ->
                     item {
                         AllGoalsPriorityHeader(
                             priority = group.priority,
@@ -178,10 +179,10 @@ fun V2AllGoalsScreen(
                     }
                 }
 
-                if (V2GoalStore.completedCount > 0) {
+                if (completedGoals.isNotEmpty()) {
                     item {
                         AllGoalsCompletedRow(
-                            count = V2GoalStore.completedCount,
+                            count = completedGoals.size,
                             expanded = completedExpanded,
                             onToggle = { completedExpanded = !completedExpanded },
                             modifier = Modifier.padding(
@@ -191,7 +192,7 @@ fun V2AllGoalsScreen(
                         )
                     }
                     if (completedExpanded) {
-                        items(V2GoalStore.completedGoals, key = { it.id }) { goal ->
+                        items(completedGoals, key = { it.id }) { goal ->
                             SwipeToDeleteGoalCard(
                                 goal = goal,
                                 linkedMemoCount = V2GoalStore.linkedMemoCount(goal),
@@ -283,7 +284,11 @@ private fun AllGoalsNavBar(onBack: () -> Unit, onCreate: () -> Unit) {
                 .padding(horizontal = DSSpacing.lg, vertical = DSSpacing.md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CircleIconButton(icon = Icons.AutoMirrored.Filled.ArrowBack, onClick = onBack)
+            CircleIconButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "返回",
+                onClick = onBack,
+            )
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = "全部目标",
@@ -292,7 +297,11 @@ private fun AllGoalsNavBar(onBack: () -> Unit, onCreate: () -> Unit) {
                 color = DSColors.inkGreen,
             )
             Spacer(modifier = Modifier.weight(1f))
-            CircleIconButton(icon = Icons.Filled.Add, onClick = onCreate)
+            CircleIconButton(
+                icon = Icons.Filled.Add,
+                contentDescription = "新建目标",
+                onClick = onCreate,
+            )
         }
         Box(
             modifier = Modifier
@@ -306,6 +315,7 @@ private fun AllGoalsNavBar(onBack: () -> Unit, onCreate: () -> Unit) {
 @Composable
 private fun CircleIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     onClick: () -> Unit,
 ) {
     Box(
@@ -318,76 +328,10 @@ private fun CircleIconButton(
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            contentDescription = contentDescription,
             tint = DSColors.fairway,
             modifier = Modifier.size(14.dp),
         )
-    }
-}
-
-// =================================================================
-// Empty State
-// =================================================================
-
-@Composable
-private fun AllGoalsEmptyState(
-    onCreate: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp))
-            .clip(RoundedCornerShape(24.dp))
-            .background(DSColors.cardWhite.copy(alpha = 0.88f))
-            .border(width = 1.dp, color = Color.White.copy(alpha = 0.75f), shape = RoundedCornerShape(24.dp))
-            .padding(horizontal = DSSpacing.lg, vertical = 28.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(DSColors.fairway.copy(alpha = 0.10f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = null,
-                tint = DSColors.fairway,
-                modifier = Modifier.size(22.dp),
-            )
-        }
-        Text(
-            text = "还没有训练目标",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = DSColors.inkGreen,
-        )
-        Text(
-            text = "先创建一个本周可执行的小目标，首页会自动把它放进今日聚焦。",
-            fontSize = 12.sp,
-            color = DSColors.shadowGray,
-            lineHeight = 18.sp,
-        )
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(DSColors.fairway)
-                .clickable(onClick = onCreate)
-                .padding(horizontal = 18.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Add,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(14.dp),
-            )
-            Text("新建目标", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        }
     }
 }
 
@@ -517,7 +461,6 @@ private fun priorityDividerColor(p: V2Goal.Priority): Color = when (p) {
 // Goal Card
 // =================================================================
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeToDeleteGoalCard(
     goal: V2Goal,
@@ -528,33 +471,49 @@ private fun SwipeToDeleteGoalCard(
     modifier: Modifier = Modifier,
     dimmed: Boolean = false,
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        positionalThreshold = { distance -> distance * 0.35f },
-    )
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val actionWidthPx = with(density) { 76.dp.toPx() }
+    val thresholdPx = with(density) { 60.dp.toPx() }
+    val maxDragPx = actionWidthPx * 1.5f
+    var offsetPx by remember(goal.id) { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(dismissState.currentValue) {
-        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
-            onDeleteRequest()
-            dismissState.reset()
+    fun settle(target: Float) {
+        scope.launch {
+            Animatable(offsetPx).animateTo(
+                targetValue = target,
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = 480f),
+            ) {
+                offsetPx = value
+            }
         }
     }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        modifier = modifier,
-        enableDismissFromStartToEnd = false,
-        backgroundContent = {
+    Box(modifier = modifier.clipToBounds()) {
+        // iOS only mounts the red 76pt action after the row has moved. Keeping
+        // it out of the tree at rest prevents it tinting the translucent card.
+        if (offsetPx < -0.5f) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(DSSpacing.Radius.md))
-                    .background(DSColors.flagRed)
-                    .padding(horizontal = DSSpacing.lg),
-                contentAlignment = Alignment.CenterEnd,
+                    .align(Alignment.CenterEnd)
+                    .width(76.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 2.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFFF24545), Color(0xFFDB2626)),
+                        ),
+                    )
+                    .clickable {
+                        offsetPx = 0f
+                        onDeleteRequest()
+                    },
+                contentAlignment = Alignment.Center,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.DeleteOutline,
@@ -565,16 +524,37 @@ private fun SwipeToDeleteGoalCard(
                     Text("删除", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-        },
-    ) {
-        AllGoalsCard(
-            goal = goal,
-            linkedMemoCount = linkedMemoCount,
-            onCheckIn = onCheckIn,
-            onTap = onTap,
-            modifier = Modifier.fillMaxWidth(),
-            dimmed = dimmed,
-        )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetPx.roundToInt(), 0) }
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta ->
+                        offsetPx = (offsetPx + delta).coerceIn(-maxDragPx, 0f)
+                    },
+                    onDragStopped = { velocity ->
+                        val reveal = offsetPx <= -thresholdPx || velocity < -300f
+                        settle(if (reveal) -actionWidthPx else 0f)
+                    },
+                ),
+        ) {
+            AllGoalsCard(
+                goal = goal,
+                linkedMemoCount = linkedMemoCount,
+                onCheckIn = onCheckIn,
+                onTap = onTap,
+                modifier = Modifier.fillMaxWidth(),
+                dimmed = dimmed,
+            )
+            if (offsetPx < -0.5f) {
+                Box(
+                    modifier = Modifier.matchParentSize().clickable { settle(0f) },
+                )
+            }
+        }
     }
 }
 

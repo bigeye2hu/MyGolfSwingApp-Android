@@ -33,7 +33,10 @@ import com.mygolfswing.app.data.model.V2MemoThumbnailKind
 import com.mygolfswing.app.data.video.V2VideoThumbnailLoader
 
 /**
- * Memo 视频封面：thumbnailUrl → 本地抽帧 → 渐变占位（对齐 iOS `V2MemoMixedCard`）。
+ * Memo 视频封面：thumbnailUrl → 本地抽帧 → 主题照片 → 渐变占位。
+ *
+ * 主题照片映射与 iOS `V2Memo.v2FallbackCoverAssetName` 一致；远端、Mock 和游客
+ * Memo 不再全部退回同一张草地图片。本地视频仍优先现场抽取真实首帧。
  */
 @Composable
 fun V2MemoThumbnail(
@@ -48,9 +51,12 @@ fun V2MemoThumbnail(
         V2MemoThumbnailStore.resolveThumbnailUrl(context, memo)
     }
     var fallbackBitmap by remember(memo.id) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val fallbackCoverRes = remember(memo.hasVideo, memo.videoUrl, memo.thumbnailKind) {
+        memoFallbackCoverDrawableRes(memo)
+    }
 
     LaunchedEffect(memo.id, resolvedUrl, memo.videoUrl) {
-        if (resolvedUrl != null) {
+        if (resolvedUrl != null || !isLocalMemoVideoReference(memo.videoUrl)) {
             fallbackBitmap = null
             return@LaunchedEffect
         }
@@ -75,6 +81,14 @@ fun V2MemoThumbnail(
             fallback != null -> {
                 Image(
                     bitmap = fallback.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            fallbackCoverRes != null -> {
+                Image(
+                    painter = painterResource(id = fallbackCoverRes),
                     contentDescription = null,
                     contentScale = contentScale,
                     modifier = Modifier.fillMaxSize(),
@@ -107,6 +121,25 @@ fun V2MemoThumbnail(
             }
         }
     }
+}
+
+internal fun memoFallbackCoverDrawableRes(memo: V2Memo): Int? {
+    if (!memo.hasVideo || isLocalMemoVideoReference(memo.videoUrl)) return null
+    return when (memo.thumbnailKind) {
+        V2MemoThumbnailKind.FAIRWAY -> R.drawable.v2_quickadd_video
+        V2MemoThumbnailKind.GREEN_GRASS -> R.drawable.v2_quickadd_swing
+        V2MemoThumbnailKind.SUNSET -> R.drawable.homepage_analysis
+        V2MemoThumbnailKind.SAND -> R.drawable.v2_quickadd_goal
+        V2MemoThumbnailKind.MIST -> R.drawable.golf_course_background
+        V2MemoThumbnailKind.FOREST -> R.drawable.golf_swing_hero
+    }
+}
+
+internal fun isLocalMemoVideoReference(value: String?): Boolean {
+    val normalized = value?.trim()?.lowercase().orEmpty()
+    return normalized.startsWith("file:") ||
+        normalized.startsWith("content:") ||
+        normalized.startsWith("/")
 }
 
 private fun homeMemoPlaceholderBrush(): Brush = Brush.linearGradient(

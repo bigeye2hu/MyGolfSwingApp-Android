@@ -1,14 +1,10 @@
 package com.mygolfswing.app.ui.ai
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,20 +13,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
@@ -48,9 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,8 +52,8 @@ import com.mygolfswing.app.data.model.V2AIMessageRole
 import com.mygolfswing.app.data.store.V2AIChatStore
 import com.mygolfswing.app.data.store.V2ProfileStore
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
+import com.mygolfswing.app.ui.common.V2RoomPage
 import com.mygolfswing.app.ui.designsystem.DSColors
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.max
 import kotlin.math.sin
@@ -78,7 +72,6 @@ fun V2AIChatScreen(
 ) {
     val session by V2AIChatStore.currentSession.collectAsState()
     val status by V2AIChatStore.statusBar.collectAsState()
-    val recordedBanner by V2AIChatStore.recordedBanner.collectAsState()
     val providerName by V2AIChatStore.providerName.collectAsState()
     val modelName by V2AIChatStore.modelName.collectAsState()
     val modelDisplay by V2AIChatStore.modelDisplay.collectAsState()
@@ -116,12 +109,6 @@ fun V2AIChatScreen(
             V2AIChatStore.consumeOpenConfigRequest()
         }
     }
-    LaunchedEffect(recordedBanner) {
-        if (recordedBanner != null) {
-            delay(3_000)
-            V2AIChatStore.consumeRecordedBanner()
-        }
-    }
     LaunchedEffect(historyRequestKey, profile.isLoggedIn) {
         if (historyRequestKey > 0 && profile.isLoggedIn) {
             showHistory = true
@@ -131,13 +118,11 @@ fun V2AIChatScreen(
         onDispose { triggerReflectionOnce() }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DSColors.warmWhite),
-    ) {
+    V2RoomPage(Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
         AIChatTopBar(
             modelLabel = modelDisplay,
+            isGuest = !profile.isLoggedIn,
             onClose = {
                 triggerReflectionOnce()
                 onSwitchToHome()
@@ -145,20 +130,8 @@ fun V2AIChatScreen(
             onHistory = {
                 if (profile.isLoggedIn) showHistory = true else onRequestLoginForHistory()
             },
-            onConfig = onOpenConfig,
+            onConfig = { if (profile.isLoggedIn) onOpenConfig() else onRequestLogin() },
         )
-
-        if (!profile.isLoggedIn) {
-            AIChatLoginPrompt(onLogin = onRequestLogin)
-        }
-        AnimatedVisibility(
-            visible = recordedBanner != null,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = fadeOut(),
-        ) {
-            recordedBanner?.let { RecordedBanner(text = it) }
-        }
-
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -167,7 +140,19 @@ fun V2AIChatScreen(
             contentPadding = PaddingValues(bottom = 12.dp),
         ) {
             item(key = "provider_pill") {
-                ProviderPill(provider = providerName, model = modelName, onClick = onOpenConfig)
+                ProviderPill(
+                    provider = providerName,
+                    model = modelName,
+                )
+            }
+            if (!profile.isLoggedIn) {
+                item(key = "guest_preview") {
+                    V2AIChatGuestPreviewCard(
+                        onSelectQuestion = V2AIChatStore::updateDraft,
+                        onLogin = onRequestLogin,
+                        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
+                    )
+                }
             }
             items(session.messages, key = { it.id }) { msg ->
                 when (msg.role) {
@@ -179,6 +164,13 @@ fun V2AIChatScreen(
         }
 
         status?.let { StatusBar(text = it) }
+
+        if (!profile.isLoggedIn && draft.isNotBlank()) {
+            V2AIChatGuestDraftNotice(
+                onLogin = onRequestLogin,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+            )
+        }
 
         V2AIChatInputBar(
             draft = draft,
@@ -197,11 +189,10 @@ fun V2AIChatScreen(
                     V2AIChatStore.send(text)
                 }
             },
-            isReplying = V2AIChatStore.isReplying,
-            onStop = { V2AIChatStore.stopStreaming() },
-            enabled = profile.isLoggedIn,
-            onDisabledClick = onRequestLogin,
+            enabled = true,
+            placeholder = if (profile.isLoggedIn) "向 AI 教练提问…" else "登录后向 AI 教练提问…",
         )
+    }
     }
     if (showHistory) {
         V2AIHistorySheet(onDismiss = { showHistory = false })
@@ -209,79 +200,14 @@ fun V2AIChatScreen(
 }
 
 @Composable
-private fun AIChatLoginPrompt(onLogin: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .padding(horizontal = 14.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(DSColors.cardWhite)
-            .border(1.dp, DSColors.borderLine, RoundedCornerShape(16.dp))
-            .clickable(onClick = onLogin)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-                .background(DSColors.mistGreen),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Login, null, tint = DSColors.fairway, modifier = Modifier.size(18.dp))
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("登录后使用挥呗 AI", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
-            Text("会话历史、训练档案和内置额度会同步到当前账号。", fontSize = 12.sp, color = DSColors.shadowGray)
-        }
-    }
-}
-
-@Composable
-private fun RecordedBanner(text: String) {
-    val parts = text.split(" · ", limit = 2)
-    val title = parts.firstOrNull().orEmpty().ifBlank { "已记录到档案" }
-    val delta = parts.getOrNull(1)
-    Row(
-        modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(50),
-                ambientColor = DSColors.goldBright.copy(alpha = 0.30f),
-                spotColor = DSColors.goldBright.copy(alpha = 0.30f),
-            )
-            .clip(RoundedCornerShape(50))
-            .background(Brush.horizontalGradient(listOf(DSColors.goldBright, DSColors.trophyGold)))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(Icons.Filled.CheckCircle, null, tint = Color.White, modifier = Modifier.size(14.dp))
-        Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-        if (!delta.isNullOrBlank()) {
-            Text(
-                text = delta,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = 0.85f),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White.copy(alpha = 0.20f))
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun AIChatTopBar(
+internal fun AIChatTopBar(
     modelLabel: String,
+    isGuest: Boolean,
     onClose: () -> Unit,
     onHistory: () -> Unit,
     onConfig: () -> Unit,
 ) {
-    val subtitleModel = modelLabel.ifBlank { "实时对话" }
+    val subtitle = aiChatSubtitle(modelLabel = modelLabel, isGuest = isGuest)
 
     Column(
         modifier = Modifier
@@ -304,13 +230,15 @@ private fun AIChatTopBar(
             ) {
                 Text("AI 教练", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = DSColors.inkGreen)
                 Text(
-                    "你的专属高尔夫小高 · $subtitleModel",
+                    subtitle,
                     fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
                     color = DSColors.shadowGray,
                     maxLines = 1,
                 )
             }
             TopBarIconButton(icon = Icons.Outlined.ForumOutlined, iconSize = 18.dp, contentDescription = "对话记录", onClick = onHistory)
+            Spacer(modifier = Modifier.width(12.dp))
             TopBarIconButton(icon = Icons.Filled.Settings, iconSize = 18.dp, contentDescription = "AI 配置", onClick = onConfig)
         }
         Box(
@@ -344,8 +272,17 @@ private fun TopBarIconButton(
     }
 }
 
+internal fun aiChatSubtitle(modelLabel: String, isGuest: Boolean): String {
+    val suffix = modelLabel.ifBlank { if (isGuest) "示例问答" else "实时对话" }
+    return if (isGuest) {
+        "示例问答 · 发送前登录 · $suffix"
+    } else {
+        "你的专属高尔夫小高 · $suffix"
+    }
+}
+
 @Composable
-private fun ProviderPill(provider: String, model: String, onClick: () -> Unit) {
+internal fun ProviderPill(provider: String, model: String) {
     Row(
         modifier = Modifier
             .padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
@@ -356,10 +293,10 @@ private fun ProviderPill(provider: String, model: String, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier
+                .testTag("ai-chat-provider-pill")
                 .clip(RoundedCornerShape(50))
                 .background(DSColors.cardWhite)
                 .border(width = 0.5.dp, color = DSColors.borderLine, shape = RoundedCornerShape(50))
-                .clickable(onClick = onClick)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Box(
@@ -383,7 +320,7 @@ private fun ProviderPill(provider: String, model: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun StatusBar(text: String) {
+internal fun StatusBar(text: String) {
     val transition = rememberInfiniteTransition(label = "ai_status_dots")
     val phase by transition.animateFloat(
         initialValue = 0f,
@@ -400,6 +337,7 @@ private fun StatusBar(text: String) {
     ) {
         Row(
             modifier = Modifier
+                .testTag("ai-chat-status-pill")
                 .clip(RoundedCornerShape(50))
                 .background(DSColors.goldBright.copy(alpha = 0.08f))
                 .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -412,7 +350,7 @@ private fun StatusBar(text: String) {
                 tint = DSColors.goldBright,
                 modifier = Modifier.size(11.dp),
             )
-            Text(text = "$text…", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = DSColors.inkGreen.copy(alpha = 0.72f))
+            Text(text = "$text…", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = DSColors.inkGreen.copy(alpha = 0.70f))
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 repeat(3) { index ->
                     val dotOpacity = statusDotOpacity(phase, index)
@@ -420,7 +358,7 @@ private fun StatusBar(text: String) {
                         modifier = Modifier
                             .size(4.dp)
                             .clip(CircleShape)
-                            .background(DSColors.goldBright.copy(alpha = dotOpacity)),
+                            .background(DSColors.goldBright.copy(alpha = 0.7f * dotOpacity)),
                     )
                 }
             }

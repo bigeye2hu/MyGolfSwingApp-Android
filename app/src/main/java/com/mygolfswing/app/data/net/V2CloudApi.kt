@@ -26,11 +26,15 @@ interface V2CloudApi {
 
     @POST("accountManagement")
     suspend fun accountManagement(@Body body: JsonObject): CloudResponse
+
+    @POST("coachWorkspace")
+    suspend fun coachWorkspace(@Body body: JsonObject): JsonObject
 }
 
 @kotlinx.serialization.Serializable
 data class CloudResponse(
     val success: Boolean = false,
+    val code: String? = null,
     val error: String? = null,
     val data: JsonObject? = null,
 )

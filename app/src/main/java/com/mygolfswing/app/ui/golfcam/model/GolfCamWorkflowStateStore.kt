@@ -123,6 +123,7 @@ object GolfCamWorkflowStateStore {
                 jsonObject(
                     "controlPoint1" to pointObject(it.controlPoint1.x, it.controlPoint1.y),
                     "controlPoint2" to pointObject(it.controlPoint2.x, it.controlPoint2.y),
+                    "currentFrameIndex" to JsonPrimitive(it.currentFrameIndex),
                 )
             },
             "trackStyle" to state.trackStyle?.style?.let(::encodeTrackStyle),
@@ -178,7 +179,7 @@ object GolfCamWorkflowStateStore {
             LandingOutput(
                 normalizedX = it.normalizedFloat("normalizedX"),
                 normalizedY = it.normalizedFloat("normalizedY"),
-                flightTimeSec = finiteDoubleIn(it.double("flightTimeSec"), 0.5, 8.0, fallback = 4.5),
+                flightTimeSec = finiteDoubleIn(it.double("flightTimeSec"), 0.5, 8.0, fallback = 6.0),
             )
         }
         state.flightCurve = json.obj("flightCurve")?.let { curve ->
@@ -191,7 +192,13 @@ object GolfCamWorkflowStateStore {
                 )
                 val cp1 = curve.obj("controlPoint1")?.point() ?: suggested.first
                 val cp2 = curve.obj("controlPoint2")?.point() ?: suggested.second
-                FlightCurveSelection(impact, landing, cp1, cp2)
+                FlightCurveSelection(
+                    impactPosition = impact,
+                    landingPoint = landing,
+                    controlPoint1 = cp1,
+                    controlPoint2 = cp2,
+                    currentFrameIndex = curve.int("currentFrameIndex")?.coerceAtLeast(0) ?: 0,
+                )
             } else {
                 null
             }
@@ -358,8 +365,8 @@ object GolfCamWorkflowStateStore {
 
     private fun JsonObject.point(): NormalizedPoint {
         return NormalizedPoint(
-            x = normalizedFloat("x"),
-            y = finiteFloatIn(float("y"), -1.0f, 1.5f, fallback = 0.5f),
+            x = finiteFloatIn(float("x"), -0.35f, 1.35f, fallback = 0.5f),
+            y = finiteFloatIn(float("y"), -0.8f, 1.4f, fallback = 0.5f),
         )
     }
 

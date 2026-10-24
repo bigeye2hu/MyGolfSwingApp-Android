@@ -25,11 +25,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.outlined.GpsFixed
+import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -45,7 +48,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -60,7 +64,6 @@ import com.mygolfswing.app.ui.golfcam.model.ImpactFrameSelection
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 internal const val IMPACT_FRAME_THUMBNAIL_COUNT = 60       // 最多 60 张缩略图
 internal const val IMPACT_FRAME_THUMBNAIL_CELL_WIDTH_DP = 32
@@ -75,6 +78,7 @@ internal const val IMPACT_FRAME_CANDIDATE_DOT_SIZE_DP = 6
 internal const val IMPACT_FRAME_CANDIDATE_DOT_TOP_PADDING_DP = 2
 internal const val IMPACT_FRAME_NAV_BUTTON_WIDTH_DP = 44
 internal const val IMPACT_FRAME_NAV_BUTTON_HEIGHT_DP = 50
+internal const val IMPACT_FRAME_STEP_TOOL_PANEL_HEIGHT_DP = 140
 private val CELL_W: Dp = IMPACT_FRAME_THUMBNAIL_CELL_WIDTH_DP.dp
 private val CELL_H: Dp = IMPACT_FRAME_THUMBNAIL_CELL_HEIGHT_DP.dp
 private val TIMELINE_H: Dp = IMPACT_FRAME_TIMELINE_HEIGHT_DP.dp
@@ -86,7 +90,7 @@ internal fun initialImpactFrameIndex(
     totalFrames: Int,
 ): Int {
     val lastFrame = (totalFrames - 1).coerceAtLeast(0)
-    return (savedFrameIndex ?: candidateFrames.maxByOrNull { finiteCandidateConfidence(it.confidence) }?.frameIndex ?: (totalFrames / 2))
+    return (savedFrameIndex ?: candidateFrames.maxByOrNull { finiteCandidateConfidence(it.confidence) }?.frameIndex ?: 0)
         .coerceIn(0, lastFrame)
 }
 
@@ -98,8 +102,8 @@ internal fun asyncImpactCandidateReplacementFrame(
 ): Int? {
     if (savedFrameIndexOnEntry != null || candidateFrames.isEmpty()) return null
     val lastFrame = (totalFrames - 1).coerceAtLeast(0)
-    val autoMiddleFrame = (totalFrames / 2).coerceIn(0, lastFrame)
-    if (currentFrame.coerceIn(0, lastFrame) != autoMiddleFrame) return null
+    val autoOpeningFrame = 0
+    if (currentFrame.coerceIn(0, lastFrame) != autoOpeningFrame) return null
     return candidateFrames.maxByOrNull { finiteCandidateConfidence(it.confidence) }?.frameIndex?.coerceIn(0, lastFrame)
 }
 
@@ -191,14 +195,9 @@ internal fun impactFrameThumbnailFrameIndices(
     maxThumbs: Int = IMPACT_FRAME_THUMBNAIL_COUNT,
 ): List<Int> {
     val safeTotal = totalFrames.coerceAtLeast(1)
-    val thumbCount = maxThumbs.coerceIn(1, safeTotal)
-    if (thumbCount == 1) return listOf(0)
-    val lastFrame = safeTotal - 1
-    return (0 until thumbCount).map { index ->
-        (index * lastFrame.toDouble() / (thumbCount - 1))
-            .roundToInt()
-            .coerceIn(0, lastFrame)
-    }
+    val safeMaxThumbs = maxThumbs.coerceAtLeast(1)
+    val step = (safeTotal + safeMaxThumbs - 1) / safeMaxThumbs
+    return (0 until safeTotal step step).toList()
 }
 
 internal fun impactFrameThumbnailSampleTimeMs(
@@ -245,6 +244,7 @@ fun ImpactFrameStepTool(
     state: GolfCamWorkflowState,
     candidateFrames: List<CandidateImpactFrame>,
     frameRate: Double = 30.0,
+    frameSelectionState: MutableIntState? = null,
     onResult: (ImpactFrameSelection) -> Unit,
 ) {
     val safeFrameRate = GolfCamFrameTimeline.safeFrameRate(frameRate)
@@ -257,7 +257,7 @@ fun ImpactFrameStepTool(
     val totalFrames = GolfCamFrameTimeline.totalFrames(trimDurationMs, safeFrameRate)
     val savedFrameIndexOnEntry = remember(startMs, endMs) { state.impactFrame?.frameIndex }
 
-    // 初始帧：优先已保存 → 最高候选 → 中间帧
+    // 初始帧：优先已保存 → 最高候选 → 裁剪片段开头帧（与 iOS 当前实现一致）
     val initialFrame = remember(savedFrameIndexOnEntry, candidateFrames, totalFrames) {
         initialImpactFrameIndex(
             savedFrameIndex = savedFrameIndexOnEntry,
@@ -266,8 +266,17 @@ fun ImpactFrameStepTool(
         )
     }
 
-    var currentFrame by remember(startMs, endMs, safeFrameRate, totalFrames, savedFrameIndexOnEntry) {
+    var internalCurrentFrame by remember(startMs, endMs, safeFrameRate, totalFrames, savedFrameIndexOnEntry) {
         mutableIntStateOf(initialFrame)
+    }
+    val currentFrame = frameSelectionState?.intValue ?: internalCurrentFrame
+    fun selectFrame(frameIndex: Int) {
+        val clampedFrame = frameIndex.coerceIn(0, (totalFrames - 1).coerceAtLeast(0))
+        if (frameSelectionState != null) {
+            frameSelectionState.intValue = clampedFrame
+        } else {
+            internalCurrentFrame = clampedFrame
+        }
     }
     LaunchedEffect(savedFrameIndexOnEntry, candidateFrames, totalFrames) {
         asyncImpactCandidateReplacementFrame(
@@ -275,7 +284,7 @@ fun ImpactFrameStepTool(
             currentFrame = currentFrame,
             candidateFrames = candidateFrames,
             totalFrames = totalFrames,
-        )?.let { currentFrame = it }
+        )?.let(::selectFrame)
     }
 
     // step：多少个真实帧 对应 1个缩略图格
@@ -309,45 +318,52 @@ fun ImpactFrameStepTool(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // ── 帧信息行 ──
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(top = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column {
-                Text("距离开始", color = DSColors.shadowGray, fontSize = 10.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text("距离开始", color = Color(0xFF6B6B70), fontSize = 9.sp)
                 Text(
                     formatImpactFrameTimeLabel(elapsedSec),
-                    color = DSColors.inkGreen,
+                    color = DSColors.shadowGray,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Medium,
                     fontFamily = FontFamily.Monospace,
                 )
             }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("当前帧", color = DSColors.shadowGray, fontSize = 10.sp)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text("当前帧", color = Color(0xFF6B6B70), fontSize = 9.sp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(DSColors.fairway, RoundedCornerShape(2.dp)),
+                    Icon(
+                        Icons.Outlined.Movie,
+                        contentDescription = null,
+                        tint = DSColors.fairway,
+                        modifier = Modifier.size(11.dp),
                     )
                     Text(
                         impactFrameDisplayText(currentFrame, totalFrames),
                         color = DSColors.inkGreen,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
                         fontFamily = FontFamily.Monospace,
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(48.dp))
+            Spacer(modifier = Modifier.width(50.dp))
         }
 
         // ── 缩略图帧轨道 ──
@@ -361,27 +377,28 @@ fun ImpactFrameStepTool(
             frameRate = safeFrameRate,
             currentFrame = currentFrame,
             candidateFrames = candidateFrames,
-            onFrameChanged = { currentFrame = it },
+            onFrameChanged = ::selectFrame,
+            modifier = Modifier.padding(horizontal = 6.dp),
         )
 
         // ── 提示文字 ──
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(13.dp)
-                    .border(1.5.dp, DSColors.shadowGray, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(modifier = Modifier.size(5.dp).background(DSColors.shadowGray, CircleShape))
-            }
+            Icon(
+                Icons.Outlined.GpsFixed,
+                contentDescription = null,
+                tint = DSColors.fairway,
+                modifier = Modifier.size(14.dp),
+            )
             Text(
                 "滑动选择球杆击中球的瞬间，或点击上方候选帧",
                 color = DSColors.shadowGray,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
         }
     }
@@ -401,9 +418,9 @@ private fun FrameFilmstrip(
     currentFrame: Int,
     candidateFrames: List<CandidateImpactFrame>,
     onFrameChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val density = LocalDensity.current
 
     val thumbnailSampleTimesMs = remember(startMs, trimDurationMs, thumbCount, frameRate) {
         (0 until thumbCount).map { thumbIndex ->
@@ -464,40 +481,66 @@ private fun FrameFilmstrip(
     }
 
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = frameToThumbIndex(currentFrame))
+    var isProgrammaticScroll by remember { mutableStateOf(false) }
+    var hasPositionedTimeline by remember { mutableStateOf(false) }
+    var programmaticTargetThumb by remember { mutableIntStateOf(-1) }
 
-    // 用户滑动时更新帧
-    LaunchedEffect(listState) {
-        snapshotFlow {
+    val centeredThumbIndex by remember(listState) {
+        derivedStateOf {
             val layoutInfo = listState.layoutInfo
             val visibleItems = layoutInfo.visibleItemsInfo
-            if (visibleItems.isEmpty()) return@snapshotFlow -1
-            val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-            visibleItems.minByOrNull { abs((it.offset + it.size / 2f) - viewportCenter) }?.index ?: -1
-        }.distinctUntilChanged()
-         .collect { thumbIdx ->
-             if (thumbIdx >= 0 && !listState.isScrollInProgress.not()) {
-                 onFrameChanged(thumbIndexToFrame(thumbIdx))
+            if (visibleItems.isEmpty()) {
+                -1
+            } else {
+                // contentPadding 会让 viewportStartOffset 为负数；几何中心必须使用实际可视宽度。
+                val viewportCenter = layoutInfo.viewportSize.width / 2f
+                visibleItems.minByOrNull { abs((it.offset + it.size / 2f) - viewportCenter) }?.index ?: -1
+            }
+        }
+    }
+
+    // iOS 滑动时只改变视觉高亮，停止后才提交一次帧选择与精确 seek。
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.isScrollInProgress to centeredThumbIndex
+         }.distinctUntilChanged()
+         .collect { (isScrolling, thumbIdx) ->
+             if (isScrolling) {
+                 if (!isProgrammaticScroll) programmaticTargetThumb = -1
+                 return@collect
              }
+             if (!hasPositionedTimeline || isProgrammaticScroll || thumbIdx < 0) return@collect
+             if (programmaticTargetThumb >= 0) {
+                 if (thumbIdx == programmaticTargetThumb) programmaticTargetThumb = -1
+                 return@collect
+             }
+             onFrameChanged(thumbIndexToFrame(thumbIdx))
          }
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val sidePad = ((maxWidth - CELL_W) / 2).coerceAtLeast(0.dp)  // 使第一/最后一张可滚到中心
-        val sidePadPx = with(density) { sidePad.toPx().toInt() }
+    BoxWithConstraints(modifier = modifier.fillMaxWidth()) {
+        val timelineWidth = (maxWidth - (IMPACT_FRAME_NAV_BUTTON_WIDTH_DP * 2).dp).coerceAtLeast(CELL_W)
+        val sidePad = ((timelineWidth - CELL_W) / 2).coerceAtLeast(0.dp)  // 使第一/最后一张可滚到中心
         val snapFlingBehavior = rememberSnapFlingBehavior(listState)
 
         // 代码改帧时滚动轨道，并和 iOS .centeredHorizontally 一样把目标缩略图居中。
-        LaunchedEffect(currentFrame, sidePadPx) {
+        LaunchedEffect(currentFrame, sidePad) {
             val targetThumb = frameToThumbIndex(currentFrame)
             if (!listState.isScrollInProgress) {
-                listState.animateScrollToItem(targetThumb, scrollOffset = -sidePadPx)
+                programmaticTargetThumb = targetThumb
+                isProgrammaticScroll = true
+                try {
+                    listState.animateScrollToItem(targetThumb)
+                } finally {
+                    hasPositionedTimeline = true
+                    isProgrammaticScroll = false
+                }
             }
         }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             // 上一帧
             NavButton(icon = Icons.Filled.ChevronLeft, label = "上一帧", enabled = currentFrame > 0) {
@@ -518,14 +561,27 @@ private fun FrameFilmstrip(
                 ) {
                     itemsIndexed(displayThumbnails) { thumbIdx, bmp ->
                         val frameIdx = thumbIndexToFrame(thumbIdx)
-                        val selectedThumb = frameToThumbIndex(currentFrame)
+                        val selectedThumb = if (listState.isScrollInProgress && centeredThumbIndex >= 0) {
+                            centeredThumbIndex
+                        } else {
+                            frameToThumbIndex(currentFrame)
+                        }
                         val isSelected = thumbIdx == selectedThumb
-                        val isCandidate = candidateFrames.any { frameToThumbIndex(it.frameIndex) == thumbIdx }
+                        val candidate = candidateFrames
+                            .filter { frameToThumbIndex(it.frameIndex) == thumbIdx }
+                            .maxByOrNull { finiteCandidateConfidence(it.confidence) }
+                        val isCandidate = candidate != null
+                        val accessibilityLabel = if (candidate != null) {
+                            "候选击球帧 ${frameIdx + 1}，置信度 ${candidate.confidencePercent}%"
+                        } else {
+                            "第 ${frameIdx + 1} 帧"
+                        }
 
                         Box(
                             modifier = Modifier
                                 .width(CELL_W)
                                 .height(TIMELINE_H)
+                                .semantics { contentDescription = accessibilityLabel }
                                 .clickable { onFrameChanged(frameIdx) },
                             contentAlignment = Alignment.TopCenter,
                         ) {
@@ -606,7 +662,7 @@ private fun NavButton(
             .width(IMPACT_FRAME_NAV_BUTTON_WIDTH_DP.dp)
             .height(IMPACT_FRAME_NAV_BUTTON_HEIGHT_DP.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(if (enabled) DSColors.mistGreen else DSColors.mistGreen.copy(alpha = 0.4f))
+            .background(DSColors.mistGreen.copy(alpha = 0.7f))
             .clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
@@ -614,14 +670,13 @@ private fun NavButton(
         Icon(
             icon,
             contentDescription = label,
-            tint = if (enabled) DSColors.inkGreen else DSColors.shadowGray,
-            modifier = Modifier.size(18.dp),
+            tint = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
+            modifier = Modifier.size(14.dp),
         )
         Text(
             label,
-            color = if (enabled) DSColors.inkGreen else DSColors.shadowGray,
-            fontSize = 7.sp,
-            fontWeight = FontWeight.Medium,
+            color = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.45f),
+            fontSize = 8.sp,
         )
     }
 }

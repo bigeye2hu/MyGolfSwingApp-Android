@@ -32,6 +32,7 @@ data class V2SwingClip(
     val durationSec: Double = 0.0,
     val retention: V2SwingClipRetention = V2SwingClipRetention.TEMPORARY,
     val sourceLabel: String? = null,
+    val notes: String? = null,
 )
 
 enum class V2SwingClipRetention(val wire: String) {

@@ -1,6 +1,5 @@
 package com.mygolfswing.app.ui.common
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -12,9 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
@@ -27,6 +25,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.designsystem.DSLayout
 import com.mygolfswing.app.ui.designsystem.DSSpacing
 import com.mygolfswing.app.ui.designsystem.DSTypography
 
@@ -44,7 +43,7 @@ fun V2NavTopBar(
         modifier = modifier
             .fillMaxWidth()
             .v2StatusBarPadding()
-            .height(56.dp)
+            .height(DSLayout.topBarHeight)
             .padding(horizontal = DSSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -73,7 +72,7 @@ fun V2NavTopBarCentered(
         modifier = modifier
             .fillMaxWidth()
             .v2StatusBarPadding()
-            .height(56.dp),
+            .height(DSLayout.topBarHeight),
     ) {
         Text(
             text = title,
@@ -100,6 +99,56 @@ fun V2NavTopBarCentered(
     }
 }
 
+/**
+ * SwiftUI sheet-style inline navigation bar: text cancellation action, centered
+ * title, and an optional trailing text action. Unlike a pushed page, a modal
+ * sheet must not imply a navigation-stack back transition.
+ */
+@Composable
+fun V2ModalTopBarCentered(
+    title: String,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+    cancelTitle: String = "取消",
+    trailingTitle: String? = null,
+    trailingEnabled: Boolean = true,
+    onTrailing: () -> Unit = {},
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .v2StatusBarPadding()
+            .height(DSLayout.topBarHeight),
+    ) {
+        Text(
+            text = cancelTitle,
+            style = DSTypography.body,
+            color = DSColors.fairway,
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .clickable(onClick = onCancel)
+                .padding(horizontal = DSSpacing.lg, vertical = 8.dp),
+        )
+        Text(
+            text = title,
+            style = DSTypography.titleMedium,
+            color = DSColors.inkGreen,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        trailingTitle?.let { actionTitle ->
+            Text(
+                text = actionTitle,
+                style = DSTypography.bodyBold,
+                color = if (trailingEnabled) DSColors.fairway else DSColors.shadowGray.copy(alpha = 0.45f),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .clickable(enabled = trailingEnabled, onClick = onTrailing)
+                    .padding(horizontal = DSSpacing.lg, vertical = 8.dp),
+            )
+        }
+    }
+}
+
 @Composable
 fun V2BackIconButton(
     onClick: () -> Unit,
@@ -109,20 +158,20 @@ fun V2BackIconButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
-            .size(40.dp)
+            .size(36.dp)
             .semantics { role = Role.Button }
-            .background(DSColors.cardWhite, CircleShape)
             .clickable(
                 interactionSource = interaction,
-                indication = ripple(bounded = true, radius = 20.dp),
+                indication = ripple(bounded = false, radius = 18.dp),
                 onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            imageVector = Icons.Filled.ChevronLeft,
             contentDescription = contentDescription,
             tint = DSColors.inkGreen,
+            modifier = Modifier.size(22.dp),
         )
     }
 }

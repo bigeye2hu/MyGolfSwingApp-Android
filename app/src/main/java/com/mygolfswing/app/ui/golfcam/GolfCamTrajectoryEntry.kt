@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -46,11 +48,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -75,6 +79,45 @@ internal const val GOLF_CAM_IMPORT_RESTORE_MESSAGE = "正在恢复上次编辑�
 internal const val GOLF_CAM_IMPORT_DETECT_MESSAGE = "正在识别视频比例与帧率"
 internal const val GOLF_CAM_IMPORT_GENERATE_PREVIEW_MESSAGE = "正在生成预览"
 internal const val GOLF_CAM_IMPORT_VIDEO_CONFIG_ERROR_MESSAGE = "无法读取视频参数，请换一个视频或稍后重试"
+internal const val GOLF_CAM_PICKER_LAUNCH_ERROR_MESSAGE = "无法打开相册，请稍后重试"
+
+internal fun launchGolfCamVideoPicker(launch: () -> Unit): String? = try {
+    launch()
+    null
+} catch (_: Throwable) {
+    GOLF_CAM_PICKER_LAUNCH_ERROR_MESSAGE
+}
+
+internal sealed interface GolfCamVideoImportOutcome {
+    data class Ready(val restoredPreviewReady: Boolean) : GolfCamVideoImportOutcome
+    data class Failure(val message: String) : GolfCamVideoImportOutcome
+}
+
+internal suspend fun prepareGolfCamVideoImport(
+    state: GolfCamWorkflowState,
+    resetForNewVideo: Boolean,
+    onStage: (String) -> Unit,
+    assignVideo: () -> Unit,
+    restore: (GolfCamWorkflowState) -> Boolean,
+    detect: suspend () -> GolfCamVideoConfig,
+): GolfCamVideoImportOutcome = try {
+    if (resetForNewVideo) state.clearAll()
+    assignVideo()
+    onStage(GOLF_CAM_IMPORT_RESTORE_MESSAGE)
+    val restored = restore(state)
+    if (shouldDetectGolfCamVideoConfig(state.videoConfig)) {
+        onStage(GOLF_CAM_IMPORT_DETECT_MESSAGE)
+        state.updateVideoConfig(detect())
+    }
+    val restoredPreviewReady = restored && previewStateFromWorkflow(state) != null
+    if (restoredPreviewReady) onStage(GOLF_CAM_IMPORT_GENERATE_PREVIEW_MESSAGE)
+    GolfCamVideoImportOutcome.Ready(restoredPreviewReady)
+} catch (error: CancellationException) {
+    throw error
+} catch (_: Throwable) {
+    state.clearAll()
+    GolfCamVideoImportOutcome.Failure(GOLF_CAM_IMPORT_VIDEO_CONFIG_ERROR_MESSAGE)
+}
 
 internal fun shouldDetectGolfCamVideoConfig(config: GolfCamVideoConfig?): Boolean {
     return config == null ||
@@ -159,30 +202,31 @@ fun GolfCamTrajectoryEntry(
             pickerError = null
             statusMessage = GOLF_CAM_IMPORT_RESTORE_MESSAGE
             scope.launch {
-                try {
-                    if (pickedUri != uri) state.clearAll()
-                    state.videoUri = uri
-                    val restored = GolfCamWorkflowStateStore.restore(uri, state)
-                    if (shouldDetectGolfCamVideoConfig(state.videoConfig)) {
-                        statusMessage = GOLF_CAM_IMPORT_DETECT_MESSAGE
-                        val detectedConfig = withContext(Dispatchers.IO) { detectGolfCamVideoConfig(context, uri) }
-                        state.updateVideoConfig(detectedConfig)
+                when (
+                    val outcome = prepareGolfCamVideoImport(
+                        state = state,
+                        resetForNewVideo = pickedUri != uri,
+                        onStage = { statusMessage = it },
+                        assignVideo = { state.videoUri = uri },
+                        restore = { target -> GolfCamWorkflowStateStore.restore(uri, target) },
+                        detect = {
+                            withContext(Dispatchers.IO) {
+                                detectGolfCamVideoConfig(context, uri)
+                            }
+                        },
+                    )
+                ) {
+                    is GolfCamVideoImportOutcome.Ready -> {
+                        pickedUri = uri
+                        showPreview = outcome.restoredPreviewReady
+                        statusMessage = null
                     }
-                    pickedUri = uri
-                    val restoredPreviewReady = restored && previewStateFromWorkflow(state) != null
-                    if (restoredPreviewReady) {
-                        statusMessage = GOLF_CAM_IMPORT_GENERATE_PREVIEW_MESSAGE
+                    is GolfCamVideoImportOutcome.Failure -> {
+                        pickedUri = null
+                        showPreview = false
+                        statusMessage = null
+                        pickerError = outcome.message
                     }
-                    showPreview = restoredPreviewReady
-                    statusMessage = null
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Throwable) {
-                    state.clearAll()
-                    pickedUri = null
-                    showPreview = false
-                    statusMessage = null
-                    pickerError = GOLF_CAM_IMPORT_VIDEO_CONFIG_ERROR_MESSAGE
                 }
             }
         }
@@ -190,15 +234,15 @@ fun GolfCamTrajectoryEntry(
 
     fun openVideoPicker(showInlineError: Boolean = true) {
         pickerError = null
-        runCatching {
+        val launchError = launchGolfCamVideoPicker {
             videoPicker.launch(arrayOf("video/*"))
-        }.onFailure {
+        }
+        if (launchError != null) {
             statusMessage = null
-            val message = "无法打开相册，请稍后重试"
             if (showInlineError) {
-                pickerError = message
+                pickerError = launchError
             } else {
-                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, launchError, Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -276,7 +320,7 @@ fun GolfCamTrajectoryEntry(
 // ─── 底部弹窗（对齐 iOS V2TrajectorySourceSheet）────────────────────────────────
 
 @Composable
-private fun TrajectorySourceSheet(
+internal fun TrajectorySourceSheet(
     statusMessage: String?,
     errorMessage: String?,
     onPickVideo: () -> Unit,
@@ -349,8 +393,15 @@ private fun SheetCard(
 ) {
     Column(
         modifier = modifier
+            .shadow(
+                elevation = 28.dp,
+                shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                ambientColor = DSColors.deepGreen.copy(alpha = 0.18f),
+                spotColor = DSColors.deepGreen.copy(alpha = 0.18f),
+            )
             .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
             .background(DSColors.warmWhite)
+            .testTag("golfcam-source-sheet")
             .navigationBarsPadding(),
     ) {
         // 拖动手柄
@@ -359,7 +410,7 @@ private fun SheetCard(
                 modifier = Modifier
                     .size(width = 40.dp, height = 4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(DSColors.shadowGray.copy(alpha = 0.3f)),
+                    .background(Color.White.copy(alpha = 0.75f)),
             )
         }
 
@@ -376,7 +427,7 @@ private fun SheetCard(
             } else {
                 SourceButton(
                     title = "从相册选择",
-                    subtitle = "导入击球视频，进入 V2 六步轨迹绘制流程",
+                    subtitle = "导入击球视频，进入裁剪、击球点、落点与轨迹样式调整",
                     onClick = onPickVideo,
                 )
                 errorMessage?.let { PickerErrorStrip(it) }
@@ -411,10 +462,11 @@ private fun SheetCard(
 @Composable
 private fun HeroHeader(modifier: Modifier = Modifier) {
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(156.dp)
-            .clip(RoundedCornerShape(22.dp)),
+            modifier = modifier
+                .fillMaxWidth()
+                .height(156.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .testTag("golfcam-source-hero"),
         contentAlignment = Alignment.BottomStart,
     ) {
         Image(
@@ -453,7 +505,7 @@ private fun HeroHeader(modifier: Modifier = Modifier) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("创建飞行轨迹", color = Color.White, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "裁剪、击球帧、击球位置、落点、曲线与样式",
+                    "按 V1 完整流程完成裁剪、击球帧、落点与分享预览",
                     color = Color.White.copy(alpha = 0.82f),
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -470,9 +522,17 @@ private fun SourceButton(title: String, subtitle: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 96.dp)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = DSColors.deepGreen.copy(alpha = 0.16f),
+                spotColor = DSColors.deepGreen.copy(alpha = 0.16f),
+            )
             .clip(RoundedCornerShape(20.dp))
             .background(Brush.linearGradient(listOf(DSColors.deepGreen, DSColors.fairway)))
             .clickable(onClick = onClick)
+            .testTag("golfcam-source-album")
             .padding(horizontal = 16.dp, vertical = 16.dp),
     ) {
         Row(
@@ -491,7 +551,13 @@ private fun SourceButton(title: String, subtitle: String, onClick: () -> Unit) {
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(subtitle, color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp, lineHeight = 16.sp)
+                Text(
+                    subtitle,
+                    color = Color.White.copy(alpha = 0.78f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    maxLines = 3,
+                )
             }
             Icon(Icons.Filled.ChevronRight, null, tint = Color.White, modifier = Modifier.size(18.dp))
         }
@@ -528,6 +594,7 @@ private fun InfoStrip() {
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(DSColors.mistGreen.copy(alpha = 0.82f))
+            .testTag("golfcam-source-info")
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -549,8 +616,17 @@ private fun ProcessingCard(statusMessage: String?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 92.dp)
+            .shadow(
+                elevation = 16.dp,
+                shape = RoundedCornerShape(20.dp),
+                ambientColor = DSColors.deepGreen.copy(alpha = 0.06f),
+                spotColor = DSColors.deepGreen.copy(alpha = 0.06f),
+            )
             .clip(RoundedCornerShape(20.dp))
             .background(Color.White)
+            .border(1.dp, DSColors.listCardBorder, RoundedCornerShape(20.dp))
+            .testTag("golfcam-source-processing")
             .padding(horizontal = 16.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),

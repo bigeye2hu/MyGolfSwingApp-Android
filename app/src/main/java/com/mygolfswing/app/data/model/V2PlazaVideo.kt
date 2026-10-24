@@ -22,6 +22,8 @@ data class V2PlazaVideo(
     val coach: V2PlazaCoach,
     val viewCount: Int,
     val saveCount: Int,
+    /** 云端点赞数；教练主页与播放器按 iOS 公共展示阈值使用。 */
+    val likeCount: Int = 0,
     val thumbnailKind: ThumbnailKind,
     /** 真实封面；为空时用 [thumbnailKind] 渐变 */
     val thumbnailUrl: String? = null,
@@ -54,6 +56,7 @@ data class V2PlazaCoach(
     val displayName: String,
     val initialChar: String,
     val avatarTint: AvatarTint,
+    val avatarUrl: String? = null,
 ) {
     enum class AvatarTint {
         GREEN, GOLD, SAND, MIST;
@@ -76,6 +79,14 @@ data class V2PlazaCategoryChip(
     val parentId: String = "",
 ) {
     val isTopLevel: Boolean get() = parentId.isBlank()
+}
+
+enum class V2PlazaSortOption(
+    val wireValue: String,
+    val displayText: String,
+) {
+    LATEST("latest", "最新"),
+    POPULAR("popular", "高分"),
 }
 
 data class V2PlazaCoachProfile(

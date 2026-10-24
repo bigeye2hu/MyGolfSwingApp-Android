@@ -28,7 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.outlined.Gesture
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +41,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,10 +63,10 @@ import com.mygolfswing.app.ui.golfcam.render.GolfCamCurveSpec
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 private const val MAX_CURVE_THUMBS = 60
 internal const val CURVE_CONTROL_HIT_TARGET_DP = 88f
+internal const val FLIGHT_CURVE_STEP_TOOL_PANEL_HEIGHT_DP = 126
 internal const val CURVE_TOOL_VERTICAL_SPACING_DP = 6
 internal const val CURVE_TOOL_VERTICAL_PADDING_DP = 8
 internal const val CURVE_INFO_TITLE_FONT_SP = 11
@@ -100,8 +102,8 @@ internal fun formatCurveTimeLabel(seconds: Double): String {
 }
 
 internal fun formatCurveControlPointLabel(xPct: Float, yPct: Float): String {
-    val safeX = xPct.takeIf { it.isFinite() }?.coerceIn(0f, 100f) ?: 50f
-    val safeY = yPct.takeIf { it.isFinite() }?.coerceIn(-100f, 150f) ?: 0f
+    val safeX = xPct.takeIf { it.isFinite() }?.coerceIn(-35f, 135f) ?: 50f
+    val safeY = yPct.takeIf { it.isFinite() }?.coerceIn(-80f, 140f) ?: 50f
     return String.format(Locale.US, "(%.0f%%,%.0f%%)", safeX, safeY)
 }
 
@@ -110,18 +112,13 @@ internal fun curveThumbnailFrameIndices(
     maxThumbs: Int = MAX_CURVE_THUMBS,
 ): List<Int> {
     if (totalFrames <= 0 || maxThumbs <= 0) return emptyList()
-    if (totalFrames <= maxThumbs) return (0 until totalFrames).toList()
-    val lastFrame = totalFrames - 1
-    return (0 until maxThumbs)
-        .map { index ->
-            (index * lastFrame.toDouble() / (maxThumbs - 1)).roundToInt().coerceIn(0, lastFrame)
-        }
-        .distinct()
+    val frameStep = maxOf(1, (totalFrames + maxThumbs - 1) / maxThumbs)
+    return (0 until totalFrames step frameStep).toList()
 }
 
 internal fun nearestCurveThumbnailIndex(frameIndex: Int, frameIndices: List<Int>): Int {
     if (frameIndices.isEmpty()) return 0
-    return frameIndices.indices.minBy { index -> golfCamFrameIndexDistance(frameIndices[index], frameIndex) }
+    return frameIndices.indexOfLast { it <= frameIndex }.coerceAtLeast(0)
 }
 
 internal fun golfCamFrameIndexDistance(firstFrame: Int, secondFrame: Int): Long {
@@ -198,11 +195,15 @@ fun FlightCurveStepTool(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .height(FLIGHT_CURVE_STEP_TOOL_PANEL_HEIGHT_DP.dp)
+            .testTag("golfcam-flight-curve-tool")
             .padding(vertical = CURVE_TOOL_VERTICAL_PADDING_DP.dp),
         verticalArrangement = Arrangement.spacedBy(CURVE_TOOL_VERTICAL_SPACING_DP.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -225,19 +226,11 @@ fun FlightCurveStepTool(
             ControlPointReadout(label = "P2", xPct = p2x, yPct = p2y)
         }
 
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(CURVE_TIMELINE_HEIGHT_DP.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            FrameStepButton(
-                enabled = currentFrameIndex > 0,
-                icon = Icons.Filled.ChevronLeft,
-                label = "上一帧",
-                onClick = { onPrevFrame?.invoke() },
-            )
-
             CurveThumbnailTimeline(
                 videoUri = videoUri,
                 trimStartMs = trimStartMs,
@@ -247,27 +240,41 @@ fun FlightCurveStepTool(
                 frameRate = safeFrameRate,
                 onFrameSelected = { onFrameSelected?.invoke(it) },
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .fillMaxHeight()
-                    .padding(horizontal = 6.dp),
+                    .testTag("golfcam-flight-curve-timeline"),
             )
 
-            FrameStepButton(
-                enabled = totalFrames == 0 || currentFrameIndex < totalFrames - 1,
-                icon = Icons.Filled.ChevronRight,
-                label = "下一帧",
-                onClick = { onNextFrame?.invoke() },
-            )
+            Row(modifier = Modifier.matchParentSize(), verticalAlignment = Alignment.CenterVertically) {
+                FrameStepButton(
+                    enabled = currentFrameIndex > 0,
+                    icon = Icons.Filled.ChevronLeft,
+                    label = "上一帧",
+                    leading = true,
+                    onClick = { onPrevFrame?.invoke() },
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                FrameStepButton(
+                    enabled = totalFrames == 0 || currentFrameIndex < totalFrames - 1,
+                    icon = Icons.Filled.ChevronRight,
+                    label = "下一帧",
+                    leading = false,
+                    onClick = { onNextFrame?.invoke() },
+                )
+            }
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(CURVE_BOTTOM_ROW_SPACING_DP.dp),
         ) {
-            Icon(Icons.Filled.TouchApp, null, tint = DSColors.fairway, modifier = Modifier.size(CURVE_HINT_ICON_SIZE_DP.dp))
+            Icon(Icons.Outlined.Gesture, null, tint = DSColors.fairway, modifier = Modifier.size(CURVE_HINT_ICON_SIZE_DP.dp))
             Text(
-                "滑动查看球飞行轨迹，调整曲线匹配实际弹道",
+                "滑动查看飞行轨迹，双指缩放后调整曲线",
                 color = DSColors.shadowGray,
                 fontSize = CURVE_HINT_FONT_SP.sp,
                 maxLines = 1,
@@ -307,34 +314,31 @@ private fun FrameStepButton(
     enabled: Boolean,
     icon: ImageVector,
     label: String,
+    leading: Boolean,
     onClick: () -> Unit,
 ) {
     val contentColor = if (enabled) DSColors.inkGreen else DSColors.shadowGray.copy(alpha = 0.42f)
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Box(
         modifier = Modifier
             .width(CURVE_FRAME_BUTTON_WIDTH_DP.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (enabled) Color.White else DSColors.mistGreen.copy(alpha = 0.52f))
-            .border(
-                width = 1.dp,
-                color = if (enabled) DSColors.fairway.copy(alpha = 0.16f) else Color.Transparent,
-                shape = RoundedCornerShape(8.dp),
+            .fillMaxHeight()
+            .background(
+                Brush.horizontalGradient(
+                    colors = if (leading) {
+                        listOf(Color.White, Color.White.copy(alpha = 0.72f), Color.Transparent)
+                    } else {
+                        listOf(Color.Transparent, Color.White.copy(alpha = 0.72f), Color.White)
+                    },
+                ),
             )
             .clickable(enabled = enabled) { onClick() }
-            .padding(vertical = 4.dp),
+            .testTag(if (leading) "golfcam-flight-curve-prev" else "golfcam-flight-curve-next"),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            null,
-            tint = contentColor,
-            modifier = Modifier.size(CURVE_FRAME_BUTTON_ICON_SIZE_DP.dp),
-        )
-        Text(
-            label,
-            color = contentColor.copy(alpha = if (enabled) 0.72f else 1f),
-            fontSize = CURVE_FRAME_BUTTON_LABEL_FONT_SP.sp,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(icon, null, tint = contentColor, modifier = Modifier.size(CURVE_FRAME_BUTTON_ICON_SIZE_DP.dp))
+            Text(label, color = contentColor, fontSize = CURVE_FRAME_BUTTON_LABEL_FONT_SP.sp)
+        }
     }
 }
 
@@ -361,6 +365,7 @@ private fun CurveActionChip(
                 },
             )
             .clickable(enabled = onClick != null) { onClick?.invoke() }
+            .testTag("golfcam-flight-curve-impact-frame")
             .padding(
                 horizontal = CURVE_IMPACT_CHIP_HORIZONTAL_PADDING_DP.dp,
                 vertical = CURVE_IMPACT_CHIP_VERTICAL_PADDING_DP.dp,
@@ -451,6 +456,9 @@ private fun CurveThumbnailTimeline(
     }
 
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = frameToThumbIndex(currentFrameIndex))
+    var visualThumbIndex by remember(currentFrameIndex, thumbnails.size) {
+        mutableStateOf(frameToThumbIndex(currentFrameIndex))
+    }
 
     LaunchedEffect(listState, thumbnails) {
         snapshotFlow {
@@ -462,15 +470,27 @@ private fun CurveThumbnailTimeline(
         }.distinctUntilChanged()
             .collect { thumbIndex ->
                 if (thumbIndex in thumbnails.indices && listState.isScrollInProgress) {
-                    onFrameSelected(thumbnails[thumbIndex].frameIndex)
+                    visualThumbIndex = thumbIndex
+                }
+            }
+    }
+
+    LaunchedEffect(listState, thumbnails) {
+        var hadUserScroll = false
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { isScrolling ->
+                if (isScrolling) {
+                    hadUserScroll = true
+                } else if (hadUserScroll) {
+                    hadUserScroll = false
+                    thumbnails.getOrNull(visualThumbIndex)?.let { onFrameSelected(it.frameIndex) }
                 }
             }
     }
 
     BoxWithConstraints(
-        modifier = modifier
-            .clip(RoundedCornerShape(5.dp))
-            .background(Color(0xFF2F2F2F)),
+        modifier = modifier,
     ) {
         val cellWidth = CURVE_TIMELINE_CELL_WIDTH_DP.dp
         val sidePad = ((maxWidth - cellWidth) / 2).coerceAtLeast(0.dp)
@@ -491,7 +511,11 @@ private fun CurveThumbnailTimeline(
             modifier = Modifier.matchParentSize(),
         ) {
             itemsIndexed(thumbnails) { thumbIndex, thumb ->
-                val selected = thumbIndex == frameToThumbIndex(currentFrameIndex)
+                val selected = thumbIndex == if (listState.isScrollInProgress) {
+                    visualThumbIndex
+                } else {
+                    frameToThumbIndex(currentFrameIndex)
+                }
                 Box(
                     modifier = Modifier
                         .width(cellWidth)

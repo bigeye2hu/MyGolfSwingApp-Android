@@ -1,18 +1,30 @@
 package com.mygolfswing.app.data.video
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaScannerConnection
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.media.MediaMuxer
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import com.mygolfswing.app.data.ServiceLocator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.io.File
@@ -37,6 +49,46 @@ internal fun deleteFileCountingFreedBytes(file: File?): Long {
     if (file == null || !file.exists() || !file.isFile) return 0L
     val bytes = file.length()
     return if (runCatching { file.delete() }.getOrDefault(false)) bytes else 0L
+}
+
+internal fun workspaceAnalysisCacheDirectory(filesDir: File, userId: String): File =
+    File(filesDir, "users/$userId/workspace_analysis")
+
+internal fun workspacePlaybackCacheDirectory(filesDir: File, userId: String): File =
+    File(filesDir, "users/$userId/workspace_playback")
+
+internal const val WORKSPACE_ANALYSIS_CACHE_MAX_BYTES: Long = 2L * 1024L * 1024L * 1024L
+internal const val WORKSPACE_ANALYSIS_CACHE_MAX_AGE_MILLIS: Long = 7L * 24L * 60L * 60L * 1_000L
+
+internal data class WorkspaceAnalysisCacheSnapshot(
+    val bytes: Long,
+    val fileCount: Int,
+)
+
+internal fun cleanupWorkspaceAnalysisCacheDirectory(
+    root: File,
+    nowMillis: Long = System.currentTimeMillis(),
+    maxAgeMillis: Long = WORKSPACE_ANALYSIS_CACHE_MAX_AGE_MILLIS,
+    maxBytes: Long = WORKSPACE_ANALYSIS_CACHE_MAX_BYTES,
+): WorkspaceAnalysisCacheSnapshot {
+    if (!root.exists()) return WorkspaceAnalysisCacheSnapshot(bytes = 0L, fileCount = 0)
+    val currentFiles = root.walkTopDown().filter { it.isFile }.toList()
+    currentFiles.filter { nowMillis - it.lastModified() > maxAgeMillis }.forEach(File::delete)
+    val retained = root.walkTopDown().filter { it.isFile }.sortedBy(File::lastModified).toMutableList()
+    var total = retained.sumOf(File::length)
+    while (total > maxBytes && retained.isNotEmpty()) {
+        val oldest = retained.removeAt(0)
+        val size = oldest.length()
+        if (oldest.delete()) total = (total - size).coerceAtLeast(0L)
+    }
+    root.walkBottomUp().filter { it.isDirectory && it != root }.forEach { directory ->
+        if (directory.listFiles().isNullOrEmpty()) directory.delete()
+    }
+    val files = root.walkTopDown().filter { it.isFile }.toList()
+    return WorkspaceAnalysisCacheSnapshot(
+        bytes = files.sumOf(File::length),
+        fileCount = files.size,
+    )
 }
 
 internal fun normalizedRemoteVideoDownloadUrl(url: String): String? {
@@ -116,6 +168,121 @@ internal fun videoFileName(prefix: String, timestamp: String, sourceName: String
     return "${prefix}_${timestamp}.${ext}"
 }
 
+internal data class GalleryVideoSpec(
+    val displayName: String,
+    val mimeType: String,
+)
+
+internal data class GalleryVideoPublishResult(
+    val saved: Boolean,
+    val message: String,
+    val uri: Uri? = null,
+)
+
+internal fun galleryVideoSpec(source: File, displayBase: String, timestamp: Long): GalleryVideoSpec {
+    val extension = supportedVideoExtensionFromName(source.name) ?: "mp4"
+    val mimeType = when (extension) {
+        "mov" -> "video/quicktime"
+        "m4v" -> "video/x-m4v"
+        else -> "video/mp4"
+    }
+    val safeBase = displayBase
+        .trim()
+        .map { char -> if (char.isLetterOrDigit() || char == '-' || char == '_') char else '_' }
+        .joinToString("")
+        .replace(Regex("_+"), "_")
+        .trim('_')
+        .take(48)
+        .ifBlank { "video" }
+    return GalleryVideoSpec(
+        displayName = "Huibei_${safeBase}_$timestamp.$extension",
+        mimeType = mimeType,
+    )
+}
+
+/** Publishes a downloaded private video to the system gallery, matching iOS plaza-download behavior. */
+internal suspend fun publishDownloadedVideoToGallery(
+    context: Context,
+    source: File,
+    displayBase: String,
+    timestamp: Long = System.currentTimeMillis(),
+): GalleryVideoPublishResult = withContext(Dispatchers.IO) {
+    if (!source.isFile || source.length() <= 0L) {
+        return@withContext GalleryVideoPublishResult(false, "下载的视频文件不可用，请重新下载")
+    }
+    val spec = galleryVideoSpec(source, displayBase, timestamp)
+
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        val root = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: return@withContext GalleryVideoPublishResult(false, "系统视频目录暂时不可用，请稍后重试")
+        val target = File(File(root, "Huibei").apply { mkdirs() }, spec.displayName)
+        return@withContext try {
+            source.inputStream().buffered().use { input ->
+                target.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            if (!target.isFile || target.length() <= 0L) {
+                target.delete()
+                GalleryVideoPublishResult(false, "视频写入相册失败，请检查存储空间后重试")
+            } else {
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(target.absolutePath),
+                    arrayOf(spec.mimeType),
+                    null,
+                )
+                GalleryVideoPublishResult(true, "已保存到系统相册")
+            }
+        } catch (cancelled: CancellationException) {
+            target.delete()
+            throw cancelled
+        } catch (_: Throwable) {
+            target.delete()
+            GalleryVideoPublishResult(false, "保存到相册失败，请检查存储空间后重试")
+        }
+    }
+
+    val resolver = context.contentResolver
+    val values = ContentValues().apply {
+        put(MediaStore.Video.Media.DISPLAY_NAME, spec.displayName)
+        put(MediaStore.Video.Media.MIME_TYPE, spec.mimeType)
+        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/挥呗")
+        put(MediaStore.Video.Media.IS_PENDING, 1)
+    }
+    var pendingUri: Uri? = null
+    try {
+        val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+            ?: return@withContext GalleryVideoPublishResult(false, "系统相册暂时不可写，请检查存储空间后重试")
+        pendingUri = uri
+        val wrote = resolver.openOutputStream(uri)?.use { output ->
+            source.inputStream().buffered().use { input -> input.copyTo(output) }
+        } != null
+        if (!wrote) {
+            resolver.delete(uri, null, null)
+            pendingUri = null
+            return@withContext GalleryVideoPublishResult(false, "视频写入相册失败，请稍后重试")
+        }
+        val published = resolver.update(
+            uri,
+            ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) },
+            null,
+            null,
+        ) > 0
+        if (!published) {
+            resolver.delete(uri, null, null)
+            pendingUri = null
+            return@withContext GalleryVideoPublishResult(false, "相册保存未完成，请稍后重试")
+        }
+        pendingUri = null
+        GalleryVideoPublishResult(true, "已保存到系统相册", uri)
+    } catch (cancelled: CancellationException) {
+        pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
+        throw cancelled
+    } catch (_: Throwable) {
+        pendingUri?.let { runCatching { resolver.delete(it, null, null) } }
+        GalleryVideoPublishResult(false, "保存到相册失败，请检查存储空间后重试")
+    }
+}
+
 internal inline fun <T> runVideoFileStoreCatching(block: () -> T): Result<T> = try {
     Result.success(block())
 } catch (e: CancellationException) {
@@ -186,6 +353,8 @@ object V2VideoFileStore {
 
     private const val VIDEO_DIR = "videos"
     private const val THUMB_DIR = "thumbs"
+    private val _workspaceAnalysisDownloadCount = MutableStateFlow(0)
+    val workspaceAnalysisDownloadCount: StateFlow<Int> = _workspaceAnalysisDownloadCount.asStateFlow()
 
     data class ImportResult(
         val absolutePath: String,
@@ -276,8 +445,14 @@ object V2VideoFileStore {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val target = File(videoDir(context, userId), videoFileName("download", ts, cleaned))
         val request = Request.Builder().url(cleaned).get().build()
-        val ok = runVideoFileStoreCatching {
-            ServiceLocator.net.httpClient.newCall(request).execute().use { response ->
+        val call = ServiceLocator.net.httpClient.newCall(request)
+        val coroutineContext = currentCoroutineContext()
+        val cancellationHandle = coroutineContext[Job]?.invokeOnCompletion { cause ->
+            if (cause is CancellationException) call.cancel()
+        }
+        val ok = try {
+            runVideoFileStoreCatching {
+                call.execute().use { response ->
                 if (!response.isSuccessful) return@runVideoFileStoreCatching false
                 val body = response.body ?: return@runVideoFileStoreCatching false
                 val total = body.contentLength()
@@ -287,6 +462,7 @@ object V2VideoFileStore {
                     FileOutputStream(target).use { out ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {
+                            coroutineContext.ensureActive()
                             val read = input.read(buffer)
                             if (read == -1) break
                             out.write(buffer, 0, read)
@@ -299,7 +475,10 @@ object V2VideoFileStore {
                 }
                 true
             }
-        }.getOrDefault(false)
+            }.getOrDefault(false)
+        } finally {
+            cancellationHandle?.dispose()
+        }
         if (!ok || !target.exists() || target.length() == 0L) {
             deleteFileCountingFreedBytes(target)
             return@withContext null
@@ -313,6 +492,69 @@ object V2VideoFileStore {
             widthPx = w,
             heightPx = h,
             sizeBytes = target.length(),
+        )
+    }
+
+    /**
+     * Downloads a private coach/student workspace video into a separate, logout-purged cache.
+     * Personal memo videos continue to live in `videos/` and are intentionally retained.
+     */
+    suspend fun downloadWorkspaceAnalysisVideo(
+        context: Context,
+        url: String,
+        onProgress: (Double) -> Unit = {},
+    ): ImportResult? {
+        val userId = ServiceLocator.session.current().userId ?: return null
+        _workspaceAnalysisDownloadCount.update { it + 1 }
+        return try {
+            val imported = downloadRemoteVideo(context, url, onProgress) ?: return null
+            withContext(Dispatchers.IO) {
+                val cacheRoot = workspaceAnalysisRoot(context, userId).apply { mkdirs() }
+                val sourceVideo = File(imported.absolutePath)
+                val cachedVideo = File(cacheRoot, sourceVideo.name)
+                val sourceThumb = imported.thumbnailPath?.let(::File)
+                val cachedThumb = sourceThumb?.let { File(cacheRoot, it.name) }
+                try {
+                    sourceVideo.moveReplacing(cachedVideo)
+                    if (sourceThumb != null && cachedThumb != null) sourceThumb.moveReplacing(cachedThumb)
+                    cleanupWorkspaceAnalysisCacheDirectory(cacheRoot)
+                    imported.copy(
+                        absolutePath = cachedVideo.absolutePath,
+                        thumbnailPath = cachedThumb?.absolutePath,
+                    )
+                } catch (throwable: Throwable) {
+                    cachedVideo.delete()
+                    cachedThumb?.delete()
+                    sourceVideo.delete()
+                    sourceThumb?.delete()
+                    null
+                }
+            }
+        } finally {
+            _workspaceAnalysisDownloadCount.update { (it - 1).coerceAtLeast(0) }
+        }
+    }
+
+    /** Clears only protected workspace-analysis media, preserving personal videos and notes. */
+    suspend fun clearWorkspaceAnalysisCache(context: Context, userId: String): Long = withContext(Dispatchers.IO) {
+        WorkspacePlaybackCache.release()
+        deleteRecursivelyCountingFreedBytes(
+            workspaceAnalysisRoot(context, userId),
+            workspacePlaybackCacheDirectory(context.filesDir, userId),
+        )
+    }
+
+    /** Applies the same seven-day / 2GB policy as iOS and returns the current real cache usage. */
+    internal suspend fun cleanupWorkspaceAnalysisCache(
+        context: Context,
+        userId: String,
+    ): WorkspaceAnalysisCacheSnapshot = withContext(Dispatchers.IO) {
+        val analysis = cleanupWorkspaceAnalysisCacheDirectory(workspaceAnalysisRoot(context, userId))
+        val playbackRoot = workspacePlaybackCacheDirectory(context.filesDir, userId)
+        val playbackFiles = if (playbackRoot.exists()) playbackRoot.walkTopDown().filter { it.isFile }.toList() else emptyList()
+        WorkspaceAnalysisCacheSnapshot(
+            bytes = analysis.bytes + playbackFiles.sumOf { it.length() },
+            fileCount = analysis.fileCount + playbackFiles.size,
         )
     }
 
@@ -415,6 +657,18 @@ object V2VideoFileStore {
 
     private fun userRootPath(context: Context, userId: String): File =
         File(context.filesDir, "users/$userId")
+
+    private fun workspaceAnalysisRoot(context: Context, userId: String): File =
+        workspaceAnalysisCacheDirectory(context.filesDir, userId)
+
+    private fun File.moveReplacing(target: File) {
+        target.parentFile?.mkdirs()
+        if (target.exists()) target.delete()
+        if (!renameTo(target)) {
+            copyTo(target, overwrite = true)
+            if (!delete()) throw IllegalStateException("Unable to remove source after cache move")
+        }
+    }
 
     private fun sourceVideoSizeBytes(context: Context, uri: Uri): Long? =
         runCatching {

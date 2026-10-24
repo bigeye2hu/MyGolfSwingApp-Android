@@ -11,12 +11,15 @@ import android.os.Build
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.annotation.OptIn
+import androidx.compose.animation.rememberSplineBasedDecay
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.Image
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,12 +29,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,9 +52,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forward5
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -59,11 +64,10 @@ import androidx.compose.material.icons.filled.Replay5
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,15 +79,23 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -92,7 +104,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
-import androidx.core.graphics.scale
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -101,6 +112,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.mygolfswing.app.data.ServiceLocator
 import com.mygolfswing.app.data.model.V2Memo
 import com.mygolfswing.app.data.model.V2MemoAccent
 import com.mygolfswing.app.data.model.V2MemoThumbnailKind
@@ -108,15 +120,23 @@ import com.mygolfswing.app.data.model.V2Topic
 import com.mygolfswing.app.data.memo.V2MemoBridge
 import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.video.V2OnlineVideoMetadataFetcher
+import com.mygolfswing.app.ui.common.V2BackHandler
 import com.mygolfswing.app.ui.common.V2DrawingOverlay
+import com.mygolfswing.app.ui.common.V2DrawingQuickActions
 import com.mygolfswing.app.ui.common.V2DrawingState
 import com.mygolfswing.app.ui.common.V2DrawingToolsPanel
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
+import com.mygolfswing.app.ui.common.V2RoomBackground
 import com.mygolfswing.app.ui.common.v2NavigationBarPadding
 import com.mygolfswing.app.ui.common.v2StatusBarPadding
 import com.mygolfswing.app.ui.designsystem.DSColors
+import com.mygolfswing.app.ui.player.VideoPlayerChrome
+import com.mygolfswing.app.ui.player.ReviewFrameScrubber
+import com.mygolfswing.app.ui.player.SmoothFrameSeeker
+import com.mygolfswing.app.ui.interaction.V2ShareMemoToSpacesScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -127,6 +147,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import java.util.UUID
 import kotlin.math.abs
+import kotlin.math.ceil
 
 /**
  * 视频 Memo 播放器（对齐 iOS `V2VideoMemoPlayerView`）。
@@ -137,27 +158,28 @@ fun V2VideoMemoPlayerScreen(
     memoId: UUID,
     onBack: () -> Unit = {},
     onEdit: (UUID) -> Unit = {},
-    onEditSource: (UUID) -> Unit = onEdit,
     onMemoCreated: (UUID) -> Unit = {},
+    deleteMemo: suspend (UUID) -> Unit = { V2MemoStore.deleteAndWait(it) },
 ) {
+    V2BackHandler(onBack = onBack)
     val memos by V2MemoStore.allMemos.collectAsState()
     val memo = memos.firstOrNull { it.id == memoId }
     val context = LocalContext.current
-    var isPlaying by remember { mutableStateOf(true) }
+    var shouldPlay by rememberSaveable(memoId) { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(shouldPlay) }
     var showPlayPauseIcon by remember { mutableStateOf(false) }
-    var showToolsPanel by remember { mutableStateOf(false) }
-    var showMoreTools by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showToolsPanel by rememberSaveable(memoId) { mutableStateOf(false) }
+    var showMoreTools by rememberSaveable(memoId) { mutableStateOf(false) }
+    var showDeleteConfirm by rememberSaveable(memoId) { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var deleteError by remember { mutableStateOf<String?>(null) }
     var playerNotice by remember { mutableStateOf<String?>(null) }
-    var showComparisonPicker by remember { mutableStateOf(false) }
-    var comparisonMemo by remember { mutableStateOf<V2Memo?>(null) }
+    var showComparison by rememberSaveable(memoId) { mutableStateOf(false) }
+    var showShareToSpaces by rememberSaveable(memoId) { mutableStateOf(false) }
     var playbackError by remember { mutableStateOf(false) }
-    var currentTime by remember { mutableFloatStateOf(0f) }
+    var currentTime by rememberSaveable(memoId) { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(0f) }
-    var currentRateIndex by remember { mutableIntStateOf(0) }
-    var selectedScrubFeel by remember { mutableStateOf(TimelineScrubFeel.Precise) }
+    var currentRateIndex by rememberSaveable(memoId) { mutableIntStateOf(0) }
     val playbackRates = remember { listOf(1f, 0.5f, 0.25f) }
     val drawingState = remember { V2DrawingState() }
     var wasPlayingBeforeTimelineScrub by remember { mutableStateOf(false) }
@@ -170,41 +192,47 @@ fun V2VideoMemoPlayerScreen(
 
     val comparisonCandidates = remember(memos, memo.id) {
         memos
-            .filter { it.id != memo.id && it.hasVideo && resolvePlaybackUrl(it.videoUrl) != null }
+            .filter { it.id != memo.id && it.hasVideo }
             .sortedByDescending { it.createdAt }
     }
-    comparisonMemo?.let { selected ->
-        VideoMemoComparisonScreen(
+    if (showComparison) {
+        VideoMemoComparisonEntryScreen(
             primaryMemo = memo,
-            secondaryMemo = selected,
             candidates = comparisonCandidates,
-            onClose = { comparisonMemo = null },
-            onReplaceComparison = { replacement -> comparisonMemo = replacement },
-            onMemoCreated = onMemoCreated,
+            onClose = { showComparison = false },
         )
         return
     }
 
     val playbackUrl = remember(memo.videoUrl) { resolvePlaybackUrl(memo.videoUrl) }
     var isLoading by remember(playbackUrl) { mutableStateOf(true) }
-    var timelineFrames by remember(playbackUrl) { mutableStateOf(emptyList<VideoMemoTimelineFrame>()) }
+    var playbackStarted by remember(playbackUrl) { mutableStateOf(false) }
     if (playbackUrl == null) {
         VideoPlaybackUnavailableOverlay(
             state = V2PlaybackState.UnavailableNoSource,
             onBack = onBack,
             onRetry = null,
-            onEditSource = { onEditSource(memo.id) },
         )
+        return
+    }
+
+    if (showShareToSpaces) {
+        V2ShareMemoToSpacesScreen(memo = memo, onBack = { showShareToSpaces = false })
         return
     }
 
     val player = remember(playbackUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(playbackUrl))
-            playWhenReady = true
+            playWhenReady = shouldPlay
+            playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
+            if (currentTime > 0f) {
+                seekTo((currentTime * 1000).toLong())
+            }
             prepare()
         }
     }
+    val frameSeeker = remember(player) { SmoothFrameSeeker(player) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
@@ -217,10 +245,11 @@ fun V2VideoMemoPlayerScreen(
                 when (playbackState) {
                     Player.STATE_IDLE,
                     Player.STATE_BUFFERING -> {
-                        isLoading = true
+                        if (!playbackStarted) isLoading = true
                     }
 
                     Player.STATE_READY -> {
+                        playbackStarted = true
                         isLoading = false
                     }
 
@@ -230,6 +259,7 @@ fun V2VideoMemoPlayerScreen(
                         player.seekTo(0)
                         player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
                         currentTime = 0f
+                        shouldPlay = false
                         isPlaying = false
                         showPlayPauseIcon = true
                     }
@@ -238,24 +268,20 @@ fun V2VideoMemoPlayerScreen(
         }
         player.addListener(listener)
         onDispose {
+            frameSeeker.dispose()
             player.removeListener(listener)
             player.release()
         }
     }
     LaunchedEffect(player) {
         while (true) {
-            currentTime = (player.currentPosition / 1000f).coerceAtLeast(0f)
+            if (!frameSeeker.isScrubbing) {
+                currentTime = (player.currentPosition / 1000f).coerceAtLeast(0f)
+                isPlaying = player.isPlaying
+            }
             val durMs = player.duration
             if (durMs > 0) duration = durMs / 1000f
-            isPlaying = player.isPlaying
             delay(100)
-        }
-    }
-    LaunchedEffect(playbackUrl, duration) {
-        timelineFrames = if (duration > 0f && playbackUrl.startsWith("file://")) {
-            loadVideoMemoTimelineFrames(context, playbackUrl, duration)
-        } else {
-            emptyList()
         }
     }
     LaunchedEffect(playbackError) {
@@ -271,10 +297,12 @@ fun V2VideoMemoPlayerScreen(
     fun togglePlayback() {
         if (player.isPlaying) {
             player.pause()
+            shouldPlay = false
             isPlaying = false
         } else {
             player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
             player.play()
+            shouldPlay = true
             isPlaying = true
         }
         showCenterIcon()
@@ -331,7 +359,7 @@ fun V2VideoMemoPlayerScreen(
             },
         )
 
-        if (isLoading && !playbackError) {
+        if (isLoading && !playbackError && !frameSeeker.isScrubbing) {
             VideoPlaybackLoadingOverlay()
         }
 
@@ -341,37 +369,41 @@ fun V2VideoMemoPlayerScreen(
                 onBack = onBack,
                 onRetry = {
                     playbackError = false
+                    playbackStarted = false
                     isLoading = true
                     player.setMediaItem(MediaItem.fromUri(playbackUrl))
                     player.prepare()
                     player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
                     player.play()
+                    shouldPlay = true
                     isPlaying = true
-                },
-                onEditSource = {
-                    player.pause()
-                    isPlaying = false
-                    onEditSource(memo.id)
                 },
             )
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(enabled = !showToolsPanel) {
-                    if (showMoreTools) {
-                        showMoreTools = false
-                    } else {
-                        togglePlayback()
-                    }
-                },
+        VideoMemoCentralTapArea(
+            enabled = !isLoading && !playbackError && !showToolsPanel,
+            onTap = {
+                if (showMoreTools) {
+                    showMoreTools = false
+                } else {
+                    togglePlayback()
+                }
+            },
         )
 
-        if (showToolsPanel) {
-            V2DrawingOverlay(
+        V2DrawingOverlay(
+            state = drawingState,
+            modifier = Modifier.fillMaxSize(),
+            interactionEnabled = showToolsPanel,
+        )
+        if (drawingState.strokes.isNotEmpty()) {
+            V2DrawingQuickActions(
                 state = drawingState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .v2StatusBarPadding()
+                    .padding(top = 96.dp, start = 14.dp),
             )
         }
 
@@ -386,10 +418,11 @@ fun V2VideoMemoPlayerScreen(
             V2DrawingToolsPanel(
                 state = drawingState,
                 onClose = { showToolsPanel = false },
+                showSelectTool = false,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .v2NavigationBarPadding()
-                    .padding(end = 12.dp, bottom = 56.dp),
+                    .align(Alignment.TopEnd)
+                    .v2StatusBarPadding()
+                    .padding(top = 62.dp, end = 12.dp),
             )
         }
 
@@ -399,20 +432,23 @@ fun V2VideoMemoPlayerScreen(
             sourceLabel = memo.trainingMethod?.takeIf { it.isNotBlank() } ?: "视频备忘录",
             currentTime = currentTime,
             duration = duration,
-            timelineFrames = timelineFrames,
-            scrubFeel = selectedScrubFeel,
             isPlaying = isPlaying,
             speedText = playbackRates[currentRateIndex].speedText(),
             isSlow = currentRateIndex != 0,
             showMoreTools = showMoreTools,
             controlsLocked = showToolsPanel,
-            onScrubFeelChange = { selectedScrubFeel = it },
             onSeek = { seconds ->
-                player.seekTo((seconds * 1000).toLong())
+                frameSeeker.moveTo((seconds * 1000f).toLong())
                 currentTime = seconds
             },
-            onTimelineScrubStart = { startTimelineScrub() },
-            onTimelineScrubEnd = { finishTimelineScrub() },
+            onTimelineScrubStart = {
+                startTimelineScrub()
+                frameSeeker.begin(33_000L)
+            },
+            onTimelineScrubEnd = {
+                frameSeeker.end()
+                finishTimelineScrub()
+            },
             onStepBackward = { stepPlayback(-5_000L) },
             onStepForward = { stepPlayback(5_000L) },
             onTogglePlay = { togglePlayback() },
@@ -420,12 +456,23 @@ fun V2VideoMemoPlayerScreen(
                 currentRateIndex = (currentRateIndex + 1) % playbackRates.size
                 player.playbackParameters = PlaybackParameters(playbackRates[currentRateIndex])
                 if (player.isPlaying) player.play()
+                val rateText = playbackRates[currentRateIndex].speedText()
+                showPlayerNotice(if (currentRateIndex == 0) "已恢复正常速度 1x" else "慢放已开启 · $rateText")
             },
             onToggleMore = { showMoreTools = !showMoreTools },
             onShare = {
                 showMoreTools = false
                 if (!shareVideoMemoInfo(context, memo, playbackUrl)) {
                     showPlayerNotice("分享面板暂时无法打开，请稍后重试")
+                }
+            },
+            onShareToSpaces = {
+                showMoreTools = false
+                player.pause()
+                isPlaying = false
+                scope.launch {
+                    if (ServiceLocator.session.current().isLoggedIn) showShareToSpaces = true
+                    else showPlayerNotice("登录后即可分享到挥呗空间")
                 }
             },
             onExport = {
@@ -446,7 +493,7 @@ fun V2VideoMemoPlayerScreen(
                 showMoreTools = false
                 player.pause()
                 isPlaying = false
-                showComparisonPicker = true
+                showComparison = true
             },
             onDelete = {
                 showMoreTools = false
@@ -519,7 +566,7 @@ fun V2VideoMemoPlayerScreen(
                     deleting = true
                     deleteError = null
                     try {
-                        V2MemoStore.deleteAndWait(memo.id)
+                        deleteMemo(memo.id)
                         showDeleteConfirm = false
                         onBack()
                     } catch (e: CancellationException) {
@@ -536,39 +583,37 @@ fun V2VideoMemoPlayerScreen(
     }
 
     deleteError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { deleteError = null },
-            title = { Text("删除失败") },
-            text = { Text(message) },
-            confirmButton = {
-                TextButton(onClick = { deleteError = null }) {
-                    Text("好", color = DSColors.fairway)
-                }
-            },
+        VideoMemoDeleteFailureDialog(
+            message = message,
+            onDismiss = { deleteError = null },
         )
     }
 
-    if (showComparisonPicker) {
-        VideoComparisonPickerDialog(
-            candidates = comparisonCandidates,
-            onDismiss = { showComparisonPicker = false },
-            onSelect = { selected ->
-                showComparisonPicker = false
-                comparisonMemo = selected
-            },
+}
+
+@Composable
+internal fun VideoMemoCentralTapArea(
+    enabled: Boolean,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val centralHeight = (maxHeight - 300.dp).coerceAtLeast(1.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(centralHeight)
+                .offset(y = 86.dp)
+                .testTag("video-memo-central-tap-area")
+                .then(if (enabled) Modifier.clickable(onClick = onTap) else Modifier),
         )
     }
 }
 
-private enum class V2PlaybackState {
+internal enum class V2PlaybackState {
     UnavailableNoSource,
     UnavailablePlaybackError,
 }
-
-private data class VideoMemoTimelineFrame(
-    val timeSec: Float,
-    val bitmap: Bitmap?,
-)
 
 private enum class TimelineScrubFeel(
     val title: String,
@@ -577,6 +622,830 @@ private enum class TimelineScrubFeel(
     Balanced("稳", 180f),
     Precise("细", 280f),
     Frame("帧", 420f),
+}
+
+private val TimelineScrubFeelSaver = Saver<TimelineScrubFeel, String>(
+    save = { it.name },
+    restore = { saved -> TimelineScrubFeel.entries.firstOrNull { it.name == saved } ?: TimelineScrubFeel.Precise },
+)
+
+private const val VIDEO_MEMO_FLING_TARGET_FACTOR = 0.22f
+private const val VIDEO_MEMO_MIN_FLING_VELOCITY_PX = 35f
+
+internal fun videoMemoScrubTimeAfterDelta(
+    currentTime: Float,
+    contentDeltaPx: Float,
+    pixelsPerSecondPx: Float,
+    duration: Float,
+): Float {
+    val safeDuration = duration.takeIf { it.isFinite() && it > 0f } ?: return 0f
+    val safeCurrent = currentTime.takeIf { it.isFinite() }?.coerceIn(0f, safeDuration) ?: return 0f
+    if (!contentDeltaPx.isFinite() || !pixelsPerSecondPx.isFinite() || pixelsPerSecondPx <= 0f) {
+        return safeCurrent
+    }
+    return (safeCurrent + contentDeltaPx / pixelsPerSecondPx).coerceIn(0f, safeDuration)
+}
+
+internal fun videoMemoTimelineBarHeightRatio(index: Int): Float = when (Math.floorMod(index, 4)) {
+    0 -> 1f
+    1, 3 -> 14f / 34f
+    else -> 24f / 34f
+}
+
+private fun positiveTimelineRemainder(value: Float, modulus: Float): Float {
+    if (!value.isFinite() || !modulus.isFinite() || modulus <= 0f) return 0f
+    return ((value % modulus) + modulus) % modulus
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+internal fun VideoMemoComparisonEntryScreen(
+    primaryMemo: V2Memo,
+    candidates: List<V2Memo>,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    val primaryUrl = remember(primaryMemo.videoUrl) { resolvePlaybackUrl(primaryMemo.videoUrl) }
+    var selectedMemoId by rememberSaveable(primaryMemo.id) { mutableStateOf<String?>(null) }
+    val selectedMemo = remember(candidates, selectedMemoId) {
+        candidates.firstOrNull { it.id.toString() == selectedMemoId }
+    }
+    var showPicker by rememberSaveable(primaryMemo.id) { mutableStateOf(false) }
+    var isPlaying by rememberSaveable(primaryMemo.id) { mutableStateOf(false) }
+    var isMuted by rememberSaveable(primaryMemo.id) { mutableStateOf(false) }
+    var showDrawingTools by rememberSaveable(primaryMemo.id) { mutableStateOf(false) }
+    var currentTime by rememberSaveable(primaryMemo.id) { mutableFloatStateOf(0f) }
+    var duration by remember { mutableFloatStateOf(0f) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    val drawingState = remember { V2DrawingState() }
+
+    selectedMemo?.let { selected ->
+        IosVideoMemoComparisonScreen(
+            primaryMemo = primaryMemo,
+            secondaryMemo = selected,
+            onClose = onClose,
+            onReselectComparison = {
+                selectedMemoId = null
+                showPicker = true
+            },
+        )
+        return
+    }
+
+    if (primaryUrl == null) {
+        VideoPlaybackUnavailableOverlay(
+            state = V2PlaybackState.UnavailableNoSource,
+            onBack = onClose,
+            onRetry = null,
+        )
+        return
+    }
+
+    val player = remember(primaryUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(primaryUrl))
+            playWhenReady = isPlaying
+            volume = if (isMuted) 0f else 1f
+            if (currentTime > 0f) seekTo((currentTime * 1000).toLong())
+            prepare()
+        }
+    }
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+    LaunchedEffect(isPlaying, player) {
+        if (isPlaying) player.play() else player.pause()
+    }
+    LaunchedEffect(isMuted, player) {
+        player.volume = if (isMuted) 0f else 1f
+    }
+    LaunchedEffect(player) {
+        while (true) {
+            currentTime = (player.currentPosition / 1000f).coerceAtLeast(0f)
+            player.duration.takeIf { it > 0 }?.let { duration = it / 1000f }
+            delay(120)
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Column(Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        useController = false
+                        this.player = player
+                    }
+                },
+                update = { it.player = player },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clickable { isPlaying = !isPlaying }
+                    .testTag("video-comparison-primary"),
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(1.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(
+                        width = 3.dp,
+                        brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(Color(0xFFAF52DE), Color(0xFF0A84FF)),
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    .clickable { showPicker = true }
+                    .testTag("video-comparison-empty-selection"),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.VideoLibrary,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Text(
+                        "点击选择对比视频",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+
+            ComparisonWaitingControlBar(
+                currentTime = currentTime,
+                duration = duration,
+                onSeek = { seconds ->
+                    player.seekTo((seconds * 1000).toLong())
+                    currentTime = seconds
+                },
+            )
+        }
+
+        ComparisonOverlayButton(
+            icon = Icons.Filled.Close,
+            contentDescription = "返回",
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .v2StatusBarPadding()
+                .padding(start = 16.dp, top = 16.dp),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .v2StatusBarPadding()
+                .padding(end = 16.dp, top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ComparisonOverlayButton(
+                icon = Icons.Filled.Share,
+                contentDescription = "分享对比视频",
+                onClick = {
+                    player.pause()
+                    isPlaying = false
+                    if (!shareVideoMemoInfo(context, primaryMemo, primaryUrl)) {
+                        notice = "无法打开分享面板"
+                    }
+                },
+            )
+            ComparisonOverlayButton(
+                icon = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (isMuted) "打开声音" else "静音",
+                onClick = { isMuted = !isMuted },
+            )
+            ComparisonOverlayButton(
+                icon = Icons.Filled.Edit,
+                contentDescription = if (showDrawingTools) "关闭绘图工具" else "打开绘图工具",
+                onClick = { showDrawingTools = !showDrawingTools },
+            )
+        }
+
+        if (showDrawingTools) {
+            V2DrawingOverlay(
+                state = drawingState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 100.dp, end = 92.dp, bottom = 180.dp),
+            )
+            V2DrawingToolsPanel(
+                state = drawingState,
+                onClose = { showDrawingTools = false },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 16.dp, top = 150.dp),
+            )
+        }
+
+        notice?.let { message ->
+            Text(
+                message,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .v2StatusBarPadding()
+                    .padding(top = 56.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.76f))
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            )
+        }
+    }
+
+    if (showPicker) {
+        VideoComparisonPickerDialog(
+            candidates = candidates,
+            onDismiss = { showPicker = false },
+            onSelect = { selected ->
+                showPicker = false
+                selectedMemoId = selected.id.toString()
+            },
+        )
+    }
+}
+
+@Composable
+private fun ComparisonWaitingControlBar(
+    currentTime: Float,
+    duration: Float,
+    onSeek: (Float) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .v2NavigationBarPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                formatComparisonTime(currentTime),
+                color = Color.White,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.horizontalGradient(
+                            listOf(Color(0xFFAF52DE), Color(0xFF0A84FF)),
+                        ),
+                    )
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
+            ScrubFeelProgressBar(
+                currentTime = currentTime,
+                duration = duration.coerceAtLeast(1f),
+                scrubFeel = TimelineScrubFeel.Precise,
+                accent = Color(0xFF0A84FF),
+                onSeek = onSeek,
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("同步", color = Color.White.copy(alpha = 0.6f), fontSize = 10.sp)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF6B5CCF).copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.CompareArrows, null, tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.size(14.dp))
+            }
+        }
+        Text(
+            "先选择对比视频",
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f).padding(bottom = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun ComparisonOverlayButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.3f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription, tint = Color.White, modifier = Modifier.size(16.dp))
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun IosVideoMemoComparisonScreen(
+    primaryMemo: V2Memo,
+    secondaryMemo: V2Memo,
+    onClose: () -> Unit,
+    onReselectComparison: () -> Unit,
+) {
+    val context = LocalContext.current
+    val primaryUrl = remember(primaryMemo.videoUrl) { resolvePlaybackUrl(primaryMemo.videoUrl) }
+    val secondaryUrl = remember(secondaryMemo.videoUrl) { resolvePlaybackUrl(secondaryMemo.videoUrl) }
+
+    if (primaryUrl == null) {
+        VideoPlaybackUnavailableOverlay(
+            state = V2PlaybackState.UnavailableNoSource,
+            onBack = onClose,
+            onRetry = null,
+        )
+        return
+    }
+
+    var topIsPlaying by rememberSaveable(primaryMemo.id, secondaryMemo.id) { mutableStateOf(false) }
+    var primaryTime by rememberSaveable(primaryMemo.id, secondaryMemo.id) { mutableFloatStateOf(0f) }
+    var secondaryTime by rememberSaveable(primaryMemo.id, secondaryMemo.id) { mutableFloatStateOf(0f) }
+    var primaryDuration by remember(primaryMemo.id) {
+        mutableFloatStateOf(primaryMemo.durationSec?.toFloat()?.coerceAtLeast(0f) ?: 0f)
+    }
+    var secondaryDuration by remember(secondaryMemo.id) {
+        mutableFloatStateOf(secondaryMemo.durationSec?.toFloat()?.coerceAtLeast(0f) ?: 0f)
+    }
+    var syncSeek by rememberSaveable(primaryMemo.id, secondaryMemo.id) { mutableStateOf(false) }
+    var showDrawingTools by rememberSaveable(primaryMemo.id, secondaryMemo.id) { mutableStateOf(false) }
+    var selectedScrubFeel by rememberSaveable(
+        primaryMemo.id,
+        secondaryMemo.id,
+        stateSaver = TimelineScrubFeelSaver,
+    ) { mutableStateOf(TimelineScrubFeel.Precise) }
+    var isMuted by rememberSaveable(primaryMemo.id, secondaryMemo.id) { mutableStateOf(false) }
+    var comparisonNotice by remember { mutableStateOf<String?>(null) }
+    var primaryPlaybackError by remember { mutableStateOf<String?>(null) }
+    var secondaryPlaybackError by remember(secondaryMemo.id) {
+        mutableStateOf(if (secondaryUrl == null) "所选对比视频文件不存在或无法读取。" else null)
+    }
+    val drawingState = remember { V2DrawingState() }
+    val scope = rememberCoroutineScope()
+
+    val primaryPlayer = remember(primaryUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(primaryUrl))
+            playWhenReady = topIsPlaying
+            volume = if (isMuted) 0f else 1f
+            if (primaryTime > 0f) seekTo((primaryTime * 1000).toLong())
+            prepare()
+        }
+    }
+    val secondaryPlayer = remember(secondaryUrl) {
+        secondaryUrl?.let { url ->
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(url))
+                volume = if (isMuted) 0f else 1f
+                if (secondaryTime > 0f) seekTo((secondaryTime * 1000).toLong())
+                prepare()
+            }
+        }
+    }
+
+    fun showNotice(text: String) {
+        scope.launch {
+            comparisonNotice = text
+            delay(1600)
+            if (comparisonNotice == text) comparisonNotice = null
+        }
+    }
+    fun seekBoth(seconds: Float) {
+        val primaryTarget = seconds.coerceIn(0f, primaryDuration.coerceAtLeast(0f))
+        val secondaryTarget = seconds.coerceIn(0f, secondaryDuration.coerceAtLeast(0f))
+        primaryPlayer.seekTo((primaryTarget * 1000).toLong())
+        secondaryPlayer?.seekTo((secondaryTarget * 1000).toLong())
+        primaryTime = primaryTarget
+        secondaryTime = secondaryTarget
+    }
+
+    DisposableEffect(primaryPlayer, secondaryPlayer) {
+        val primaryListener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                primaryPlaybackError = "原视频文件无法读取。"
+                topIsPlaying = false
+            }
+        }
+        val secondaryListener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                secondaryPlaybackError = "所选对比视频文件无法读取。"
+                syncSeek = false
+            }
+        }
+        primaryPlayer.addListener(primaryListener)
+        secondaryPlayer?.addListener(secondaryListener)
+        onDispose {
+            primaryPlayer.removeListener(primaryListener)
+            secondaryPlayer?.removeListener(secondaryListener)
+            primaryPlayer.release()
+            secondaryPlayer?.release()
+        }
+    }
+    LaunchedEffect(topIsPlaying, primaryPlayer) {
+        if (topIsPlaying) primaryPlayer.play() else primaryPlayer.pause()
+    }
+    LaunchedEffect(isMuted, primaryPlayer, secondaryPlayer) {
+        val volume = if (isMuted) 0f else 1f
+        primaryPlayer.volume = volume
+        secondaryPlayer?.volume = volume
+    }
+    LaunchedEffect(primaryPlayer, secondaryPlayer) {
+        while (true) {
+            primaryTime = (primaryPlayer.currentPosition / 1000f).coerceAtLeast(0f)
+            primaryPlayer.duration.takeIf { it > 0 }?.let { primaryDuration = it / 1000f }
+            secondaryPlayer?.let { player ->
+                secondaryTime = (player.currentPosition / 1000f).coerceAtLeast(0f)
+                player.duration.takeIf { it > 0 }?.let {
+                    secondaryDuration = it / 1000f
+                    secondaryPlaybackError = null
+                }
+            }
+            delay(120)
+        }
+    }
+
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        Column(Modifier.fillMaxSize()) {
+            if (primaryPlaybackError == null) {
+                IosComparisonPlayerSurface(
+                    player = primaryPlayer,
+                    onTap = { topIsPlaying = !topIsPlaying },
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
+            } else {
+                IosComparisonUnavailablePanel(
+                    title = "源视频无法打开",
+                    message = primaryPlaybackError.orEmpty(),
+                    actionTitle = "返回",
+                    onAction = onClose,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
+            }
+            if (secondaryPlayer != null && secondaryPlaybackError == null) {
+                IosComparisonPlayerSurface(
+                    player = secondaryPlayer,
+                    onTap = {},
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
+            } else {
+                IosComparisonUnavailablePanel(
+                    title = "对比视频无法打开",
+                    message = secondaryPlaybackError ?: "所选对比视频文件无法读取。",
+                    actionTitle = "重新选择",
+                    onAction = onReselectComparison,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                )
+            }
+            IosActiveComparisonControlBar(
+                primaryTime = primaryTime,
+                primaryDuration = primaryDuration,
+                secondaryTime = secondaryTime,
+                secondaryDuration = secondaryDuration,
+                scrubFeel = selectedScrubFeel,
+                synced = syncSeek,
+                canSync = secondaryPlayer != null && primaryDuration > 0f && secondaryDuration > 0f,
+                onToggleSync = {
+                    if (secondaryPlayer == null || primaryDuration <= 0f || secondaryDuration <= 0f) {
+                        showNotice("请先选择可播放的对比视频")
+                    } else {
+                        syncSeek = !syncSeek
+                    }
+                },
+                onSeekPrimary = { seconds ->
+                    if (syncSeek) seekBoth(seconds) else {
+                        primaryPlayer.seekTo((seconds * 1000).toLong())
+                        primaryTime = seconds
+                    }
+                },
+                onSeekSecondary = { seconds ->
+                    if (syncSeek) seekBoth(seconds) else {
+                        secondaryPlayer?.seekTo((seconds * 1000).toLong())
+                        secondaryTime = seconds
+                    }
+                },
+                onSeekBoth = ::seekBoth,
+            )
+        }
+
+        ComparisonOverlayButton(
+            icon = Icons.Filled.Close,
+            contentDescription = "返回",
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .v2StatusBarPadding()
+                .padding(start = 16.dp, top = 16.dp),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .v2StatusBarPadding()
+                .padding(end = 16.dp, top = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ComparisonOverlayButton(
+                icon = Icons.Filled.Share,
+                contentDescription = "分享对比视频",
+                onClick = {
+                    primaryPlayer.pause()
+                    secondaryPlayer?.pause()
+                    topIsPlaying = false
+                    val shared = if (secondaryUrl != null) {
+                        shareVideoMemoComparison(
+                            context = context,
+                            primaryMemo = primaryMemo,
+                            primaryPlaybackUrl = primaryUrl,
+                            secondaryMemo = secondaryMemo,
+                            secondaryPlaybackUrl = secondaryUrl,
+                        )
+                    } else {
+                        shareVideoMemoInfo(context, primaryMemo, primaryUrl)
+                    }
+                    if (!shared) showNotice("无法打开分享面板")
+                },
+            )
+            ComparisonOverlayButton(
+                icon = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (isMuted) "打开声音" else "静音",
+                onClick = { isMuted = !isMuted },
+            )
+            ComparisonOverlayButton(
+                icon = Icons.Filled.Edit,
+                contentDescription = if (showDrawingTools) "关闭绘图工具" else "打开绘图工具",
+                onClick = { showDrawingTools = !showDrawingTools },
+            )
+        }
+        if (showDrawingTools) {
+            V2DrawingOverlay(
+                state = drawingState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 100.dp, end = 92.dp, bottom = 180.dp),
+            )
+            V2DrawingToolsPanel(
+                state = drawingState,
+                onClose = { showDrawingTools = false },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 16.dp, top = 150.dp),
+            )
+        }
+
+        comparisonNotice?.let { message ->
+            Text(
+                message,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .v2StatusBarPadding()
+                    .padding(top = 56.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.76f))
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun IosComparisonPlayerSurface(
+    player: ExoPlayer,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.background(Color.Black).clickable(onClick = onTap)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    useController = false
+                    this.player = player
+                }
+            },
+            update = { it.player = player },
+        )
+    }
+}
+
+@Composable
+private fun IosComparisonUnavailablePanel(
+    title: String,
+    message: String,
+    actionTitle: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.background(Color.White.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                Icons.Filled.VideoLibrary,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.78f),
+                modifier = Modifier.size(34.dp),
+            )
+            Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                message,
+                color = Color.White.copy(alpha = 0.62f),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 28.dp),
+            )
+            Text(
+                actionTitle,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.14f))
+                    .clickable(onClick = onAction)
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun IosActiveComparisonControlBar(
+    primaryTime: Float,
+    primaryDuration: Float,
+    secondaryTime: Float,
+    secondaryDuration: Float,
+    scrubFeel: TimelineScrubFeel,
+    synced: Boolean,
+    canSync: Boolean,
+    onToggleSync: () -> Unit,
+    onSeekPrimary: (Float) -> Unit,
+    onSeekSecondary: (Float) -> Unit,
+    onSeekBoth: (Float) -> Unit,
+) {
+    if (synced) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.8f))
+                .v2NavigationBarPadding()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(Modifier.fillMaxWidth()) {
+                IosComparisonTimeChip("上方视频: ${formatComparisonTime(primaryTime)}")
+                Spacer(Modifier.weight(1f))
+                IosComparisonTimeChip("下方视频: ${formatComparisonTime(secondaryTime)}")
+            }
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                IosComparisonSyncButton(
+                    linked = true,
+                    enabled = canSync,
+                    label = "解锁",
+                    contentDescription = "取消同步拖动条",
+                    onClick = onToggleSync,
+                )
+                ScrubFeelProgressBar(
+                    currentTime = primaryTime,
+                    duration = maxOf(primaryDuration, secondaryDuration).coerceAtLeast(1f),
+                    scrubFeel = scrubFeel,
+                    accent = Color(0xFF0A84FF),
+                    onSeek = onSeekBoth,
+                    modifier = Modifier.weight(1f).padding(bottom = 6.dp),
+                )
+                Spacer(Modifier.width(52.dp))
+            }
+        }
+    } else {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.8f))
+                .v2NavigationBarPadding()
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            IosComparisonTimelineColumn(
+                time = primaryTime,
+                duration = primaryDuration,
+                scrubFeel = scrubFeel,
+                onSeek = onSeekPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            IosComparisonSyncButton(
+                linked = false,
+                enabled = canSync,
+                label = "同步",
+                contentDescription = "同步上下视频拖动条",
+                onClick = onToggleSync,
+            )
+            IosComparisonTimelineColumn(
+                time = secondaryTime,
+                duration = secondaryDuration,
+                scrubFeel = scrubFeel,
+                onSeek = onSeekSecondary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun IosComparisonTimelineColumn(
+    time: Float,
+    duration: Float,
+    scrubFeel: TimelineScrubFeel,
+    onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        IosComparisonTimeChip(formatComparisonTime(time))
+        ScrubFeelProgressBar(
+            currentTime = time,
+            duration = duration.coerceAtLeast(1f),
+            scrubFeel = scrubFeel,
+            accent = Color(0xFF0A84FF),
+            onSeek = onSeek,
+        )
+    }
+}
+
+@Composable
+private fun IosComparisonTimeChip(text: String) {
+    Text(
+        text,
+        color = Color.White,
+        fontSize = 12.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    listOf(Color(0xFFAF52DE), Color(0xFF0A84FF)),
+                ),
+            )
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
+}
+
+@Composable
+private fun IosComparisonSyncButton(
+    linked: Boolean,
+    enabled: Boolean,
+    label: String,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = Color.White.copy(alpha = if (enabled) 0.8f else 0.35f), fontSize = 10.sp)
+        Box(
+            modifier = Modifier
+                .size(if (linked) 36.dp else 32.dp)
+                .clip(CircleShape)
+                .background(
+                    androidx.compose.ui.graphics.Brush.linearGradient(
+                        listOf(Color(0xFFAF52DE), Color(0xFF0A84FF)),
+                    ),
+                    alpha = if (enabled) 1f else 0.35f,
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.CompareArrows,
+                contentDescription = contentDescription,
+                tint = Color.White,
+                modifier = Modifier.size(14.dp),
+            )
+        }
+    }
 }
 
 @OptIn(UnstableApi::class)
@@ -822,14 +1691,6 @@ private fun VideoMemoComparisonScreen(
                 }
             }
 
-            ScrubFeelControl(
-                selected = selectedScrubFeel,
-                onSelected = { selectedScrubFeel = it },
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(bottom = 8.dp),
-            )
-
             if (isOverlayMode) {
                 Box(
                     modifier = Modifier
@@ -1052,7 +1913,6 @@ private fun VideoMemoComparisonScreen(
     if (showReplacePicker) {
         VideoComparisonPickerDialog(
             candidates = replaceCandidates,
-            emptyMessage = "还没有其他可播放的视频 Memo 可用于替换当前对比视频。",
             onDismiss = { showReplacePicker = false },
             onSelect = { selected ->
                 showReplacePicker = false
@@ -1185,7 +2045,7 @@ private fun VideoPlaybackLoadingOverlay() {
                 strokeWidth = 2.dp,
             )
             Text(
-                text = "加载中...",
+                text = "加载中…",
                 color = Color.White.copy(alpha = 0.62f),
                 fontSize = 13.sp,
             )
@@ -1194,11 +2054,10 @@ private fun VideoPlaybackLoadingOverlay() {
 }
 
 @Composable
-private fun VideoPlaybackUnavailableOverlay(
+internal fun VideoPlaybackUnavailableOverlay(
     state: V2PlaybackState,
     onBack: () -> Unit,
     onRetry: (() -> Unit)?,
-    onEditSource: (() -> Unit)? = null,
 ) {
     val isNoSource = state == V2PlaybackState.UnavailableNoSource
     Box(
@@ -1212,17 +2071,18 @@ private fun VideoPlaybackUnavailableOverlay(
                 .padding(horizontal = 28.dp)
                 .fillMaxWidth()
                 .widthIn(max = 340.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(22.dp))
                 .background(Color(0xFF1F2937).copy(alpha = 0.96f))
-                .padding(horizontal = 22.dp, vertical = 22.dp),
+                .border(1.dp, Color(0xFF374151).copy(alpha = 0.4f), RoundedCornerShape(22.dp))
+                .padding(horizontal = 22.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Icon(
-                imageVector = if (isNoSource) Icons.Filled.PhoneAndroid else Icons.Filled.ErrorOutline,
+                imageVector = if (isNoSource) Icons.Filled.PhoneAndroid else Icons.Filled.WifiOff,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.92f),
-                modifier = Modifier.size(38.dp),
+                modifier = Modifier.padding(top = 4.dp).size(38.dp),
             )
             Text(
                 text = if (isNoSource) "视频不在本机" else "视频暂时无法加载",
@@ -1254,35 +2114,6 @@ private fun VideoPlaybackUnavailableOverlay(
                     Text("重试", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
             }
-            if (onEditSource != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(46.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color(0xFF374151))
-                        .clickable(onClick = onEditSource),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Edit,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(17.dp),
-                        )
-                        Text(
-                            if (isNoSource) "编辑 / 重新选择视频" else "编辑 / 更换视频源",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
-            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1304,57 +2135,178 @@ private fun VideoPlaybackUnavailableOverlay(
 }
 
 @Composable
-private fun VideoMemoDeleteConfirmDialog(
+internal fun VideoMemoDeleteConfirmDialog(
     deleting: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("删除备忘录") },
-        text = { Text("确定删除这个视频备忘录吗？此操作不可撤销。") },
-        confirmButton = {
-            TextButton(enabled = !deleting, onClick = onConfirm) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (deleting) {
-                        CircularProgressIndicator(
-                            color = DSColors.flagRed,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    Text(if (deleting) "删除中..." else "删除", color = DSColors.flagRed)
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(enabled = !deleting, onClick = onDismiss) { Text("取消") }
-        },
-    )
-}
-
-@Composable
-private fun VideoComparisonPickerDialog(
-    candidates: List<V2Memo>,
-    emptyMessage: String = "还没有另一条可播放的视频 Memo。先保存至少两条本机视频后，就可以进行上下分屏对比。",
-    onDismiss: () -> Unit,
-    onSelect: (V2Memo) -> Unit,
-) {
-    var selectedMemo by remember(candidates) { mutableStateOf<V2Memo?>(null) }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(DSColors.warmWhite)
-                .v2StatusBarPadding()
-                .v2NavigationBarPadding(),
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(enabled = !deleting, onClick = onDismiss),
+            )
+            Column(
+                modifier = Modifier
+                    .width(270.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF2F2F7).copy(alpha = 0.98f)),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        "删除备忘录",
+                        color = Color(0xFF1C1C1E),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        "确定删除这个视频备忘录吗？此操作不可撤销。",
+                        color = Color(0xFF3A3A3C),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFD1D1D6)))
+                Row(modifier = Modifier.fillMaxWidth().height(44.dp)) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxSize()
+                            .clickable(enabled = !deleting, onClick = onDismiss)
+                            .testTag("video-memo-delete-cancel"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "取消",
+                            color = Color(0xFF007AFF),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    Box(Modifier.width(1.dp).fillMaxSize().background(Color(0xFFD1D1D6)))
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxSize()
+                            .clickable(enabled = !deleting, onClick = onConfirm)
+                            .testTag("video-memo-delete-confirm"),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        if (deleting) {
+                            CircularProgressIndicator(
+                                color = Color(0xFFFF3B30),
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Text(
+                            if (deleting) "删除中…" else "删除",
+                            color = Color(0xFFFF3B30),
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun VideoMemoDeleteFailureDialog(
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable(onClick = onDismiss),
+            )
+            Column(
+                modifier = Modifier.width(270.dp).clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFF2F2F7).copy(alpha = 0.98f))
+                    .testTag("video-memo-delete-failure-dialog"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        "删除失败",
+                        color = Color(0xFF1C1C1E),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
+                    Text(
+                        message,
+                        color = Color(0xFF3A3A3C),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFD1D1D6)))
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                        .clickable(onClick = onDismiss)
+                        .testTag("video-memo-delete-failure-dismiss"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "好",
+                        color = Color(0xFF007AFF),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun VideoComparisonPickerDialog(
+    candidates: List<V2Memo>,
+    onDismiss: () -> Unit,
+    onSelect: (V2Memo) -> Unit,
+) {
+    var selectedMemoId by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedMemo = remember(candidates, selectedMemoId) {
+        candidates.firstOrNull { it.id.toString() == selectedMemoId }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(DSColors.warmWhite)) {
+            V2RoomBackground(Modifier.fillMaxSize())
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .v2StatusBarPadding()
+                    .v2NavigationBarPadding(),
+            ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1393,31 +2345,11 @@ private fun VideoComparisonPickerDialog(
                     Icon(
                         imageVector = Icons.Filled.VideoLibrary,
                         contentDescription = null,
-                        tint = DSColors.shadowGray.copy(alpha = 0.62f),
-                        modifier = Modifier.size(42.dp),
+                        tint = DSColors.shadowGray.copy(alpha = 0.5f),
+                        modifier = Modifier.size(40.dp),
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text("暂无可对比的视频", color = DSColors.shadowGray, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        emptyMessage,
-                        color = DSColors.shadowGray.copy(alpha = 0.78f),
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 16.dp)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(DSColors.fairway)
-                        .clickable(onClick = onDismiss),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("知道了", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("暂无可对比的视频", color = DSColors.shadowGray, fontSize = 15.sp)
                 }
             } else {
                 LazyColumn(
@@ -1432,7 +2364,7 @@ private fun VideoComparisonPickerDialog(
                         VideoComparisonCandidateRow(
                             memo = memo,
                             selected = selectedMemo?.id == memo.id,
-                            onClick = { selectedMemo = memo },
+                            onClick = { selectedMemoId = memo.id.toString() },
                         )
                     }
                     item { Spacer(Modifier.height(76.dp)) }
@@ -1460,6 +2392,7 @@ private fun VideoComparisonPickerDialog(
                 }
             }
         }
+        }
     }
 }
 
@@ -1469,6 +2402,7 @@ private fun VideoComparisonCandidateRow(memo: V2Memo, selected: Boolean, onClick
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
+            .semantics { this.selected = selected }
             .background(DSColors.cardWhite)
             .border(
                 width = if (selected) 2.dp else 1.dp,
@@ -1488,15 +2422,6 @@ private fun VideoComparisonCandidateRow(memo: V2Memo, selected: Boolean, onClick
             contentAlignment = Alignment.Center,
         ) {
             V2MemoThumbnail(memo = memo, modifier = Modifier.fillMaxSize())
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.34f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Filled.PlayArrow, null, tint = Color.White.copy(alpha = 0.92f), modifier = Modifier.size(18.dp))
-            }
         }
         Column(
             modifier = Modifier
@@ -1554,7 +2479,12 @@ private fun TopBar(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleIconButton(icon = Icons.Filled.Close, contentDescription = "关闭", onClick = onBack)
+        CircleIconButton(
+            icon = Icons.Filled.Close,
+            contentDescription = "返回",
+            iconSize = 16.dp,
+            onClick = onBack,
+        )
         Spacer(Modifier.weight(1f))
         Row(
             modifier = Modifier
@@ -1565,13 +2495,14 @@ private fun TopBar(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.VideoLibrary, null, tint = Color.White, modifier = Modifier.size(13.dp))
+            Icon(Icons.Filled.VideoLibrary, null, tint = Color.White, modifier = Modifier.size(12.dp))
             Text("视频Memo", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.weight(1f))
         CircleIconButton(
             icon = Icons.Filled.Edit,
-            contentDescription = "画线工具",
+            contentDescription = if (showToolsPanel) "关闭绘图工具" else "打开绘图工具",
+            iconSize = 22.dp,
             tint = when {
                 !drawingEnabled -> Color.White.copy(alpha = 0.35f)
                 showToolsPanel -> DSColors.goldBright
@@ -1590,14 +2521,11 @@ private fun BottomInfoAndProgress(
     sourceLabel: String,
     currentTime: Float,
     duration: Float,
-    timelineFrames: List<VideoMemoTimelineFrame>,
-    scrubFeel: TimelineScrubFeel,
     isPlaying: Boolean,
     speedText: String,
     isSlow: Boolean,
     showMoreTools: Boolean,
     controlsLocked: Boolean,
-    onScrubFeelChange: (TimelineScrubFeel) -> Unit,
     onSeek: (Float) -> Unit,
     onTimelineScrubStart: () -> Unit,
     onTimelineScrubEnd: () -> Unit,
@@ -1607,6 +2535,7 @@ private fun BottomInfoAndProgress(
     onSpeed: () -> Unit,
     onToggleMore: () -> Unit,
     onShare: () -> Unit,
+    onShareToSpaces: () -> Unit,
     onExport: () -> Unit,
     onEdit: () -> Unit,
     onCompare: () -> Unit,
@@ -1644,29 +2573,13 @@ private fun BottomInfoAndProgress(
                 Spacer(Modifier.weight(1f))
                 Text(formatTime(duration), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
-            ScrubFeelControl(
-                selected = scrubFeel,
-                onSelected = onScrubFeelChange,
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 6.dp),
-            )
-            VideoMemoTimelineStrip(
-                currentTime = currentTime,
-                duration = duration,
-                frames = timelineFrames,
-                scrubFeel = scrubFeel,
-                onSeek = onSeek,
+            ReviewFrameScrubber(
+                currentMs = (currentTime * 1000f).toLong().coerceAtLeast(0L),
+                durationMs = (duration * 1000f).toLong().coerceAtLeast(1L),
+                onSeek = { ms -> onSeek(ms / 1000f) },
                 onScrubStart = onTimelineScrubStart,
                 onScrubEnd = onTimelineScrubEnd,
-            )
-            TopProgressSeekBar(
-                currentTime = currentTime,
-                duration = duration,
-                onSeek = onSeek,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
             )
             BottomMemoPlaybackControls(
                 isPlaying = isPlaying,
@@ -1680,6 +2593,7 @@ private fun BottomInfoAndProgress(
                 onSpeed = onSpeed,
                 onToggleMore = onToggleMore,
                 onShare = onShare,
+                onShareToSpaces = onShareToSpaces,
                 onExport = onExport,
                 onEdit = onEdit,
                 onCompare = onCompare,
@@ -1689,152 +2603,6 @@ private fun BottomInfoAndProgress(
     }
 }
 
-@Composable
-private fun TopProgressSeekBar(
-    currentTime: Float,
-    duration: Float,
-    onSeek: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val safeDuration = duration.coerceAtLeast(0.1f)
-    val progress = (currentTime / safeDuration).coerceIn(0f, 1f)
-
-    fun seekFromX(x: Float, width: Float) {
-        if (width <= 0f) return
-        val ratio = (x / width).coerceIn(0f, 1f)
-        onSeek((ratio * safeDuration).coerceIn(0f, safeDuration))
-    }
-
-    Box(
-        modifier = modifier
-            .height(16.dp)
-            .pointerInput(safeDuration) {
-                detectTapGestures { offset -> seekFromX(offset.x, size.width.toFloat()) }
-            }
-            .pointerInput(safeDuration) {
-                detectDragGestures(
-                    onDragStart = { offset -> seekFromX(offset.x, size.width.toFloat()) },
-                    onDrag = { change, _ ->
-                        seekFromX(change.position.x, size.width.toFloat())
-                        change.consume()
-                    },
-                )
-            },
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(Color.White.copy(alpha = 0.30f)),
-        )
-        Box(
-            Modifier
-                .fillMaxWidth(progress)
-                .height(4.dp)
-                .background(Color(0xFF3B82F6)),
-        )
-        Box(
-            modifier = Modifier.fillMaxWidth(progress.coerceAtLeast(0.001f)),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            Box(
-                Modifier
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(Color.White),
-            )
-        }
-    }
-}
-
-@Composable
-private fun VideoMemoTimelineStrip(
-    currentTime: Float,
-    duration: Float,
-    frames: List<VideoMemoTimelineFrame>,
-    scrubFeel: TimelineScrubFeel,
-    onSeek: (Float) -> Unit,
-    onScrubStart: () -> Unit,
-    onScrubEnd: () -> Unit,
-) {
-    if (duration <= 0f) return
-    val items = remember(duration, frames) {
-        frames.ifEmpty { buildFallbackTimelineFrames(duration) }
-    }
-    val activeIndex = remember(currentTime, items) {
-        items.indices.minByOrNull { index -> kotlin.math.abs(items[index].timeSec - currentTime) } ?: 0
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .padding(top = 6.dp, bottom = 2.dp)
-            .pointerInput(duration, currentTime, scrubFeel) {
-                var startTime = currentTime
-                var accumulatedX = 0f
-                detectDragGestures(
-                    onDragStart = {
-                        onScrubStart()
-                        startTime = currentTime
-                        accumulatedX = 0f
-                    },
-                    onDragEnd = { onScrubEnd() },
-                    onDragCancel = { onScrubEnd() },
-                    onDrag = { change, dragAmount ->
-                        accumulatedX += dragAmount.x
-                        val target = (startTime + accumulatedX / scrubFeel.pixelsPerSecond)
-                            .coerceIn(0f, duration.coerceAtLeast(0f))
-                        onSeek(target)
-                        change.consume()
-                    },
-                )
-            },
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items.forEachIndexed { index, frame ->
-            val isActive = index == activeIndex
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(34.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(Color.White.copy(alpha = if (frame.bitmap == null) 0.1f else 0.16f))
-                    .border(
-                        width = if (isActive) 2.dp else 1.dp,
-                        color = if (isActive) DSColors.goldBright else Color.White.copy(alpha = 0.16f),
-                        shape = RoundedCornerShape(7.dp),
-                    )
-                    .clickable { onSeek(frame.timeSec.coerceIn(0f, duration)) },
-                contentAlignment = Alignment.Center,
-            ) {
-                frame.bitmap?.let { bitmap ->
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "跳转到 ${formatTime(frame.timeSec)}",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } ?: Text(
-                    text = formatTime(frame.timeSec),
-                    color = Color.White.copy(alpha = if (isActive) 0.92f else 0.58f),
-                    fontSize = 9.sp,
-                    fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                )
-                if (isActive) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .background(DSColors.goldBright),
-                    )
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun ScrubFeelControl(
@@ -1861,6 +2629,7 @@ private fun ScrubFeelControl(
                     .size(width = 34.dp, height = 26.dp)
                     .clip(RoundedCornerShape(50))
                     .background(if (selected == feel) Color.White else Color.White.copy(alpha = 0.14f))
+                    .semantics { this.selected = selected == feel }
                     .clickable { onSelected(feel) }
                     .padding(top = 5.dp),
                 textAlign = TextAlign.Center,
@@ -1876,10 +2645,11 @@ private fun ScrubFeelProgressBar(
     scrubFeel: TimelineScrubFeel,
     accent: Color,
     onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val progress = if (duration > 0f) (currentTime / duration).coerceIn(0f, 1f) else 0f
-    Box(
-        modifier = Modifier
+    BoxWithConstraints(
+        modifier = modifier
             .fillMaxWidth()
             .height(32.dp)
             .pointerInput(duration, currentTime, scrubFeel) {
@@ -1910,21 +2680,18 @@ private fun ScrubFeelProgressBar(
                 .background(accent),
         )
         Box(
-            modifier = Modifier.fillMaxWidth(progress.coerceAtLeast(0.001f)),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            Box(
-                Modifier
-                    .size(16.dp)
-                    .clip(CircleShape)
-                    .background(Color.White),
-            )
-        }
+            Modifier
+                .align(Alignment.CenterStart)
+                .offset(x = (maxWidth - 16.dp) * progress)
+                .size(16.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+        )
     }
 }
 
 @Composable
-private fun BottomMemoPlaybackControls(
+internal fun BottomMemoPlaybackControls(
     isPlaying: Boolean,
     speedText: String,
     isSlow: Boolean,
@@ -1936,12 +2703,14 @@ private fun BottomMemoPlaybackControls(
     onSpeed: () -> Unit,
     onToggleMore: () -> Unit,
     onShare: () -> Unit,
+    onShareToSpaces: () -> Unit,
     onExport: () -> Unit,
     onEdit: () -> Unit,
     onCompare: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Box(Modifier.fillMaxWidth()) {
+    Box(modifier.fillMaxWidth()) {
         AnimatedVisibility(
             visible = showMoreTools,
             enter = fadeIn() + slideInHorizontally { it / 3 },
@@ -1952,42 +2721,82 @@ private fun BottomMemoPlaybackControls(
         ) {
             Column(
                 modifier = Modifier
+                    .width(142.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF1C1C1E).copy(alpha = 0.95f))
                     .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                    .padding(vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    .padding(vertical = 2.dp),
             ) {
-                CompactMoreItem(icon = Icons.Filled.Share, label = "分享", onClick = onShare)
+                CompactMoreItem(icon = Icons.Filled.Groups, label = "分享到空间", onClick = onShareToSpaces)
+                MoreToolsDivider()
+                CompactMoreItem(icon = Icons.Filled.Share, label = "系统分享", onClick = onShare)
+                MoreToolsDivider()
                 CompactMoreItem(icon = Icons.Filled.Download, label = "导出", onClick = onExport)
+                MoreToolsDivider()
                 CompactMoreItem(icon = Icons.AutoMirrored.Filled.CompareArrows, label = "对比", onClick = onCompare)
+                MoreToolsDivider()
                 CompactMoreItem(icon = Icons.Filled.Folder, label = "分类", onClick = onEdit)
+                MoreToolsDivider()
                 CompactMoreItem(icon = Icons.Filled.DeleteOutline, label = "删除", onClick = onDelete)
             }
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp, bottom = 8.dp),
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FloatingTextButton(primary = speedText, secondary = "速度", highlighted = isSlow, onClick = onSpeed)
-            Spacer(Modifier.weight(1f))
-            BottomControlIconButton(icon = Icons.Filled.Replay5, contentDescription = "后退 5 秒", onClick = onStepBackward)
-            BottomControlIconButton(
-                icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = if (isPlaying) "暂停" else "播放",
-                emphasized = true,
-                enabled = !controlsLocked,
-                onClick = onTogglePlay,
-            )
-            BottomControlIconButton(icon = Icons.Filled.Forward5, contentDescription = "前进 5 秒", onClick = onStepForward)
-            Spacer(Modifier.weight(1f))
-            FloatingIconButton(
-                icon = if (showMoreTools) Icons.Filled.Close else Icons.Filled.MoreHoriz,
-                label = if (showMoreTools) "收起" else "更多",
-                onClick = onToggleMore,
-            )
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 48.dp, height = 44.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.12f))
+                        .clickable(enabled = !controlsLocked, onClick = onSpeed),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        speedText,
+                        color = if (isSlow) DSColors.goldBright else Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                BottomControlIconButton(
+                    icon = Icons.Filled.Replay5,
+                    contentDescription = "后退 5 秒",
+                    enabled = !controlsLocked,
+                    onClick = onStepBackward,
+                )
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                BottomControlIconButton(
+                    icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "暂停视频" else "播放视频",
+                    emphasized = true,
+                    enabled = !controlsLocked,
+                    onClick = onTogglePlay,
+                )
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                BottomControlIconButton(
+                    icon = Icons.Filled.Forward5,
+                    contentDescription = "前进 5 秒",
+                    enabled = !controlsLocked,
+                    onClick = onStepForward,
+                )
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                BottomControlIconButton(
+                    icon = if (showMoreTools) Icons.Filled.Close else Icons.Filled.MoreHoriz,
+                    contentDescription = if (showMoreTools) "关闭更多工具" else "打开更多工具",
+                    outlinedCircle = true,
+                    enabled = !controlsLocked,
+                    onClick = onToggleMore,
+                )
+            }
         }
     }
 }
@@ -1996,15 +2805,20 @@ private fun BottomMemoPlaybackControls(
 private fun CompactMoreItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier
-            .width(112.dp)
+            .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = Color.White.copy(alpha = 0.86f), modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(10.dp))
-        Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(label, color = Color.White, fontSize = 14.sp)
     }
+}
+
+@Composable
+private fun MoreToolsDivider() {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.2f)))
 }
 
 @Composable
@@ -2012,29 +2826,57 @@ private fun BottomControlIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     emphasized: Boolean = false,
+    outlinedCircle: Boolean = false,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Box(
         modifier = Modifier
-            .size(if (emphasized) 56.dp else 46.dp)
-            .clip(CircleShape)
-            .background(
-                when {
-                    emphasized && enabled -> DSColors.fairway
-                    emphasized -> Color.White.copy(alpha = 0.12f)
-                    else -> Color.White.copy(alpha = 0.12f)
-                },
-            )
+            .size(width = if (emphasized) 54.dp else 44.dp, height = if (emphasized) 54.dp else 44.dp)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            contentDescription,
-            tint = Color.White.copy(alpha = if (enabled) 1f else 0.35f),
-            modifier = Modifier.size(if (emphasized) 32.dp else 24.dp),
-        )
+        when {
+            emphasized -> {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = if (enabled) 1f else 0.35f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription,
+                        tint = Color.Black,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+            }
+            outlinedCircle -> {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .border(1.5.dp, Color.White.copy(alpha = if (enabled) 1f else 0.35f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription,
+                        tint = Color.White.copy(alpha = if (enabled) 1f else 0.35f),
+                        modifier = Modifier.size(if (icon == Icons.Filled.MoreHoriz) 15.dp else 12.dp),
+                    )
+                }
+            }
+            else -> {
+                Icon(
+                    icon,
+                    contentDescription,
+                    tint = Color.White.copy(alpha = if (enabled) 1f else 0.35f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
     }
 }
 
@@ -2043,6 +2885,7 @@ private fun CircleIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
     tint: Color = Color.White,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
@@ -2054,35 +2897,7 @@ private fun CircleIconButton(
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(20.dp))
-    }
-}
-
-@Composable
-private fun FloatingTextButton(primary: String, secondary: String, highlighted: Boolean, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .size(48.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Text(primary, color = if (highlighted) DSColors.goldBright else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(secondary, color = Color.White.copy(alpha = 0.8f), fontSize = 9.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun FloatingIconButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .size(48.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
-        Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(iconSize))
     }
 }
 
@@ -2091,40 +2906,6 @@ private fun Float.speedText(): String = when {
     this == 0.5f -> "0.5x"
     this == 0.25f -> "0.25x"
     else -> "${this}x"
-}
-
-private fun buildFallbackTimelineFrames(duration: Float, count: Int = 8): List<VideoMemoTimelineFrame> {
-    val safeDuration = duration.coerceAtLeast(0.1f)
-    return List(count.coerceAtLeast(2)) { index ->
-        val ratio = index / (count.coerceAtLeast(2) - 1).toFloat()
-        VideoMemoTimelineFrame(
-            timeSec = (safeDuration * ratio).coerceIn(0f, duration.coerceAtLeast(0f)),
-            bitmap = null,
-        )
-    }
-}
-
-private suspend fun loadVideoMemoTimelineFrames(
-    context: Context,
-    playbackUrl: String,
-    duration: Float,
-): List<VideoMemoTimelineFrame> = withContext(Dispatchers.IO) {
-    runCatching {
-        val times = buildFallbackTimelineFrames(duration)
-        val retriever = MediaMetadataRetriever()
-        try {
-            retriever.setDataSource(context, playbackUrl.toUri())
-            times.map { frame ->
-                val sampleTime = frame.timeSec.coerceAtMost((duration - 0.05f).coerceAtLeast(0f))
-                val bitmap = retriever
-                    .getFrameAtTime((sampleTime * 1_000_000L).toLong(), MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    ?.scale(160, 90)
-                frame.copy(bitmap = bitmap)
-            }
-        } finally {
-            retriever.release()
-        }
-    }.getOrElse { emptyList() }
 }
 
 private suspend fun saveVideoFrameToGallery(

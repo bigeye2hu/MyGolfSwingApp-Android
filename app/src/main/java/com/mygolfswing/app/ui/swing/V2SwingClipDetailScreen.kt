@@ -9,18 +9,17 @@ import android.provider.MediaStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,14 +29,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.ArrowCircleUp
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.LayersClear
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forward5
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.PauseCircle
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Replay5
@@ -45,15 +42,12 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material.icons.filled.Upgrade
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -67,16 +61,16 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -89,25 +83,25 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.mygolfswing.app.data.memo.V2MemoBridge
-import com.mygolfswing.app.data.model.V2Memo
-import com.mygolfswing.app.data.model.V2MemoAccent
-import com.mygolfswing.app.data.model.V2MemoThumbnailKind
 import com.mygolfswing.app.data.model.V2SwingClip
 import com.mygolfswing.app.data.model.V2SwingClipRetention
-import com.mygolfswing.app.data.model.V2Topic
-import com.mygolfswing.app.data.store.V2MemoStore
 import com.mygolfswing.app.data.store.V2SwingSessionStore
+import com.mygolfswing.app.ui.common.V2BackHandler
 import com.mygolfswing.app.ui.common.V2DrawingOverlay
 import com.mygolfswing.app.ui.common.V2DrawingState
 import com.mygolfswing.app.ui.common.V2DrawingToolsPanel
 import com.mygolfswing.app.ui.common.V2MissingEntityScreen
 import com.mygolfswing.app.ui.common.v2FullScreenInsets
 import com.mygolfswing.app.ui.designsystem.DSColors
-import com.mygolfswing.app.ui.golfcam.AudioImpactDetector
+import com.mygolfswing.app.ui.player.ReviewFrameScrubber
+import com.mygolfswing.app.ui.player.SmoothFrameSeeker
 import com.mygolfswing.app.ui.golfcam.model.ImpactCandidate
+import com.mygolfswing.app.ui.interaction.V2ProfessionalAnalysisMode
+import com.mygolfswing.app.ui.interaction.V2WorkspaceProfessionalAnalysisScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,15 +112,6 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.roundToInt
 
-private enum class SwingReplayScrubFeel(
-    val title: String,
-    val pointsPerFrame: Float,
-) {
-    Balanced("稳", 5f),
-    Precise("细", 9f),
-    Frame("帧", 15f),
-}
-
 private enum class BottomActionStyle {
     Framed,
     Plain,
@@ -136,32 +121,29 @@ private enum class BottomActionStyle {
 @Composable
 fun V2SwingClipDetailScreen(
     clipId: UUID,
+    showCloseButton: Boolean = false,
     onBack: () -> Unit,
-    onMemoCreated: (UUID) -> Unit = {},
 ) {
+    V2BackHandler(onBack = onBack)
     val sessions by V2SwingSessionStore.sessions.collectAsState()
     val swingError by V2SwingSessionStore.lastError.collectAsState()
     val clip = sessions.flatMap { it.clips }.firstOrNull { it.id == clipId }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var isPlaying by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(false) }
     var currentTimeSec by remember { mutableFloatStateOf(0f) }
     var durationSec by remember { mutableFloatStateOf(0f) }
     var playbackRate by remember { mutableFloatStateOf(1f) }
     var showDrawingTools by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
-    var showAnalysisActions by remember { mutableStateOf(false) }
-    var showImpactMarkers by remember { mutableStateOf(false) }
-    var isDetectingImpact by remember { mutableStateOf(false) }
-    var impactCandidates by remember(clipId) { mutableStateOf<List<ImpactCandidate>>(emptyList()) }
     var showHelp by remember { mutableStateOf(false) }
     var showPromoteConfirm by remember { mutableStateOf(false) }
     var showDemoteConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var analysisNotice by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var showClearDrawingConfirm by remember { mutableStateOf(false) }
+    var showsReviewPlayer by remember { mutableStateOf(false) }
     var toast by remember { mutableStateOf<String?>(null) }
     var metadata by remember(clipId) { mutableStateOf(SwingVideoMetadata()) }
-    var selectedScrubFeel by remember { mutableStateOf(SwingReplayScrubFeel.Precise) }
     val drawingState = remember { V2DrawingState() }
 
     if (clip == null) {
@@ -174,13 +156,34 @@ fun V2SwingClipDetailScreen(
         V2MissingEntityScreen(message = "本地挥杆视频文件不存在", onBack = onBack, title = "挥杆详情")
         return
     }
+    val reviewSourceFile = remember(clip.videoPath) {
+        V2MemoBridge.localVideoAbsolutePath(clip.videoPath)?.let(::File)?.takeIf { it.isFile && it.length() > 0L }
+    }
+    if (showsReviewPlayer && reviewSourceFile != null) {
+        V2WorkspaceProfessionalAnalysisScreen(
+            sourceFile = reviewSourceFile,
+            title = "回看",
+            mode = V2ProfessionalAnalysisMode.STANDALONE_REVIEW,
+            onSwitchPlayer = { showsReviewPlayer = false },
+            onCancel = onBack,
+            onRecordingReady = { recording ->
+                scope.launch {
+                    val result = saveClipToGallery(context, clip.copy(videoPath = recording.absolutePath))
+                    android.widget.Toast.makeText(context, result.message, android.widget.Toast.LENGTH_SHORT).show()
+                    recording.delete()
+                }
+            },
+        )
+        return
+    }
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
-            playWhenReady = true
+            playWhenReady = false
             prepare()
         }
     }
+    val frameSeeker = remember(player) { SmoothFrameSeeker(player) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -193,35 +196,31 @@ fun V2SwingClipDetailScreen(
         }
         player.addListener(listener)
         onDispose {
+            frameSeeker.dispose()
             player.removeListener(listener)
             player.release()
         }
     }
     LaunchedEffect(player) {
         while (true) {
-            currentTimeSec = (player.currentPosition / 1000f).coerceAtLeast(0f)
+            if (!frameSeeker.isScrubbing) {
+                currentTimeSec = (player.currentPosition / 1000f).coerceAtLeast(0f)
+                isPlaying = player.isPlaying
+            }
             val dur = player.duration
             if (dur > 0) durationSec = dur / 1000f
-            isPlaying = player.isPlaying
             delay(80)
         }
     }
     LaunchedEffect(uri) {
         metadata = loadSwingVideoMetadata(context, uri)
     }
-    LaunchedEffect(uri) {
-        isDetectingImpact = true
-        val candidates = AudioImpactDetector.detect(context, uri).take(3)
-        impactCandidates = candidates
-        showImpactMarkers = candidates.isNotEmpty()
-        isDetectingImpact = false
-    }
     LaunchedEffect(playbackRate) {
         player.playbackParameters = PlaybackParameters(playbackRate)
     }
     LaunchedEffect(toast) {
         if (toast != null) {
-            delay(1_800)
+            delay(2_000)
             toast = null
         }
     }
@@ -236,13 +235,18 @@ fun V2SwingClipDetailScreen(
             DetailTopBar(
                 onBack = onBack,
                 onHelp = { showHelp = true },
-            )
-            SwingScrubFeelControl(
-                selected = selectedScrubFeel,
-                onSelected = { selectedScrubFeel = it },
-                modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .padding(top = 8.dp, bottom = 4.dp),
+                title = "挥杆详情",
+                showBackLabel = !showCloseButton,
+                switchAccessibilityLabel = "切换到回看",
+                onSwitchPlayer = {
+                    if (reviewSourceFile == null) {
+                        toast = "这段视频暂时不能回看"
+                    } else {
+                        showsReviewPlayer = true
+                        showDrawingTools = false
+                        drawingState.clearSelection()
+                    }
+                },
             )
             Box(
                 modifier = Modifier
@@ -263,78 +267,72 @@ fun V2SwingClipDetailScreen(
                     },
                     update = { it.player = player },
                 )
+                V2DrawingOverlay(
+                    state = drawingState,
+                    modifier = Modifier.fillMaxSize(),
+                    interactionEnabled = showDrawingTools,
+                )
                 if (showDrawingTools) {
-                    V2DrawingOverlay(state = drawingState, modifier = Modifier.fillMaxSize())
                     V2DrawingToolsPanel(
                         state = drawingState,
                         onClose = {
                             showDrawingTools = false
                             drawingState.clearSelection()
+                            if (drawingState.strokes.isNotEmpty()) {
+                                toast = "标记已保留，可继续播放"
+                            }
                         },
-	                        modifier = Modifier.align(Alignment.CenterEnd).padding(end = 10.dp),
+	                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 8.dp),
 	                    )
 	                }
-                if (showImpactMarkers && impactCandidates.isNotEmpty()) {
-                    ImpactMarkerOverlay(
-                        candidates = impactCandidates,
-                        onSelect = { candidate ->
-                            player.pause()
-                            val targetMs = (candidate.timeSec * 1000.0).roundToInt().toLong()
-                            player.seekTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
-                            currentTimeSec = candidate.timeSec.toFloat().coerceAtLeast(0f)
-                            isPlaying = false
-                        },
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(start = 10.dp, top = 10.dp),
-                    )
-                }
             }
-            ControlsPanel(
+                ControlsPanel(
                 clip = clip,
                 isPlaying = isPlaying,
                 currentTime = currentTimeSec,
                 duration = durationSec,
                 metadata = metadata,
                 playbackRate = playbackRate,
-                scrubFeel = selectedScrubFeel,
                 showDetails = showDetails,
-                showAnalysisActions = showAnalysisActions,
                 showDrawingTools = showDrawingTools,
-                impactCandidates = impactCandidates,
-                isDetectingImpact = isDetectingImpact,
-                showImpactMarkers = showImpactMarkers,
+                hasDrawings = drawingState.strokes.isNotEmpty(),
                 onTogglePlay = {
                     if (player.isPlaying) player.pause() else player.play()
                 },
                 onStepFrames = { deltaFrames ->
                     player.pause()
-                    val deltaMs = (deltaFrames * metadata.frameDurationMs).roundToInt().toLong()
-                    player.seekTo((player.currentPosition + deltaMs).coerceIn(0L, player.duration.coerceAtLeast(0L)))
-                },
-                onSeekToFrame = { frameIndex ->
-                    player.pause()
-                    val clampedFrame = frameIndex.coerceIn(0, metadata.totalFrames(durationSec).coerceAtLeast(1) - 1)
-                    val targetMs = (clampedFrame * metadata.frameDurationMs).roundToInt().toLong()
-                    player.seekTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
+                    val targetMs = metadata.stepTargetMs(
+                        positionMs = player.currentPosition,
+                        deltaFrames = deltaFrames,
+                        durationSec = durationSec,
+                    )
+                    player.setSeekParameters(SeekParameters.EXACT)
+                    player.seekTo(targetMs)
                     currentTimeSec = targetMs / 1000f
                     isPlaying = false
                 },
-                onSeek = { progress ->
-                    val target = (durationSec * progress * 1000).roundToInt().toLong()
-                    player.seekTo(target)
-                },
-                onRate = { playbackRate = it },
-                onToggleImpactMarkers = {
-                    if (impactCandidates.isNotEmpty()) showImpactMarkers = !showImpactMarkers
-                },
-                onSeekToImpact = { candidate ->
-                    player.pause()
-                    val targetMs = (candidate.timeSec * 1000.0).roundToInt().toLong()
-                    player.seekTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
-                    currentTimeSec = candidate.timeSec.toFloat().coerceAtLeast(0f)
+                onSeekToFrame = { frameIndex ->
+                    val clampedFrame = frameIndex.coerceIn(0, metadata.totalFrames(durationSec).coerceAtLeast(1) - 1)
+                    val targetMs = (clampedFrame * metadata.frameDurationMs).roundToInt().toLong()
+                    frameSeeker.moveTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
+                    currentTimeSec = targetMs / 1000f
                     isPlaying = false
-                    showImpactMarkers = true
+                },
+                onFrameScrubStart = {
+                    val toleranceUs = (metadata.frameDurationMs.coerceAtLeast(1f) * 1000f).roundToInt().toLong()
+                    frameSeeker.begin(toleranceUs)
+                    isPlaying = false
+                },
+                onFrameScrubEnd = { frameIndex ->
+                    val clampedFrame = frameIndex.coerceIn(0, metadata.totalFrames(durationSec).coerceAtLeast(1) - 1)
+                    val targetMs = (clampedFrame * metadata.frameDurationMs).roundToInt().toLong()
+                    frameSeeker.end()
+                    player.seekTo(targetMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
+                    currentTimeSec = targetMs / 1000f
+                },
+                onRate = {
+                    playbackRate = it
+                    toast = if (it == 1f) "已恢复正常速度" else "慢放 ${swingRateText(it)}"
                 },
                 onFavorite = {
                     if (clip.retention == V2SwingClipRetention.PROMOTED) return@ControlsPanel
@@ -358,50 +356,28 @@ fun V2SwingClipDetailScreen(
                     }
                 },
                 onInfo = { showDetails = !showDetails },
-                onToggleAnalysis = { showAnalysisActions = !showAnalysisActions },
                 onToggleDrawing = {
                     showDrawingTools = !showDrawingTools
                     if (!showDrawingTools) {
                         drawingState.clearSelection()
-                    } else {
-                        player.pause()
+                        if (drawingState.strokes.isNotEmpty()) {
+                            toast = "标记已保留，可继续播放"
+                        }
                     }
                 },
-                onOpenDrawing = {
-                    showAnalysisActions = false
-                    showDrawingTools = true
-                    player.pause()
-                },
-                onShowPosturePlan = {
-                    analysisNotice = "姿态分析替代方案" to
-                        "Android 版已接入音频击球帧候选。当前可先用「击球帧」快速定位击球时刻，再用画线逐帧分析检查站位、脊柱角度、杆面和挥杆平面。"
-                },
-                onShowWatchPlan = {
-                    analysisNotice = "穿戴联动说明" to
-                        "Android 穿戴设备节奏和远程触发需要单独适配。当前挥杆播放器已支持帧步进、慢放、画线和成长池，适合先完成上线版回看分析。"
-                },
-                onCreateMemo = {
-                    scope.launch {
-                        val memo = buildSwingReviewMemo(
-                            clip = clip,
-                            durationSec = if (durationSec > 0f) durationSec.toDouble() else clip.durationSec,
-                            metadata = metadata,
-                        )
-                        V2MemoStore.createAndWait(memo)
-                        toast = "已创建复盘 Memo"
-                        onMemoCreated(memo.id)
-                    }
-                },
+                onRequestClearDrawing = { showClearDrawingConfirm = true },
                 onDelete = { showDeleteConfirm = true },
-            )
+                )
         }
         toast?.let {
             Text(
                 it,
                 color = Color.White,
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 76.dp)
-                    .clip(RoundedCornerShape(18.dp)).background(Color.Black.copy(alpha = 0.65f))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)
+                    .clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.75f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
     }
@@ -409,8 +385,8 @@ fun V2SwingClipDetailScreen(
     if (showDeleteConfirm) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除这段挥杆？") },
-            text = { Text("将删除视频文件和缩略图，此操作不可撤销。") },
+            title = { Text("删除视频") },
+            text = { Text("确定要删除这段挥杆视频吗？此操作不可撤销。") },
             confirmButton = {
                 TextButton(onClick = {
                     V2SwingSessionStore.deleteClips(setOf(clip.id))
@@ -425,17 +401,17 @@ fun V2SwingClipDetailScreen(
     }
 
     if (showHelp) {
-        HelpDialog(onDismiss = { showHelp = false })
+        SwingClipHelpSheet(onDismiss = { showHelp = false })
     }
 
-    analysisNotice?.let { notice ->
-        AlertDialog(
-            onDismissRequest = { analysisNotice = null },
-            title = { Text(notice.first) },
-            text = { Text(notice.second) },
-            confirmButton = {
-                TextButton(onClick = { analysisNotice = null }) { Text("知道了") }
+    if (showClearDrawingConfirm) {
+        ClearDrawingConfirmationSheet(
+            onConfirm = {
+                drawingState.clearAll()
+                showClearDrawingConfirm = false
+                toast = "标记已清空"
             },
+            onDismiss = { showClearDrawingConfirm = false },
         )
     }
 
@@ -477,14 +453,19 @@ fun V2SwingClipDetailScreen(
 }
 
 @Composable
-private fun DetailTopBar(
+internal fun DetailTopBar(
     onBack: () -> Unit,
     onHelp: () -> Unit,
+    title: String,
+    showBackLabel: Boolean = true,
+    switchAccessibilityLabel: String,
+    onSwitchPlayer: () -> Unit,
 ) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .height(44.dp)
+            .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -492,81 +473,90 @@ private fun DetailTopBar(
                 .align(Alignment.CenterStart)
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(onClick = onBack)
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .height(44.dp)
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = null,
+                contentDescription = if (showBackLabel) null else "关闭",
                 tint = Color.White,
                 modifier = Modifier.size(20.dp),
             )
-            Text("返回", color = Color.White, fontSize = 16.sp)
+            if (showBackLabel) {
+                Text("返回", color = Color.White, fontSize = 16.sp)
+            }
         }
-        Text("挥杆详情", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-        IconButton(
-            onClick = onHelp,
-            modifier = Modifier.align(Alignment.CenterEnd).size(40.dp),
+        Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.align(Alignment.CenterEnd),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.AutoMirrored.Filled.HelpOutline,
-                contentDescription = "功能说明",
-                tint = Color.White.copy(alpha = 0.70f),
-                modifier = Modifier.size(20.dp),
-            )
+            IconButton(onClick = onHelp, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.AutoMirrored.Filled.HelpOutline,
+                    contentDescription = "使用说明",
+                    tint = Color.White.copy(alpha = 0.70f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            IconButton(onClick = onSwitchPlayer, modifier = Modifier.size(40.dp)) {
+                Icon(
+                    Icons.Filled.Sync,
+                    contentDescription = switchAccessibilityLabel,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ControlsPanel(
+internal fun ControlsPanel(
     clip: V2SwingClip,
     isPlaying: Boolean,
     currentTime: Float,
     duration: Float,
     metadata: SwingVideoMetadata,
     playbackRate: Float,
-    scrubFeel: SwingReplayScrubFeel,
     showDetails: Boolean,
-    showAnalysisActions: Boolean,
     showDrawingTools: Boolean,
-    impactCandidates: List<ImpactCandidate>,
-    isDetectingImpact: Boolean,
-    showImpactMarkers: Boolean,
+    hasDrawings: Boolean,
     onTogglePlay: () -> Unit,
     onStepFrames: (Int) -> Unit,
     onSeekToFrame: (Int) -> Unit,
-    onSeek: (Float) -> Unit,
+    onFrameScrubStart: () -> Unit,
+    onFrameScrubEnd: (Int) -> Unit,
     onRate: (Float) -> Unit,
-    onToggleImpactMarkers: () -> Unit,
-    onSeekToImpact: (ImpactCandidate) -> Unit,
     onFavorite: () -> Unit,
     onPromote: () -> Unit,
     onSave: () -> Unit,
     onInfo: () -> Unit,
-    onToggleAnalysis: () -> Unit,
     onToggleDrawing: () -> Unit,
-    onOpenDrawing: () -> Unit,
-    onShowPosturePlan: () -> Unit,
-    onShowWatchPlan: () -> Unit,
-    onCreateMemo: () -> Unit,
+    onRequestClearDrawing: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val totalFrames = metadata.totalFrames(duration)
     val currentFrame = metadata.currentFrame(currentTime, duration)
-    Column(
-        Modifier.fillMaxWidth().background(Color.Black).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("${"%.1f".format(currentTime)}s", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    Column(Modifier.fillMaxWidth().background(Color.Black)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${"%.2f".format(currentTime)}s", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.weight(1f))
-            Text("帧 $currentFrame / $totalFrames", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("帧 $currentFrame/$totalFrames", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
             Spacer(Modifier.weight(1f))
-            Text("${"%.1f".format(duration)}s", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Text("${"%.2f".format(duration)}s", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(0.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             StepButton(Icons.Filled.SkipPrevious, "-10") { onStepFrames(-10) }
             StepButton(Icons.Filled.Replay5, "-3") { onStepFrames(-3) }
             StepButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "-1") { onStepFrames(-1) }
@@ -584,7 +574,11 @@ private fun ControlsPanel(
             StepButton(Icons.Filled.Forward5, "+3") { onStepFrames(3) }
             StepButton(Icons.Filled.SkipNext, "+10") { onStepFrames(10) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             listOf(0.1f, 0.25f, 0.5f, 1f).forEach { rate ->
                 val isActive = playbackRate == rate
                 Text(
@@ -593,37 +587,57 @@ private fun ControlsPanel(
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
                         .background(if (isActive) DSColors.fairway.copy(alpha = 0.50f) else Color.White.copy(alpha = 0.10f))
                         .clickable { onRate(rate) }
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                 )
             }
             Spacer(Modifier.weight(1f))
-            ImpactChip(
-                candidates = impactCandidates,
-                detecting = isDetectingImpact,
-                active = showImpactMarkers,
-                onToggle = onToggleImpactMarkers,
-                onPrimaryCandidate = {
-                    impactCandidates.firstOrNull()?.let(onSeekToImpact)
-                },
-            )
             DrawingChip(active = showDrawingTools, onClick = onToggleDrawing)
+            if (hasDrawings && !showDrawingTools) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 30.dp, height = 28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(DSColors.flagRed.copy(alpha = 0.14f))
+                        .clickable(onClick = onRequestClearDrawing),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.LayersClear,
+                        contentDescription = "清空绘制标记",
+                        tint = DSColors.flagRed.copy(alpha = 0.90f),
+                        modifier = Modifier.size(13.dp),
+                    )
+                }
+            }
         }
-        SwingFrameScrubBar(
-            currentFrame = currentFrame,
-            totalFrames = totalFrames,
-            duration = duration,
-            impactCandidates = impactCandidates,
-            showImpactMarkers = showImpactMarkers,
-            scrubFeel = scrubFeel,
-            onSeekToFrame = onSeekToFrame,
+        }
+        val durationMs = (duration * 1000f).roundToInt().toLong().coerceAtLeast(1L)
+        val shownMs = (currentTime * 1000f).roundToInt().toLong().coerceIn(0L, durationMs)
+        val scrubTargetMs = remember(durationMs) { longArrayOf(shownMs) }
+        ReviewFrameScrubber(
+            currentMs = shownMs,
+            durationMs = durationMs,
+            onSeek = { ms ->
+                scrubTargetMs[0] = ms
+                val lastFrame = (totalFrames - 1).coerceAtLeast(0)
+                val frame = ((ms.toFloat() / durationMs) * lastFrame).roundToInt().coerceIn(0, lastFrame)
+                onSeekToFrame(frame)
+            },
+            onScrubStart = onFrameScrubStart,
+            onScrubEnd = {
+                val lastFrame = (totalFrames - 1).coerceAtLeast(0)
+                val frame = ((scrubTargetMs[0].toFloat() / durationMs) * lastFrame).roundToInt().coerceIn(0, lastFrame)
+                onFrameScrubEnd(frame)
+            },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
         )
         Column(Modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.10f)))
             Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -635,36 +649,11 @@ private fun ControlsPanel(
                     enabled = !isPromoted,
                     onClick = onFavorite,
                 )
-                BottomAction(
-                    if (isPromoted) Icons.Filled.CheckCircle else Icons.Filled.ArrowCircleUp,
-                    "成长池",
-                    clip.retention == V2SwingClipRetention.PROMOTED,
-                    activeColor = DSColors.fairway,
-                    onClick = onPromote,
-                )
                 Spacer(Modifier.weight(1f))
-                BottomAction(
-                    Icons.Filled.Edit,
-                    "分析",
-                    showAnalysisActions,
-                    activeColor = DSColors.fairway,
-                    onClick = onToggleAnalysis,
-                )
                 BottomAction(Icons.Filled.Download, "保存", false, style = BottomActionStyle.Plain, onClick = onSave)
                 BottomAction(Icons.Filled.Info, "详情", showDetails, style = BottomActionStyle.Plain, activeColor = DSColors.fairway, onClick = onInfo)
                 BottomAction(Icons.Filled.DeleteOutline, "删除", false, style = BottomActionStyle.Plain, onClick = onDelete, danger = true)
             }
-        }
-        if (showAnalysisActions) {
-            AnalysisActionsPanel(
-                metadata = metadata,
-                totalFrames = totalFrames,
-                onCreateMemo = onCreateMemo,
-                onOpenDrawing = onOpenDrawing,
-                onShowDetails = onInfo,
-                onShowPosturePlan = onShowPosturePlan,
-                onShowWatchPlan = onShowWatchPlan,
-            )
         }
         if (showDetails) {
             Column(
@@ -674,7 +663,7 @@ private fun ControlsPanel(
                     .padding(bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                DetailRow("时间", clip.timestamp.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", Locale.CHINA)))
+                DetailRow("时间", clip.timestamp.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.CHINA)))
                 DetailRow("时长", swingDetailDurationLabel(if (duration > 0) duration.toDouble() else clip.durationSec))
                 DetailRow("帧率", metadata.fpsLabel)
                 DetailRow("大小", metadata.fileSizeLabel)
@@ -688,258 +677,15 @@ private fun ControlsPanel(
     }
 }
 
-@Composable
-private fun SwingScrubFeelControl(
-    selected: SwingReplayScrubFeel,
-    onSelected: (SwingReplayScrubFeel) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.White.copy(alpha = 0.08f))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("手感", color = Color.White.copy(alpha = 0.68f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        SwingReplayScrubFeel.entries.forEach { feel ->
-            Text(
-                text = feel.title,
-                color = if (selected == feel) Color.Black else Color.White.copy(alpha = 0.82f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .size(width = 34.dp, height = 26.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (selected == feel) Color.White else Color.White.copy(alpha = 0.14f))
-                    .clickable { onSelected(feel) }
-                    .padding(top = 5.dp),
-            )
-        }
-    }
+internal fun videoFrameFromScrubPosition(positionX: Float, width: Float, totalFrames: Int): Int {
+    val safeFrames = totalFrames.coerceAtLeast(1)
+    if (!positionX.isFinite() || !width.isFinite() || width <= 0f) return 0
+    val lastFrame = safeFrames - 1
+    return ((positionX / width).coerceIn(0f, 1f) * lastFrame).roundToInt().coerceIn(0, lastFrame)
 }
 
 @Composable
-private fun SwingFrameScrubBar(
-    currentFrame: Int,
-    totalFrames: Int,
-    duration: Float,
-    impactCandidates: List<ImpactCandidate>,
-    showImpactMarkers: Boolean,
-    scrubFeel: SwingReplayScrubFeel,
-    onSeekToFrame: (Int) -> Unit,
-) {
-    val safeTotal = totalFrames.coerceAtLeast(1)
-    val progress = (currentFrame / safeTotal.toFloat()).coerceIn(0f, 1f)
-    var startFrame by remember { mutableIntStateOf(currentFrame) }
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(24.dp)
-            .pointerInput(currentFrame, totalFrames, scrubFeel) {
-                var accumulatedX = 0f
-                detectDragGestures(
-                    onDragStart = {
-                        startFrame = currentFrame
-                        accumulatedX = 0f
-                    },
-                    onDrag = { change, dragAmount ->
-                        accumulatedX += dragAmount.x
-                        val frameDelta = (accumulatedX / scrubFeel.pointsPerFrame).roundToInt()
-                        onSeekToFrame(startFrame + frameDelta)
-                        change.consume()
-                    },
-                )
-            },
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.15f)))
-        Box(
-            Modifier
-                .fillMaxWidth(progress)
-                .height(4.dp)
-                .clip(RoundedCornerShape(50))
-                .background(Color.White.copy(alpha = 0.60f)),
-        )
-        if (showImpactMarkers && duration > 0f) {
-            impactCandidates.forEach { candidate ->
-                val markerProgress = (candidate.timeSec.toFloat() / duration).coerceIn(0f, 1f)
-                Box(
-                    Modifier
-                        .offset(x = maxWidth * markerProgress - 3.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(DSColors.trophyGold),
-                )
-            }
-        }
-        Box(
-            modifier = Modifier.fillMaxWidth(progress.coerceAtLeast(0.001f)),
-            contentAlignment = Alignment.CenterEnd,
-        ) {
-            Box(
-                Modifier
-                    .size(16.dp)
-                    .shadow(2.dp, CircleShape)
-                    .clip(CircleShape)
-                    .background(Color.White),
-            )
-        }
-    }
-}
-
-@Composable
-private fun AnalysisActionsPanel(
-    metadata: SwingVideoMetadata,
-    totalFrames: Int,
-    onCreateMemo: () -> Unit,
-    onOpenDrawing: () -> Unit,
-    onShowDetails: () -> Unit,
-    onShowPosturePlan: () -> Unit,
-    onShowWatchPlan: () -> Unit,
-) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.08f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text("回看分析", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        AnalysisActionRow(
-            title = "生成复盘 Memo",
-            body = "带入这段视频、帧率和复盘提示，方便继续补充训练观察。",
-            value = "可用",
-            onClick = onCreateMemo,
-        )
-        AnalysisActionRow(
-            title = "画线逐帧分析",
-            body = "进入标注工具，暂停视频后检查站位、杆面和挥杆平面。",
-            value = "可用",
-            onClick = onOpenDrawing,
-        )
-        AnalysisActionRow(
-            title = "技术元数据",
-            body = "${metadata.fpsLabel} · $totalFrames 帧 · ${metadata.fileSizeLabel}",
-            value = "详情",
-            onClick = onShowDetails,
-        )
-        AnalysisActionRow(
-            title = "姿态参考",
-            body = "用击球帧候选和画线逐帧，完成上线版姿态复盘。",
-            value = "替代方案",
-            onClick = onShowPosturePlan,
-        )
-        AnalysisActionRow(
-            title = "穿戴联动",
-            body = "查看 Android 版当前可用的手机录制与回看分析路径。",
-            value = "说明",
-            onClick = onShowWatchPlan,
-        )
-    }
-}
-
-@Composable
-private fun ImpactMarkerOverlay(
-    candidates: List<ImpactCandidate>,
-    onSelect: (ImpactCandidate) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        candidates.forEachIndexed { index, candidate ->
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.60f))
-                    .clickable { onSelect(candidate) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Bolt,
-                    contentDescription = null,
-                    tint = DSColors.trophyGold,
-                    modifier = Modifier.size(10.dp),
-                )
-                Text(
-                    "击球${index + 1}",
-                    color = DSColors.trophyGold,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ImpactChip(
-    candidates: List<ImpactCandidate>,
-    detecting: Boolean,
-    active: Boolean,
-    onToggle: () -> Unit,
-    onPrimaryCandidate: () -> Unit,
-) {
-    when {
-        detecting -> {
-            Box(
-                modifier = Modifier.size(24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    color = DSColors.trophyGold,
-                    strokeWidth = 2.dp,
-                )
-            }
-        }
-
-        candidates.isNotEmpty() -> {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (active) DSColors.trophyGold.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.15f))
-                        .clickable(onClick = onToggle)
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Bolt,
-                        contentDescription = null,
-                        tint = if (active) DSColors.trophyGold else Color.White,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Text(
-                        "击球帧",
-                        color = if (active) DSColors.trophyGold else Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    "跳转",
-                    color = Color.White.copy(alpha = 0.78f),
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.12f))
-                        .clickable(onClick = onPrimaryCandidate)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DrawingChip(active: Boolean, onClick: () -> Unit) {
+internal fun DrawingChip(active: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
@@ -959,53 +705,63 @@ private fun DrawingChip(active: Boolean, onClick: () -> Unit) {
     }
 }
 
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AnalysisActionRow(
-    title: String,
-    body: String,
-    value: String,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
+internal fun ClearDrawingConfirmationSheet(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = if (enabled) 0.07f else 0.035f))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color(0xFFF4F3F1),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = null,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "清空画面上的所有标记？",
+                    color = DSColors.shadowGray,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                )
+                Box(Modifier.fillMaxWidth().height(1.dp).background(DSColors.borderLine))
+                Text(
+                    "清空标记",
+                    color = DSColors.flagRed,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onConfirm)
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                )
+            }
             Text(
-                title,
-                color = Color.White.copy(alpha = if (enabled) 0.94f else 0.42f),
-                fontSize = 13.sp,
+                "取消",
+                color = DSColors.fairway,
+                fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                body,
-                color = Color.White.copy(alpha = if (enabled) 0.56f else 0.32f),
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color.White)
+                    .clickable(onClick = onDismiss).padding(horizontal = 16.dp, vertical = 16.dp),
             )
         }
-        Text(
-            value,
-            color = if (enabled) DSColors.trophyGold else Color.White.copy(alpha = 0.34f),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.White.copy(alpha = if (enabled) 0.08f else 0.04f))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
     }
 }
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HelpDialog(onDismiss: () -> Unit) {
+internal fun SwingClipHelpSheet(onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1013,62 +769,61 @@ private fun HelpDialog(onDismiss: () -> Unit) {
         containerColor = Color.White,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("功能说明", color = DSColors.inkGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDismiss) {
-                    Text("完成", color = DSColors.fairway, fontWeight = FontWeight.SemiBold)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(44.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "功能说明",
+                    color = Color(0xFF111827),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 8.dp),
+                ) {
+                    Text("完成", color = DSColors.fairway, fontSize = 16.sp)
                 }
             }
-            HelpRow(
-                icon = Icons.Filled.PlayCircle,
-                iconColor = Color(0xFF111827),
-                title = "播放与逐帧",
-                body = "中间按钮播放/暂停，左右箭头逐帧前进后退（±1/±3/±10 帧），底部速率按钮可直接切换 .1x 到 1x 慢放。",
-            )
-            HelpRow(
-                icon = Icons.Filled.Edit,
-                iconColor = DSColors.fairway,
-                title = "绘制工具",
-                body = "在视频画面上画线标注挥杆姿态，支持直线、自由画笔和颜色选择，方便分析动作细节。",
-            )
-            HelpRow(
-                icon = Icons.Filled.Bolt,
-                iconColor = DSColors.trophyGold,
-                title = "击球帧检测",
-                body = "自动通过音频分析检测击球时刻，检测到后可点击「击球帧」按钮在画面左侧显示候选帧并一键跳转。",
-            )
-            HelpRow(
-                icon = Icons.Filled.Star,
-                iconColor = DSColors.trophyGold,
-                title = "收藏",
-                body = "点击底部星标按钮收藏视频，收藏后永久保留，不会被自动清理。",
-            )
-            HelpRow(
-                icon = Icons.Filled.ArrowCircleUp,
-                iconColor = DSColors.fairway,
-                title = "存入成长池",
-                body = "将视频同步到成长池（视频备忘录），可在首页成长池中查看和管理。",
-            )
-            HelpRow(
-                icon = Icons.Filled.Download,
-                iconColor = Color(0xFF3B82F6),
-                title = "保存到相册",
-                body = "将视频导出到系统相册，永久保存在设备中，不受 App 数据清理影响。",
-            )
-            HelpRow(
-                icon = Icons.Filled.DeleteOutline,
-                iconColor = DSColors.flagRed,
-                title = "删除",
-                body = "永久删除此挥杆视频，操作不可撤销。",
-            )
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE5E7EB)))
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                    .testTag("swing-help-content").padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                HelpRow(
+                    icon = Icons.Filled.PlayCircle,
+                    iconColor = Color(0xFF111827),
+                    title = "播放与逐帧",
+                    body = "中间按钮播放/暂停，左右箭头逐帧前进后退（±1/±3/±10 帧），底部速率按钮可直接切换 0.1x ~ 1x 慢放。",
+                )
+                HelpRow(
+                    icon = Icons.Filled.Edit,
+                    iconColor = DSColors.fairway,
+                    title = "绘制工具",
+                    body = "在视频画面上画线标注挥杆姿态，支持直线、自由画笔和颜色选择，方便分析动作细节。",
+                )
+                HelpRow(
+                    icon = Icons.Filled.Star,
+                    iconColor = DSColors.trophyGold,
+                    title = "收藏",
+                    body = "点击底部星标按钮收藏视频，收藏后永久保留，不会被自动清理。",
+                )
+                HelpRow(
+                    icon = Icons.Filled.Download,
+                    iconColor = Color(0xFF3B82F6),
+                    title = "保存到相册",
+                    body = "将视频导出到系统相册，永久保存在设备中，不受 App 数据清理影响。",
+                )
+                HelpRow(
+                    icon = Icons.Filled.DeleteOutline,
+                    iconColor = DSColors.flagRed,
+                    title = "删除",
+                    body = "永久删除此挥杆视频，操作不可撤销。",
+                )
+            }
         }
     }
 }
@@ -1098,7 +853,7 @@ private fun HelpRow(
 }
 
 @Composable
-private fun StepButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+internal fun StepButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .size(44.dp)
@@ -1152,36 +907,6 @@ private fun DetailRow(label: String, value: String) {
         Spacer(Modifier.weight(1f))
         Text(value, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
     }
-}
-
-private fun buildSwingReviewMemo(
-    clip: V2SwingClip,
-    durationSec: Double,
-    metadata: SwingVideoMetadata,
-): V2Memo {
-    val title = "挥杆回看 · ${clip.timestamp.format(DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.CHINA))}"
-    val body = buildString {
-        append("来自挥杆回看。")
-        append("先标记站位、上杆顶点、击球瞬间和收杆，再补充本次训练目标与下一次改进动作。")
-        append("\n\n")
-        append("技术信息：${durationShort(durationSec)} · ${metadata.fpsLabel}")
-        if (metadata.fileSizeLabel != "—") append(" · ${metadata.fileSizeLabel}")
-        clip.sourceLabel?.takeIf { it.isNotBlank() }?.let { append("\n来源：$it") }
-    }
-    return V2Memo.mixedMemo(
-        displayTitle = title,
-        body = body,
-        videoUrl = clip.videoPath,
-        durationSec = durationSec,
-        topic = V2Topic.SWING,
-        tags = listOf("挥杆回看", "逐帧分析"),
-        metaText = V2MemoBridge.relativeMetaText(clip.timestamp, "挥杆回看 · ${metadata.fpsLabel}"),
-        thumbnailKind = V2MemoThumbnailKind.FAIRWAY,
-    ).copy(
-        isNew = true,
-        accent = V2MemoAccent.REFLECTION,
-        trainingMethod = "挥杆回看",
-    )
 }
 
 private data class GallerySaveResult(
@@ -1251,12 +976,15 @@ internal fun swingGalleryVideoSpec(source: File, displayBase: String): SwingGall
     )
 }
 
-private data class SwingVideoMetadata(
+internal data class SwingVideoMetadata(
     val fps: Float = 30f,
     val durationMs: Long = 0L,
     val fileSizeBytes: Long = 0L,
 ) {
-    val frameDurationMs: Float get() = 1000f / fps.coerceAtLeast(1f)
+    private val safeFps: Float
+        get() = fps.takeIf { it.isFinite() && it > 0f } ?: 30f
+
+    val frameDurationMs: Float get() = 1000f / safeFps
 
     val fpsLabel: String get() =
         if (fps > 0f) "${"%.0f".format(fps)} fps" else "—"
@@ -1269,21 +997,45 @@ private data class SwingVideoMetadata(
 
     fun totalFrames(durationSec: Float): Int {
         val effectiveDuration = if (durationMs > 0L) durationMs / 1000f else durationSec
-        return (effectiveDuration * fps).roundToInt().coerceAtLeast(1)
+        return (effectiveDuration.coerceAtLeast(0f) * safeFps).toInt().coerceAtLeast(1)
     }
 
     fun currentFrame(currentTimeSec: Float, durationSec: Float): Int =
-        (currentTimeSec * fps).roundToInt().plus(1).coerceIn(1, totalFrames(durationSec))
+        (currentTimeSec.coerceAtLeast(0f) * safeFps).toInt().plus(1).coerceIn(1, totalFrames(durationSec))
+
+    fun effectiveDurationMs(durationSec: Float): Long =
+        (durationMs.takeIf { it > 0L } ?: (durationSec.coerceAtLeast(0f) * 1000f).roundToInt().toLong())
+            .coerceAtLeast(0L)
+
+    fun stepTargetMs(positionMs: Long, deltaFrames: Int, durationSec: Float): Long {
+        val total = totalFrames(durationSec)
+        val currentIndex = (positionMs.coerceAtLeast(0L) / frameDurationMs).toInt().coerceIn(0, total - 1)
+        val targetIndex = (currentIndex + deltaFrames).coerceIn(0, total - 1)
+        return (targetIndex * frameDurationMs).roundToInt().toLong()
+            .coerceIn(0L, effectiveDurationMs(durationSec))
+    }
 }
 
-private suspend fun loadSwingVideoMetadata(context: Context, uri: Uri): SwingVideoMetadata = withContext(Dispatchers.IO) {
+internal data class SwingImpactDetectionUiResult(
+    val candidates: List<ImpactCandidate>,
+    val showMarkers: Boolean,
+)
+
+internal fun swingImpactDetectionUiResult(candidates: List<ImpactCandidate>): SwingImpactDetectionUiResult =
+    SwingImpactDetectionUiResult(
+        candidates = candidates.take(3),
+        // Match iOS: detection only reveals the toggle; markers require an explicit tap.
+        showMarkers = false,
+    )
+
+internal suspend fun loadSwingVideoMetadata(context: Context, uri: Uri): SwingVideoMetadata = withContext(Dispatchers.IO) {
     val retriever = MediaMetadataRetriever()
     runCatching {
         retriever.setDataSource(context, uri)
         val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
         val fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
             ?.toFloatOrNull()
-            ?.takeIf { it > 0f }
+            ?.takeIf { it.isFinite() && it > 0f }
             ?: 30f
         val fileSize = if (uri.scheme == "file") {
             uri.path?.let(::File)?.takeIf { it.exists() }?.length() ?: 0L
@@ -1303,14 +1055,9 @@ private fun mediaUriFor(pathOrUrl: String): Uri? {
     return if (file.exists() && file.isFile) Uri.fromFile(file) else null
 }
 
-private fun durationShort(sec: Double): String {
-    val t = sec.toInt().coerceAtLeast(0)
-    return if (t < 60) "${t}s" else "%d:%02d".format(t / 60, t % 60)
-}
-
 private fun swingDetailDurationLabel(sec: Double): String = "%.1f 秒".format(Locale.CHINA, sec.coerceAtLeast(0.0))
 
-private fun swingRateText(rate: Float): String = when (rate) {
+internal fun swingRateText(rate: Float): String = when (rate) {
     1f -> "1x"
     0.1f -> ".1x"
     0.25f -> ".25x"

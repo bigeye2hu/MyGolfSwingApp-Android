@@ -3166,7 +3166,6 @@ fun V2WorkspaceScreen(
     var pinning by remember(connection.connectionId) { mutableStateOf(false) }
     var headerPinned by remember(connection.connectionId, connection.pinned) { mutableStateOf(connection.pinned) }
     var feedPlayback by remember(connection.connectionId) { mutableStateOf<WorkspaceAnalysisPlayback?>(null) }
-    var feedFramePlayback by remember(connection.connectionId) { mutableStateOf(false) }
     var preparingFeedPlaybackId by remember(connection.connectionId) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(
@@ -3643,7 +3642,6 @@ fun V2WorkspaceScreen(
         val title = workspaceThreadSourceTitle(item, connection.relationshipType == "friend")
         fun present(uri: String) {
             preparingFeedPlaybackId = null
-            feedFramePlayback = false
             feedPlayback = WorkspaceAnalysisPlayback(
                 uri = uri,
                 title = title,
@@ -3908,31 +3906,16 @@ fun V2WorkspaceScreen(
     }
 
     feedPlayback?.let { playback ->
-        if (feedFramePlayback) {
-            WorkspaceFramePlayerScreen(
-                mediaUri = playback.uri,
-                title = playback.title,
-                onBack = {
-                    feedFramePlayback = false
-                    feedPlayback = null
-                },
-                onSwitchToReview = { feedFramePlayback = false },
-            )
-        } else {
-            V2WorkspaceProfessionalAnalysisScreen(
-                mediaUri = playback.uri,
-                title = playback.title,
-                subtitle = playback.subtitle,
-                startsPlaying = true,
-                mode = V2ProfessionalAnalysisMode.STANDALONE_REVIEW,
-                onSwitchPlayer = { feedFramePlayback = true },
-                onCancel = {
-                    feedFramePlayback = false
-                    feedPlayback = null
-                },
-                onRecordingReady = { _ -> },
-            )
-        }
+        V2WorkspaceProfessionalAnalysisScreen(
+            mediaUri = playback.uri,
+            title = playback.title,
+            subtitle = playback.subtitle,
+            startsPlaying = true,
+            continuousPlayback = true,
+            mode = V2ProfessionalAnalysisMode.STANDALONE_REVIEW,
+            onCancel = { feedPlayback = null },
+            onRecordingReady = { _ -> },
+        )
         return
     }
 
@@ -7404,7 +7387,6 @@ private fun ThreadDialog(
     var trimSaving by remember(source.itemId) { mutableStateOf(false) }
     var trimError by remember(source.itemId) { mutableStateOf<String?>(null) }
     var analysisPlayback by remember { mutableStateOf<WorkspaceAnalysisPlayback?>(null) }
-    var framePlayback by remember { mutableStateOf(false) }
     var preparingPlaybackId by remember { mutableStateOf<String?>(null) }
     var playbackNotice by remember { mutableStateOf<String?>(null) }
     var coverPickingVideo by remember(source.itemId) { mutableStateOf<V2PreparedWorkspaceVideo?>(null) }
@@ -7537,7 +7519,6 @@ private fun ThreadDialog(
             ?: item?.title?.takeIf { it.isNotBlank() }
             ?: "视频"
         playbackNotice = null
-        framePlayback = false
         analysisPlayback = WorkspaceAnalysisPlayback(
             uri = uri,
             title = title,
@@ -9420,28 +9401,14 @@ private fun ThreadDialog(
     }
 
     analysisPlayback?.let { playback ->
-        if (framePlayback) {
-            WorkspaceFramePlayerScreen(
-                mediaUri = playback.uri,
-                title = playback.title,
-                onBack = {
-                    framePlayback = false
-                    analysisPlayback = null
-                },
-                onSwitchToReview = { framePlayback = false },
-            )
-        } else {
         V2WorkspaceProfessionalAnalysisScreen(
             mediaUri = playback.uri,
             title = playback.title,
             subtitle = playback.subtitle,
             startsPlaying = true,
+            continuousPlayback = true,
             mode = V2ProfessionalAnalysisMode.STANDALONE_REVIEW,
-            onSwitchPlayer = { framePlayback = true },
-            onCancel = {
-                framePlayback = false
-                analysisPlayback = null
-            },
+            onCancel = { analysisPlayback = null },
             onRecordingReady = { recording ->
                 scope.launch {
                     val saved = runCatching { saveExportedVideoToGallery(context, recording) }.isSuccess
@@ -9454,7 +9421,6 @@ private fun ThreadDialog(
                 }
             },
         )
-        }
     }
 
     analysisSource?.let { imported ->
